@@ -4,6 +4,7 @@ import { usersRoutes } from "../../src/server/routes/users";
 import { accountsRoutes } from "../../src/server/routes/accounts";
 import { emailsRoutes } from "../../src/server/routes/emails";
 import { downloadsRoutes } from "../../src/server/routes/downloads";
+import { searchRoutes } from "../../src/server/routes/search";
 
 /** Boots the real route handlers (same wiring as src/server/main.ts) against a test db on an ephemeral port. */
 export function startTestServer(db: Database) {
@@ -13,6 +14,7 @@ export function startTestServer(db: Database) {
     ...accountsRoutes(db),
     ...emailsRoutes(db),
     ...downloadsRoutes(db),
+    ...searchRoutes(db),
   };
 
   return Bun.serve({ port: 0, routes });

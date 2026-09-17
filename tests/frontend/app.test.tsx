@@ -98,6 +98,23 @@ function installMockFetch() {
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse(SECOND_EMAIL);
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse({ ...EMAIL, isRead: true });
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse({ ...SECOND_EMAIL, isRead: true });
+    if (method === "GET" && path === "/api/search") {
+      // The mock doesn't replicate real matching (that's covered by backend tests) —
+      // it just returns a canned hit so the UI wiring (fetch -> render -> select) is exercised.
+      return jsonResponse([
+        {
+          id: SECOND_EMAIL.id,
+          accountEmail: ACCOUNT.email,
+          folder: SECOND_EMAIL.folder,
+          uid: SECOND_EMAIL.uid,
+          isRead: SECOND_EMAIL.isRead,
+          isFlagged: SECOND_EMAIL.isFlagged,
+          subject: SECOND_EMAIL.subject,
+          from: SECOND_EMAIL.from,
+          date: SECOND_EMAIL.date,
+        },
+      ]);
+    }
 
     return jsonResponse({ error: `Unhandled mock route: ${method} ${path}` }, 404);
   }) as typeof fetch;
@@ -185,5 +202,29 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.click(await screen.findByText("Hello there"));
     await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(0));
     await waitFor(() => expect(isTabSelected("Plain text")).toBe(true));
+  });
+
+  test("searching switches the message list to results and opening one reads it", async () => {
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    const searchBox = screen.getByPlaceholderText(/search all mail/i);
+    await userEvent.type(searchBox, "second");
+
+    // Debounced, so this only resolves once the (mocked) search actually ran.
+    await waitFor(() => expect(screen.getByText(/Search: "second"/)).toBeTruthy(), { timeout: 2000 });
+    await waitFor(() => expect(screen.getAllByText("Second message").length).toBeGreaterThan(0), { timeout: 2000 });
+
+    // Opening the result reads it, same as opening any other message.
+    await userEvent.click(screen.getAllByText("Second message")[0]!);
+    await waitFor(() => expect(screen.getAllByText(/Bob/).length).toBeGreaterThan(0));
+
+    // Clearing the search returns to the normal folder view without losing the reading pane.
+    await userEvent.click(screen.getByTitle("Clear search"));
+    await waitFor(() => expect(screen.queryByText(/Search:/)).toBeNull());
+    expect(screen.getAllByText("Second message").length).toBeGreaterThan(0);
   });
 });

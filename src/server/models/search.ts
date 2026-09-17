@@ -1,0 +1,165 @@
+import { Database } from "bun:sqlite";
+import type { EmailAddress } from "../types";
+
+export interface SearchResult {
+  id: number;
+  accountEmail: string;
+  folder: string;
+  uid: number | null;
+  isRead: boolean;
+  isFlagged: boolean;
+  subject: string | null;
+  from: EmailAddress[];
+  date: string | null;
+}
+
+interface ParsedQuery {
+  subjectTerms: string[];
+  fromTerms: string[];
+}
+
+/**
+ * Splits a query into whitespace-separated tokens, except that a `"..."`
+ * span (optionally preceded by a `field:` prefix, e.g. `from:"jane doe"`)
+ * is kept as one token with its spaces intact — an exact-phrase match
+ * rather than several independent AND'd words.
+ */
+function tokenizeQuery(query: string): string[] {
+  const tokenRe = /([a-zA-Z]+:)?"([^"]*)"|(\S+)/g;
+  const tokens: string[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenRe.exec(query)) !== null) {
+    const token = match[2] !== undefined ? `${match[1] ?? ""}${match[2]}` : match[3]!;
+    if (token) tokens.push(token);
+  }
+
+  return tokens;
+}
+
+/**
+ * Parses a search query into subject terms (ANDed — a bare "amazon
+ * gutschein" means "contains amazon AND contains gutschein", independently
+ * of order) and `from:` terms (ORed). Each term supports `*` as a wildcard;
+ * a term with no `*` implicitly matches anywhere, i.e. is wrapped as
+ * `*term*`. Quoting a phrase with `"..."` keeps it as a single term instead
+ * of splitting it into separate AND'd words.
+ */
+export function parseSearchQuery(query: string): ParsedQuery {
+  const subjectTerms: string[] = [];
+  const fromTerms: string[] = [];
+
+  for (const token of tokenizeQuery(query)) {
+    const fromMatch = /^from:(.+)$/i.exec(token);
+    if (fromMatch) fromTerms.push(fromMatch[1]!);
+    else subjectTerms.push(token);
+  }
+
+  return { subjectTerms, fromTerms };
+}
+
+/**
+ * Converts one search term into a case-insensitive regex, unanchored so it
+ * matches anywhere in the field rather than requiring the field to start/end
+ * exactly at the pattern's edges — "amazon*gutschein" should find "Amazon
+ * Gutschein für dich", not just a subject that ends right after "gutschein".
+ * Matching runs in JS rather than SQL LIKE/LOWER() specifically because
+ * those are ASCII-only in stock SQLite (no ICU extension here) — real
+ * mailboxes have plenty of non-ASCII subjects/names, and `i` + `u` flags
+ * give correct Unicode case folding.
+ */
+function wildcardToRegExp(term: string): RegExp {
+  const pattern = term.includes("*") ? term : `*${term}*`;
+  const escaped = pattern
+    .split("*")
+    .map(part => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+    .join(".*");
+  return new RegExp(escaped, "iu");
+}
+
+interface SearchRow {
+  id: number;
+  account_email: string;
+  folder: string;
+  uid: number | null;
+  is_read: number;
+  is_flagged: number;
+  subject: string | null;
+  from_addr: string | null;
+  date: string | null;
+}
+
+function parseAddresses(json: string | null): EmailAddress[] {
+  if (!json) return [];
+  try {
+    return JSON.parse(json);
+  } catch {
+    return [];
+  }
+}
+
+function addressSearchText(addresses: EmailAddress[]): string {
+  return addresses.map(a => `${a.name ?? ""} ${a.address}`).join(" ");
+}
+
+function toSearchResult(row: SearchRow): SearchResult {
+  return {
+    id: row.id,
+    accountEmail: row.account_email,
+    folder: row.folder,
+    uid: row.uid,
+    isRead: !!row.is_read,
+    isFlagged: !!row.is_flagged,
+    subject: row.subject,
+    from: parseAddresses(row.from_addr),
+    date: row.date,
+  };
+}
+
+export interface SearchOptions {
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * Searches every email across every account the given user owns — not just
+ * the currently selected account/folder. Defaults to matching the subject;
+ * combine with `from:addr` to also filter by sender. Always case-insensitive.
+ */
+export function searchEmails(db: Database, userId: number, query: string, options: SearchOptions = {}): SearchResult[] {
+  const { subjectTerms, fromTerms } = parseSearchQuery(query);
+  if (subjectTerms.length === 0 && fromTerms.length === 0) return [];
+
+  const subjectRegexes = subjectTerms.map(wildcardToRegExp);
+  const fromRegexes = fromTerms.map(wildcardToRegExp);
+
+  const rows = db
+    .query<SearchRow, [number]>(
+      `SELECT emails.id, accounts.email as account_email, emails.folder, emails.uid,
+              emails.is_read, emails.is_flagged, emails.subject, emails.from_addr, emails.date
+       FROM emails
+       JOIN accounts ON accounts.id = emails.account_id
+       WHERE accounts.user_id = ?
+       ORDER BY emails.date DESC`
+    )
+    .all(userId);
+
+  const limit = options.limit ?? 50;
+  const offset = options.offset ?? 0;
+  const results: SearchResult[] = [];
+
+  for (const row of rows) {
+    const subject = row.subject ?? "";
+    if (!subjectRegexes.every(re => re.test(subject))) continue;
+
+    if (fromRegexes.length > 0) {
+      const fromText = addressSearchText(parseAddresses(row.from_addr));
+      if (!fromRegexes.some(re => re.test(fromText))) continue;
+    }
+
+    results.push(toSearchResult(row));
+    if (results.length >= offset + limit) break;
+  }
+
+  return results.slice(offset, offset + limit);
+}

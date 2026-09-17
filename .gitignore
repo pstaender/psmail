@@ -33,6 +33,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Finder (MacOS) folder config
 .DS_Store
 
+# editor swap files
+*.swp
+*.swo
+
 /.claude_session
 
 # personal test mail fixtures (real emails, not for version control)

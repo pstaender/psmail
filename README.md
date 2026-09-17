@@ -29,6 +29,7 @@ Open `http://localhost:3001` (configurable, see [Configuration](#configuration))
   - **Full HTML** — shows the message as sent, remote content and links untouched. Scripts are still never executed (see below).
   - Both HTML views render inside a sandboxed `<iframe>` (no `allow-scripts`) as a defense-in-depth layer independent of the HTML sanitizer.
 - **Compose** — new/reply/forward, plain text body, file attachments, save draft or send.
+- **Search** — the box in the header searches subjects across *every* account you own at once (not just the selected one). Selecting a result switches the sidebar/reading pane to that message's account and folder without losing your place in the results. See [Search syntax](#search-syntax).
 
 Two known limitations worth knowing about: moving/deleting/flagging a message only updates the local database — there's no two-way sync pushing those changes back to the IMAP server yet; and sync only runs when you trigger it (no background scheduler, despite `downloadIntervalSeconds` existing in settings).
 
@@ -67,8 +68,20 @@ Accounts are addressed in the URL **by email address** (URL-encoded), e.g. `/api
 - `PATCH /api/accounts/:email/emails/:id/move/:folderName`
 - `POST/GET/DELETE /api/accounts/:email/emails/:id/attachments[/:attachmentId]`
 - `GET/POST /api/accounts/:email/downloads`, `GET /api/accounts/:email/downloads/:id` — the sync job queue; only one active job per account at a time.
+- `GET /api/search?q=...` — searches across every account the caller owns; see [Search syntax](#search-syntax).
 
 An email account's IMAP/SMTP passwords are encrypted at rest with a key derived from the owning user's login password (scrypt + AES-256-GCM). The derived key lives only in server memory for the lifetime of the session — restarting the server means logging in again before account credentials can be decrypted (e.g. to sync or send).
+
+## Search syntax
+
+Always case-insensitive; searches every account you own; bare words match the subject.
+
+- `amazon gutschein` — subject contains "amazon" **and** contains "gutschein", independently, in any order.
+- `amazon*gutschein` — `*` is a wildcard, and unlike the bare-word AND above, this requires "amazon" to appear *before* "gutschein" (anything, or nothing, in between) — e.g. matches "Amazon Gutschein für dich", not just something starting with amazon and ending with gutschein.
+- `"Mountain Bike"` — quote a phrase to require it verbatim (as one contiguous phrase) instead of splitting it into independent AND'd words.
+- `from:someone@example.com` — filters by sender address or display name; combine with other terms, e.g. `from:someone@example.com amazon*gutschein`. Multiple `from:` terms are OR'd together.
+
+Implemented in `src/server/models/search.ts`; matching runs in JS (not SQL `LIKE`) so Unicode case-folding (e.g. `ä`/`Ä`) works correctly — stock SQLite's `LIKE`/`LOWER()` are ASCII-only without the ICU extension.
 
 ## CLI
 

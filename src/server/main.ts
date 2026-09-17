@@ -8,6 +8,7 @@ import { accountsRoutes } from "./routes/accounts";
 import { emailsRoutes } from "./routes/emails";
 import { downloadsRoutes } from "./routes/downloads";
 import { foldersRoutes } from "./routes/folders";
+import { searchRoutes } from "./routes/search";
 
 export async function startServer() {
   const settings = await loadSettings();
@@ -21,6 +22,7 @@ export async function startServer() {
     ...emailsRoutes(db),
     ...downloadsRoutes(db),
     ...foldersRoutes(db),
+    ...searchRoutes(db),
 
     "/api/health": {
       GET: () => Response.json({ ok: true }),

@@ -1,6 +1,7 @@
 import type { Account, DownloadJob, EmailRecord, User } from "../server/types";
 import type { CreateAccountInput, UpdateAccountInput } from "../server/models/accounts";
 import type { EmailInput } from "../server/models/emails";
+import type { SearchResult } from "../server/models/search";
 import type { ImapFolder } from "../server/services/imap";
 
 export class ApiError extends Error {
@@ -132,4 +133,12 @@ export const api = {
     request<DownloadJob>("POST", `/api/accounts/${enc(accountEmail)}/downloads`, { token, body: { folder } }),
   getDownloadJob: (token: string, accountEmail: string, jobId: number) =>
     request<DownloadJob>("GET", `/api/accounts/${enc(accountEmail)}/downloads/${jobId}`, { token }),
+
+  /** Searches across every account the user owns. See src/server/models/search.ts for query syntax. */
+  search: (token: string, query: string, opts: { limit?: number; offset?: number } = {}) => {
+    const params = new URLSearchParams({ q: query });
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.offset) params.set("offset", String(opts.offset));
+    return request<SearchResult[]>("GET", `/api/search?${params}`, { token });
+  },
 };

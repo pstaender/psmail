@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { LogOut, Mail, PenSquare } from "lucide-react";
+import { LogOut, Mail, PenSquare, Search, X } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -11,11 +11,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { AccountTree } from "@/components/sidebar/AccountTree";
 import { EmptyState } from "@/components/mail/EmptyState";
 import { MessageList } from "@/components/mail/MessageList";
+import { SearchResultList } from "@/components/mail/SearchResultList";
 import { MessageView } from "@/components/mail/MessageView";
 import type { BodyView } from "@/components/mail/MessageBody";
 import { ComposeDialog, type ComposeDraft } from "@/components/mail/ComposeDialog";
@@ -23,10 +25,12 @@ import { useAccounts } from "@/hooks/useAccounts";
 import { useEmails } from "@/hooks/useEmails";
 import { useFolders } from "@/hooks/useFolders";
 import { useEmailDetail } from "@/hooks/useEmailDetail";
+import { useSearchResults } from "@/hooks/useSearchResults";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { forwardDraft, replyDraft } from "@/lib/compose";
 import type { EmailRecord } from "../../server/types";
+import type { SearchResult } from "../../server/models/search";
 
 export function AppShell() {
   const { token, username, logout } = useAuth();
@@ -41,6 +45,9 @@ export function AppShell() {
   // Remembered across messages (and folder/account switches) so the next message
   // opened reuses whatever body view the user was last reading with.
   const [preferredBodyView, setPreferredBodyView] = useState<BodyView | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const { results: searchResults, loading: searchLoading } = useSearchResults(searchQuery);
+  const isSearching = searchQuery.trim().length > 0;
 
   useEffect(() => {
     if (!selectedAccountEmail && accounts.length > 0) {
@@ -74,6 +81,15 @@ export function AppShell() {
 
   function selectEmail(email: EmailRecord) {
     setSelectedEmailId(email.id);
+  }
+
+  // A search result can belong to a different account/folder than the one currently
+  // selected in the sidebar; opening one switches the reading pane to that context
+  // without clearing the search itself, so the result list stays browsable.
+  function selectSearchResult(result: SearchResult) {
+    setSelectedAccountEmail(result.accountEmail);
+    setSelectedFolder(result.folder);
+    setSelectedEmailId(result.id);
   }
 
   async function toggleFlag(email: EmailRecord) {
@@ -133,12 +149,32 @@ export function AppShell() {
     <div className="flex h-full flex-col">
       <Toaster position="bottom-right" />
 
-      <header className="flex shrink-0 items-center justify-between border-b px-4 py-2">
-        <div className="flex items-center gap-2">
+      <header className="flex shrink-0 items-center justify-between gap-4 border-b px-4 py-2">
+        <div className="flex items-center gap-2 shrink-0">
           <Mail className="size-5 text-primary" />
           <span className="font-semibold">P.S.Mail</span>
         </div>
-        <div className="flex items-center gap-2">
+
+        <div className="relative w-full max-w-md">
+          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder='Search all mail… e.g. from:you@x.com amazon*sale "mountain bike"'
+            className="h-8 pl-8 pr-8"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              title="Clear search"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
           <span className="text-sm text-muted-foreground">{username}</span>
           <Button variant="ghost" size="icon" onClick={logout} title="Sign out">
             <LogOut className="size-4" />
@@ -160,13 +196,22 @@ export function AppShell() {
 
         <div className="flex w-80 shrink-0 flex-col border-r">
           <div className="flex items-center justify-between border-b px-3 py-2">
-            <span className="truncate text-sm font-medium">{selectedFolder ?? "—"}</span>
+            <span className="truncate text-sm font-medium">
+              {isSearching ? `Search: "${searchQuery.trim()}"` : selectedFolder ?? "—"}
+            </span>
             <Button size="sm" disabled={!selectedAccountEmail} onClick={() => openCompose(null)}>
               <PenSquare className="size-4" /> New
             </Button>
           </div>
           <div className="min-h-0 flex-1">
-            {selectedAccountEmail && selectedFolder ? (
+            {isSearching ? (
+              <SearchResultList
+                results={searchResults}
+                loading={searchLoading}
+                selectedId={selectedEmailId}
+                onSelect={selectSearchResult}
+              />
+            ) : selectedAccountEmail && selectedFolder ? (
               <MessageList
                 emails={emails}
                 loading={emailsLoading}
