@@ -176,6 +176,14 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(screen.getByText("Reply")).toBeTruthy();
     expect(screen.getByText("Delete")).toBeTruthy();
 
+    // Reply opens the compose dialog with the MarkdownEditor pre-filled with the quoted original.
+    await userEvent.click(screen.getByText("Reply"));
+    expect(await screen.findByText("New message")).toBeTruthy();
+    const replyBody = document.querySelector(".psmail-markdown-editor .TinyMDE");
+    expect(replyBody).toBeTruthy();
+    expect(replyBody!.textContent).toContain("Hi from Alice");
+    await userEvent.keyboard("{Escape}");
+
     // Compose dialog opens without crashing
     await userEvent.click(screen.getByRole("button", { name: /new/i }));
     expect(await screen.findByText("New message")).toBeTruthy();

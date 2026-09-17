@@ -1,0 +1,270 @@
+/*
+ * Restyle for tiny-markdown-editor (https://github.com/jefago/tiny-markdown-editor),
+ * adapted from https://github.com/pstaender/bucketnotes/blob/main/src/tinyMarkdownEditor.css
+ * (only the parts that apply here — no heading-indent feature, no focus-mode/full-width
+ * variants, no command bar styling since we don't mount a CommandBar) onto this app's own
+ * theme tokens (--foreground, --muted, --border, --primary, ...) instead of bucketnotes'.
+ *
+ * The intent, same as the source: de-emphasize the raw markdown syntax (mark characters,
+ * link destinations) rather than color-coding it, and keep everything close to the
+ * surrounding text color — it should read like a plain markdown file, not a syntax-highlighted
+ * one.
+ */
+
+.psmail-markdown-editor {
+  display: block;
+  color: var(--foreground);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.875rem;
+
+  --tmde-line-height: 1.6rem;
+  --tmde-space: 1rem;
+  --tmde-border-radius: var(--radius-sm);
+  --tmde-transition-duration: 150ms;
+  --tmde-grey-lighter: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
+}
+
+.psmail-markdown-editor .TinyMDE {
+  min-height: 100%;
+  padding: 0;
+  outline: none;
+  background: none;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.psmail-markdown-editor .TinyMDE.TinyMDE_empty {
+  position: relative;
+}
+
+.psmail-markdown-editor .TinyMDE.TinyMDE_empty::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  top: 0.15em;
+  pointer-events: none;
+  color: var(--muted-foreground);
+  font-weight: normal;
+  font-style: normal;
+}
+
+.psmail-markdown-editor .TinyMDE > div {
+  line-height: var(--tmde-line-height);
+  min-height: var(--tmde-line-height);
+}
+
+.psmail-markdown-editor .TinyMDE .TMBlankLine {
+  height: var(--tmde-line-height);
+}
+
+/* headings: bold only, no size scaling — this stays a markdown editor, not a WYSIWYG renderer */
+.psmail-markdown-editor .TinyMDE .TMH1,
+.psmail-markdown-editor .TinyMDE .TMH2,
+.psmail-markdown-editor .TinyMDE .TMH3,
+.psmail-markdown-editor .TinyMDE .TMH4,
+.psmail-markdown-editor .TinyMDE .TMH5,
+.psmail-markdown-editor .TinyMDE .TMH6 {
+  font-weight: bold;
+}
+
+/* code */
+.psmail-markdown-editor .TinyMDE .TMMark_TMCode,
+.psmail-markdown-editor .TinyMDE .TMFencedCodeBacktick,
+.psmail-markdown-editor .TinyMDE .TMFencedCodeTilde,
+.psmail-markdown-editor .TinyMDE .TMIndentedCode,
+.psmail-markdown-editor .TinyMDE .TMCode {
+  font-family: inherit;
+}
+.psmail-markdown-editor .TinyMDE .TMFencedCodeBacktick,
+.psmail-markdown-editor .TinyMDE .TMFencedCodeTilde,
+.psmail-markdown-editor .TinyMDE .TMCode {
+  background-color: var(--muted);
+}
+.psmail-markdown-editor .TinyMDE .TMCodeFenceBacktickOpen,
+.psmail-markdown-editor .TinyMDE .TMCodeFenceTildeOpen,
+.psmail-markdown-editor .TinyMDE .TMCodeFenceBacktickClose,
+.psmail-markdown-editor .TinyMDE .TMCodeFenceTildeClose {
+  background-color: var(--muted);
+}
+.psmail-markdown-editor .TinyMDE .TMCodeFenceBacktickOpen,
+.psmail-markdown-editor .TinyMDE .TMCodeFenceBacktickClose {
+  border-radius: var(--tmde-border-radius);
+}
+.psmail-markdown-editor .TinyMDE .TMCode,
+.psmail-markdown-editor .TinyMDE .TMMark_TMCode {
+  border-radius: var(--tmde-border-radius);
+  background: var(--muted);
+  padding: 0.1em 0.15em;
+  margin-left: -0.25em;
+}
+.psmail-markdown-editor .TinyMDE .TMCodeFenceBacktickOpen,
+.psmail-markdown-editor .TinyMDE .TMFencedCodeBacktick,
+.psmail-markdown-editor .TinyMDE .TMCodeFenceBacktickClose {
+  padding: 0 1rem;
+}
+.psmail-markdown-editor .TinyMDE .TMCodeFenceBacktickOpen .TMInfoString {
+  opacity: 0.5;
+}
+.psmail-markdown-editor .TinyMDE .TMCodeFenceBacktickOpen {
+  padding-top: 0.5rem;
+}
+.psmail-markdown-editor .TinyMDE .TMCodeFenceBacktickClose {
+  padding-bottom: 0.5rem;
+}
+
+.psmail-markdown-editor .TinyMDE .TMBlockquote {
+  background: var(--muted);
+  padding-left: var(--tmde-space);
+  padding-right: var(--tmde-space);
+  padding-bottom: 0;
+  padding-top: 0;
+}
+.psmail-markdown-editor .TinyMDE .TMBlockquote:not(.TMBlockquote + .TMBlockquote) {
+  padding-top: 1rem;
+  border-radius: var(--tmde-border-radius) var(--tmde-border-radius) 0 0;
+}
+.psmail-markdown-editor .TinyMDE .TMBlockquote:not(:has(+ .TMBlockquote)) {
+  padding-bottom: 1rem;
+  border-radius: 0 0 var(--tmde-border-radius) var(--tmde-border-radius);
+}
+
+/* markup characters (#, *, -, >, etc.) — de-emphasized rather than color-coded */
+.psmail-markdown-editor .TinyMDE .TMMark {
+  color: var(--foreground);
+}
+.psmail-markdown-editor .TinyMDE .TMMark_TMH1,
+.psmail-markdown-editor .TinyMDE .TMMark_TMH2,
+.psmail-markdown-editor .TinyMDE .TMMark_TMH3,
+.psmail-markdown-editor .TinyMDE .TMMark_TMH4,
+.psmail-markdown-editor .TinyMDE .TMMark_TMH5,
+.psmail-markdown-editor .TinyMDE .TMMark_TMH6 {
+  color: var(--foreground);
+}
+.psmail-markdown-editor .TinyMDE .TMMark_TMUL,
+.psmail-markdown-editor .TinyMDE .TMMark_TMOL {
+  color: var(--muted-foreground);
+}
+
+/* task list checkboxes */
+.psmail-markdown-editor .TinyMDE .TMMark_TMTask {
+  color: transparent;
+}
+.psmail-markdown-editor .TinyMDE .TMCheckbox {
+  position: relative;
+  color: transparent;
+  caret-color: var(--foreground);
+  cursor: pointer;
+  font-family: inherit;
+}
+.psmail-markdown-editor .TinyMDE .TMCheckbox::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 0.85em;
+  height: 0.85em;
+  border: 1px solid var(--border);
+  box-sizing: border-box;
+  border-radius: 2px;
+  pointer-events: none;
+}
+.psmail-markdown-editor .TinyMDE .TMCheckbox_checked::before {
+  border-color: var(--primary);
+}
+.psmail-markdown-editor .TinyMDE .TMCheckbox_checked::after {
+  content: "✓";
+  color: var(--primary);
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* links / images */
+.psmail-markdown-editor .TinyMDE .TMImage,
+.psmail-markdown-editor .TinyMDE .TMLink,
+.psmail-markdown-editor .TinyMDE .TMLinkDestination,
+.psmail-markdown-editor .TinyMDE .TMImageDestination,
+.psmail-markdown-editor .TinyMDE .TMAutolink {
+  text-decoration: underline;
+  text-decoration-color: var(--primary);
+}
+@media (hover: hover) {
+  .psmail-markdown-editor .TinyMDE .TMImage,
+  .psmail-markdown-editor .TinyMDE .TMLink,
+  .psmail-markdown-editor .TinyMDE .TMLinkDestination,
+  .psmail-markdown-editor .TinyMDE .TMImageDestination,
+  .psmail-markdown-editor .TinyMDE .TMAutolink {
+    text-decoration: none;
+  }
+  .psmail-markdown-editor .TinyMDE .TMImage:hover,
+  .psmail-markdown-editor .TinyMDE .TMLink:hover,
+  .psmail-markdown-editor .TinyMDE .TMLinkDestination:hover,
+  .psmail-markdown-editor .TinyMDE .TMImageDestination:hover,
+  .psmail-markdown-editor .TinyMDE .TMAutolink:hover {
+    text-decoration: underline;
+    cursor: pointer;
+  }
+}
+.psmail-markdown-editor .TinyMDE .TMImage,
+.psmail-markdown-editor .TinyMDE .TMLink,
+.psmail-markdown-editor .TinyMDE .TMLinkDestination,
+.psmail-markdown-editor .TinyMDE .TMImageDestination,
+.psmail-markdown-editor .TinyMDE .TMAutolink,
+.psmail-markdown-editor .TinyMDE .TMMark {
+  transition: color var(--tmde-transition-duration);
+}
+.psmail-markdown-editor .TinyMDE .TMPara:not(.with-caret) .TMLinkDestination,
+.psmail-markdown-editor .TinyMDE .TMPara:not(.with-caret) .TMMark_TMImage,
+.psmail-markdown-editor .TinyMDE .TMPara:not(.with-caret) .TMMark_TMLink {
+  color: var(--tmde-grey-lighter);
+}
+@media (hover: hover) {
+  .psmail-markdown-editor .TinyMDE .TMPara:not(.with-caret) .TMLinkDestination:hover,
+  .psmail-markdown-editor .TinyMDE .TMPara:not(.with-caret) .TMMark_TMImage:hover,
+  .psmail-markdown-editor .TinyMDE .TMPara:not(.with-caret) .TMMark_TMLink:hover {
+    color: var(--foreground);
+  }
+}
+.psmail-markdown-editor .TinyMDE .TMPara:not(.with-caret) .TMMark:has(.TMLink) {
+  color: var(--tmde-grey-lighter);
+}
+.psmail-markdown-editor .TinyMDE .TMLinkLabel {
+  text-decoration: underline;
+  font-family: inherit;
+}
+.psmail-markdown-editor .TinyMDE .TMLinkTitle {
+  font-style: italic;
+}
+
+/* horizontal rule: hide the raw --- markup and draw a line instead, except while the
+   caret is on that line (so it stays editable/visible there) */
+.psmail-markdown-editor .TinyMDE .TMHR {
+  position: relative;
+}
+.psmail-markdown-editor .TinyMDE .TMMark_TMHR {
+  transition: color var(--tmde-transition-duration);
+}
+.psmail-markdown-editor .TinyMDE .TMHR:not(.with-caret) .TMMark_TMHR {
+  color: transparent;
+}
+.psmail-markdown-editor .TinyMDE .TMHR:before {
+  content: "";
+  position: absolute;
+  bottom: calc(50% - 2.4px);
+  left: 0;
+  border-bottom: 3px solid var(--border);
+  width: 100%;
+  z-index: -1;
+}
+
+/* raw HTML */
+.psmail-markdown-editor .TinyMDE .TMHTML,
+.psmail-markdown-editor .TinyMDE .TMHTMLBlock {
+  font-family: inherit;
+  color: var(--muted-foreground);
+}

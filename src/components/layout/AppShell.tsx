@@ -246,7 +246,7 @@ export function AppShell() {
           <Input
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder='Search all mail… e.g. from:you@x.com amazon*sale "mountain bike"'
+            placeholder='Search all mail…'
             className="h-8 pl-8 pr-8"
           />
           {searchQuery && (

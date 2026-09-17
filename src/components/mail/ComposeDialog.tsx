@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, Paperclip, Send as SendIcon, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { MarkdownEditor, type MarkdownEditorHandle } from "./MarkdownEditor";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { parseAddressList } from "@/lib/addresses";
@@ -32,6 +32,7 @@ export function ComposeDialog({
   onSent: () => void;
 }) {
   const { token } = useAuth();
+  const editorRef = useRef<MarkdownEditorHandle>(null);
   const [to, setTo] = useState("");
   const [cc, setCc] = useState("");
   const [showCc, setShowCc] = useState(false);
@@ -124,14 +125,19 @@ export function ComposeDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="compose-body">Message</Label>
-            <Textarea
-              id="compose-body"
-              rows={10}
-              className="font-mono"
-              value={body}
-              onChange={e => setBody(e.target.value)}
-            />
+            <Label className="cursor-pointer" onClick={() => editorRef.current?.focus()}>
+              Message
+            </Label>
+            <div className="rounded-md border border-input bg-transparent px-3 py-2 shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
+              <MarkdownEditor
+                ref={editorRef}
+                initialValue={body}
+                onChange={setBody}
+                placeholder="Write your message…"
+                aria-label="Message"
+                className="min-h-[12rem]"
+              />
+            </div>
           </div>
 
           <div className="space-y-1.5">
