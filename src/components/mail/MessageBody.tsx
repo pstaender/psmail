@@ -10,7 +10,7 @@ import type { EmailRecord } from "../../server/types";
 const HAS_REMOTE_IMG = /<img[^>]+src=["']https?:\/\//i;
 
 function PlainTextView({ text }: { text: string }) {
-  return <pre className="whitespace-pre-wrap break-words p-4 font-sans text-sm">{text}</pre>;
+  return <pre className="whitespace-pre-wrap break-words p-4 font-mono text-sm">{text}</pre>;
 }
 
 export function MessageBody({ email }: { email: EmailRecord }) {
