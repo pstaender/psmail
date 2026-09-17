@@ -19,6 +19,7 @@ export interface Account {
   smtpPort: number;
   smtpSecure: boolean;
   smtpUsername: string;
+  readOnly: boolean;
   createdAt: string;
   updatedAt: string;
 }

@@ -17,6 +17,7 @@ interface AccountRow {
   smtp_secure: number;
   smtp_username: string;
   smtp_password_encrypted: string;
+  read_only: number;
   created_at: string;
   updated_at: string;
 }
@@ -34,6 +35,13 @@ export interface CreateAccountInput {
   smtpSecure: boolean;
   smtpUsername: string;
   smtpPassword: string;
+  /**
+   * When true, this account should never have local changes (flags, moves, deletes) written
+   * back to the IMAP server. Currently a no-op in practice: sync only reads, and move/delete/
+   * flag already only update the local database (see README's "known limitations") — there's
+   * no two-way sync yet for this to gate. Stored now so a future two-way sync has it ready.
+   */
+  readOnly?: boolean;
 }
 
 export type UpdateAccountInput = Partial<CreateAccountInput>;
@@ -52,6 +60,7 @@ function toAccount(row: AccountRow): Account {
     smtpPort: row.smtp_port,
     smtpSecure: !!row.smtp_secure,
     smtpUsername: row.smtp_username,
+    readOnly: !!row.read_only,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -61,13 +70,13 @@ export function createAccount(db: Database, userId: number, input: CreateAccount
   const row = db
     .query<
       AccountRow,
-      [number, string, string | null, string, number, number, string, string, string, number, number, string, string]
+      [number, string, string | null, string, number, number, string, string, string, number, number, string, string, number]
     >(
       `INSERT INTO accounts (
         user_id, email, display_name,
         imap_host, imap_port, imap_secure, imap_username, imap_password_encrypted,
-        smtp_host, smtp_port, smtp_secure, smtp_username, smtp_password_encrypted
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        smtp_host, smtp_port, smtp_secure, smtp_username, smtp_password_encrypted, read_only
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING *`
     )
     .get(
@@ -83,7 +92,8 @@ export function createAccount(db: Database, userId: number, input: CreateAccount
       input.smtpPort,
       input.smtpSecure ? 1 : 0,
       input.smtpUsername,
-      encryptSecret(input.smtpPassword, encryptionKey)
+      encryptSecret(input.smtpPassword, encryptionKey),
+      input.readOnly ? 1 : 0
     );
 
   return toAccount(row!);
@@ -131,14 +141,18 @@ export function updateAccount(db: Database, id: number, input: UpdateAccountInpu
     smtp_username: input.smtpUsername ?? existing.smtp_username,
     smtp_password_encrypted:
       input.smtpPassword !== undefined ? encryptSecret(input.smtpPassword, encryptionKey) : existing.smtp_password_encrypted,
+    read_only: input.readOnly !== undefined ? (input.readOnly ? 1 : 0) : existing.read_only,
   };
 
   const row = db
-    .query<AccountRow, [string, string | null, string, number, number, string, string, string, number, number, string, string, number]>(
+    .query<
+      AccountRow,
+      [string, string | null, string, number, number, string, string, string, number, number, string, string, number, number]
+    >(
       `UPDATE accounts SET
         email = ?, display_name = ?,
         imap_host = ?, imap_port = ?, imap_secure = ?, imap_username = ?, imap_password_encrypted = ?,
-        smtp_host = ?, smtp_port = ?, smtp_secure = ?, smtp_username = ?, smtp_password_encrypted = ?,
+        smtp_host = ?, smtp_port = ?, smtp_secure = ?, smtp_username = ?, smtp_password_encrypted = ?, read_only = ?,
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       WHERE id = ?
       RETURNING *`
@@ -156,6 +170,7 @@ export function updateAccount(db: Database, id: number, input: UpdateAccountInpu
       merged.smtp_secure,
       merged.smtp_username,
       merged.smtp_password_encrypted,
+      merged.read_only,
       id
     );
 

@@ -48,6 +48,7 @@ function validateCreateInput(body: Partial<CreateAccountInput>): CreateAccountIn
     smtpSecure: body.smtpSecure ?? true,
     smtpUsername: body.smtpUsername!,
     smtpPassword: body.smtpPassword!,
+    readOnly: body.readOnly ?? false,
   };
 }
 

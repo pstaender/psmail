@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { AccountTree } from "@/components/sidebar/AccountTree";
+import { EditAccountDialog } from "@/components/sidebar/EditAccountDialog";
 import { ResizeHandle } from "@/components/layout/ResizeHandle";
 import { EmptyState } from "@/components/mail/EmptyState";
 import { MessageList } from "@/components/mail/MessageList";
@@ -48,6 +49,7 @@ export function AppShell() {
   // The reference point a Shift+click range is measured from — the last plain- or Cmd/Ctrl-clicked message.
   const [selectionAnchorId, setSelectionAnchorId] = useState<number | null>(null);
   const [pendingDeleteAccount, setPendingDeleteAccount] = useState<string | null>(null);
+  const [editingAccountEmail, setEditingAccountEmail] = useState<string | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeInitial, setComposeInitial] = useState<ComposeDraft | null>(null);
   // Remembered across messages (and folder/account switches) so the next message
@@ -315,6 +317,7 @@ export function AppShell() {
                 selected={selected}
                 onSelectFolder={selectFolder}
                 onDeleteAccount={setPendingDeleteAccount}
+                onEditAccount={setEditingAccountEmail}
                 onCollapse={() => setSidebarCollapsed(true)}
               />
             </div>
@@ -402,6 +405,13 @@ export function AppShell() {
           }}
         />
       )}
+
+      <EditAccountDialog
+        account={accounts.find(a => a.email === editingAccountEmail) ?? null}
+        open={editingAccountEmail !== null}
+        onOpenChange={open => !open && setEditingAccountEmail(null)}
+        onSaved={refreshAccounts}
+      />
 
       <AlertDialog open={pendingDeleteAccount !== null} onOpenChange={open => !open && setPendingDeleteAccount(null)}>
         <AlertDialogContent>

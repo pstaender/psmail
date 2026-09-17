@@ -91,4 +91,49 @@ describe("accounts model", () => {
     deleteAccount(db, account.id);
     expect(() => getAccountRow(db, account.id)).toThrow(ApiError);
   });
+
+  describe("readOnly flag", () => {
+    test("defaults to false when not given", async () => {
+      const db = createTestDb();
+      const user = await createUser(db, "alice", "pw");
+      const key = deriveEncryptionKey("pw", generateSalt());
+
+      const account = createAccount(db, user.id, sampleAccountInput, key);
+      expect(account.readOnly).toBe(false);
+    });
+
+    test("is stored when given true at creation", async () => {
+      const db = createTestDb();
+      const user = await createUser(db, "alice", "pw");
+      const key = deriveEncryptionKey("pw", generateSalt());
+
+      const account = createAccount(db, user.id, { ...sampleAccountInput, readOnly: true }, key);
+      expect(account.readOnly).toBe(true);
+    });
+
+    test("can be toggled via updateAccount without touching other fields", async () => {
+      const db = createTestDb();
+      const user = await createUser(db, "alice", "pw");
+      const key = deriveEncryptionKey("pw", generateSalt());
+      const account = createAccount(db, user.id, sampleAccountInput, key);
+
+      const updated = updateAccount(db, account.id, { readOnly: true }, key);
+      expect(updated.readOnly).toBe(true);
+      expect(updated.imapHost).toBe(sampleAccountInput.imapHost);
+
+      const reverted = updateAccount(db, account.id, { readOnly: false }, key);
+      expect(reverted.readOnly).toBe(false);
+    });
+
+    test("is preserved across an update that doesn't mention it", async () => {
+      const db = createTestDb();
+      const user = await createUser(db, "alice", "pw");
+      const key = deriveEncryptionKey("pw", generateSalt());
+      const account = createAccount(db, user.id, { ...sampleAccountInput, readOnly: true }, key);
+
+      const updated = updateAccount(db, account.id, { displayName: "New name" }, key);
+      expect(updated.readOnly).toBe(true);
+      expect(updated.displayName).toBe("New name");
+    });
+  });
 });

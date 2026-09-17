@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { dirname } from "node:path";
 import { getDatabasePath } from "../config/paths";
 import { SCHEMA_SQL } from "./schema";
+import { runMigrations } from "./migrations";
 
 let instance: Database | null = null;
 
@@ -22,6 +23,7 @@ export function getDb(path?: string): Database {
   instance.exec("PRAGMA journal_mode = WAL;");
   instance.exec("PRAGMA foreign_keys = ON;");
   instance.exec(SCHEMA_SQL);
+  runMigrations(instance);
   return instance;
 }
 

@@ -12,6 +12,7 @@ export function AccountTree({
   selected,
   onSelectFolder,
   onDeleteAccount,
+  onEditAccount,
   onCollapse,
 }: {
   accounts: Account[];
@@ -20,6 +21,7 @@ export function AccountTree({
   selected: { accountEmail: string; folder: string } | null;
   onSelectFolder: (accountEmail: string, folder: string) => void;
   onDeleteAccount: (accountEmail: string) => void;
+  onEditAccount: (accountEmail: string) => void;
   onCollapse: () => void;
 }) {
   return (
@@ -45,6 +47,7 @@ export function AccountTree({
               selected={selected}
               onSelectFolder={onSelectFolder}
               onDeleteAccount={onDeleteAccount}
+              onEditAccount={onEditAccount}
             />
           ))}
         </div>

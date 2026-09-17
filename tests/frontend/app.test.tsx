@@ -28,6 +28,7 @@ const ACCOUNT = {
   smtpPort: 465,
   smtpSecure: true,
   smtpUsername: "me@example.com",
+  readOnly: false,
   createdAt: NOW,
   updatedAt: NOW,
 };
@@ -92,6 +93,10 @@ function jsonResponse(body: unknown, status = 200) {
 const originalFetch = global.fetch;
 
 function installMockFetch() {
+  // A fresh mutable copy per test (installMockFetch runs in beforeEach), so a PATCH in one
+  // test can't leak into another, and so GET /api/accounts reflects a prior PATCH within a test.
+  let currentAccount = { ...ACCOUNT };
+
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     const method = init?.method ?? "GET";
@@ -101,7 +106,12 @@ function installMockFetch() {
     if (method === "POST" && path === "/api/auth/login") {
       return jsonResponse({ token: "test-token", expiresAt: NOW, user: { id: 1, username: "default" } });
     }
-    if (method === "GET" && path === "/api/accounts") return jsonResponse([ACCOUNT]);
+    if (method === "GET" && path === "/api/accounts") return jsonResponse([currentAccount]);
+    if (method === "PATCH" && path === "/api/accounts/me%40example.com") {
+      const body = init?.body ? JSON.parse(init.body as string) : {};
+      currentAccount = { ...currentAccount, ...body };
+      return jsonResponse(currentAccount);
+    }
     if (method === "GET" && path === "/api/accounts/me%40example.com/folders") return jsonResponse(FOLDERS);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails") {
       return jsonResponse([EMAIL, SECOND_EMAIL, THIRD_EMAIL]);
@@ -393,5 +403,36 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     render(<App />);
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
     expect(localStorage.getItem("psmail.messageListWidth")).toBe("380");
+  });
+
+  test("editing account settings prefills the form and can toggle read-only", async () => {
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    // No lock icon before the change.
+    expect(screen.queryByTitle("Read-only")).toBeNull();
+
+    await userEvent.click(screen.getByTitle("More actions"));
+    const menuItemLabels = (await screen.findAllByRole("menuitem")).map(i => i.textContent ?? "");
+    // "below the Remove account action", per the request.
+    expect(menuItemLabels.findIndex(t => t.includes("Remove account"))).toBeLessThan(
+      menuItemLabels.findIndex(t => t.includes("Account settings"))
+    );
+    await userEvent.click(screen.getByText("Account settings"));
+
+    expect(await screen.findByText("Account settings", { selector: "[data-slot=dialog-title]" })).toBeTruthy();
+    const hostField = screen.getByLabelText("Host", { selector: "#edit-imap-host" }) as HTMLInputElement;
+    expect(hostField.value).toBe("imap.example.com");
+    // Password fields are never prefilled (the API never returns them).
+    expect((screen.getByLabelText("Password", { selector: "#edit-imap-pass" }) as HTMLInputElement).value).toBe("");
+
+    await userEvent.click(screen.getByLabelText("Read-only"));
+    await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => expect(screen.queryByText("Account settings", { selector: "[data-slot=dialog-title]" })).toBeNull());
+    await waitFor(() => expect(screen.getByTitle("Read-only")).toBeTruthy());
   });
 });

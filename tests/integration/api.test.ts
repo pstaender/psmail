@@ -107,6 +107,23 @@ describe("P.S.Mail API", () => {
     expect(status).toBe(201);
     expect(json.email).toBe(accountEmail);
     expect(json.imapPassword).toBeUndefined();
+    expect(json.readOnly).toBe(false);
+  });
+
+  test("PATCH /api/accounts/:email can toggle readOnly without needing a password", async () => {
+    const { status, json } = await api("PATCH", `/api/accounts/${encodeURIComponent(accountEmail)}`, {
+      token,
+      body: { readOnly: true },
+    });
+    expect(status).toBe(200);
+    expect(json.readOnly).toBe(true);
+    expect(json.imapHost).toBe("imap.example.com"); // untouched
+
+    const revert = await api("PATCH", `/api/accounts/${encodeURIComponent(accountEmail)}`, {
+      token,
+      body: { readOnly: false },
+    });
+    expect(revert.json.readOnly).toBe(false);
   });
 
   test("GET /api/accounts lists only the caller's accounts", async () => {

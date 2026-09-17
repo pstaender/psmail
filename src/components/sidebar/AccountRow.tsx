@@ -6,9 +6,11 @@ import {
   Folder,
   Inbox,
   Loader2,
+  Lock,
   MoreVertical,
   RefreshCw,
   Send,
+  Settings,
   Trash2,
   Mail as MailIcon,
 } from "lucide-react";
@@ -44,11 +46,13 @@ export function AccountRow({
   selected,
   onSelectFolder,
   onDeleteAccount,
+  onEditAccount,
 }: {
   account: Account;
   selected: { accountEmail: string; folder: string } | null;
   onSelectFolder: (accountEmail: string, folder: string) => void;
   onDeleteAccount: (accountEmail: string) => void;
+  onEditAccount: (accountEmail: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const { folders, loading, error, refresh } = useFolders(expanded ? account.email : null);
@@ -62,6 +66,11 @@ export function AccountRow({
             <ChevronRight className={cn("size-3.5 shrink-0 transition-transform text-muted-foreground", expanded && "rotate-90")} />
             <MailIcon className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="truncate text-sm font-medium">{account.displayName || account.email}</span>
+            {account.readOnly && (
+              <span title="Read-only" className="shrink-0">
+                <Lock className="size-3 text-muted-foreground" />
+              </span>
+            )}
           </button>
         </CollapsibleTrigger>
 
@@ -78,13 +87,21 @@ export function AccountRow({
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="size-6 shrink-0 opacity-0 group-hover:opacity-100">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 shrink-0 opacity-0 group-hover:opacity-100"
+              title="More actions"
+            >
               <MoreVertical className="size-3.5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem variant="destructive" onClick={() => onDeleteAccount(account.email)}>
-              Remove account
+              <Trash2 className="size-3.5" /> Remove account
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onEditAccount(account.email)}>
+              <Settings className="size-3.5" /> Account settings
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

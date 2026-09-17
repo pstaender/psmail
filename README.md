@@ -20,7 +20,7 @@ Open `http://localhost:3001` (configurable, see [Configuration](#configuration))
 ## Webclient
 
 - **Login** — pick a profile (or create one) and sign in. Session token is kept in `localStorage`.
-- **Sidebar** — accounts and their folders (read live from IMAP), with unread counts from local sync state, a per-account "Sync now" button with live progress, and "Add account". Collapsible (the panel-icon button next to "Accounts", or the button that replaces it once collapsed) and resizable by dragging its right edge; both are remembered (`localStorage`).
+- **Sidebar** — accounts and their folders (read live from IMAP), with unread counts from local sync state, a per-account "Sync now" button with live progress, and "Add account". Collapsible (the panel-icon button next to "Accounts", or the button that replaces it once collapsed) and resizable by dragging its right edge; both are remembered (`localStorage`). Each account's `⋮` menu has "Remove account" and, below it, "Account settings" — every field is editable there (host/port/username/TLS for both IMAP and SMTP, display name, the read-only flag below); passwords are optional on edit (blank = keep the current one, since the API never returns them) and required on creation.
 - **Message list** — per-folder, with unread/flag indicators, attachment marker, and a snippet. Resizable by dragging its right edge (remembered too). Cmd/Ctrl+click to toggle individual messages, or Shift+click to select the whole range from the last plain/Ctrl-clicked message, for bulk Mark as read/unread, Move, or Delete (with confirmation); a plain click reads a message as usual and clears the multi-selection.
 - **Reading pane** — sender/recipient/subject/date header block, attachments with download, and three body views:
   - **Text** — the clearest possible reading version. Uses the plain-text part if there is one (any stray HTML tags stripped); otherwise cleans up the HTML with [Defuddle](https://github.com/kepano/defuddle) (drops layout/boilerplate clutter — marketing email is almost all nested-table layout, which is exactly what its table-content extraction targets) and converts it to Markdown with [Turndown](https://github.com/mixmark-io/turndown). Images are dropped, boilerplate links (unsubscribe, privacy policy, view-in-browser, …) are de-linked to plain text, and invisible Unicode padding characters some templates hide preheader text in are stripped.
@@ -72,6 +72,8 @@ Accounts are addressed in the URL **by email address** (URL-encoded), e.g. `/api
 - `GET /api/search?q=...` — searches across every account the caller owns; see [Search syntax](#search-syntax).
 
 An email account's IMAP/SMTP passwords are encrypted at rest with a key derived from the owning user's login password (scrypt + AES-256-GCM). The derived key lives only in server memory for the lifetime of the session — restarting the server means logging in again before account credentials can be decrypted (e.g. to sync or send).
+
+Accounts also have a `readOnly` flag (editable via "Account settings" in the sidebar, or `readOnly: true/false` in the account create/update body). It's meant to guarantee local changes (flags, moves, deletes) never get uploaded to that account's IMAP server — but there's currently no code path that uploads such changes at all (see the two-way-sync limitation above), so today the flag is a no-op in practice. It's stored now so a future two-way sync has it ready to check.
 
 ## Search syntax
 

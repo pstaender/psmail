@@ -30,6 +30,7 @@ const EMPTY: CreateAccountInput = {
   smtpSecure: true,
   smtpUsername: "",
   smtpPassword: "",
+  readOnly: false,
 };
 
 export function AddAccountDialog({ onCreated }: { onCreated: () => void }) {
@@ -183,6 +184,16 @@ export function AddAccountDialog({ onCreated }: { onCreated: () => void }) {
               <Label htmlFor="smtp-secure">Use TLS</Label>
             </div>
           </fieldset>
+
+          <div className="flex items-start gap-2 rounded-md border p-3">
+            <Switch id="acc-read-only" className="mt-0.5" checked={form.readOnly} onCheckedChange={v => set("readOnly", v)} />
+            <div className="space-y-0.5">
+              <Label htmlFor="acc-read-only">Read-only</Label>
+              <p className="text-xs text-muted-foreground">
+                Local changes (flags, moves, deletes) are never uploaded to this account's IMAP server.
+              </p>
+            </div>
+          </div>
 
           <DialogFooter>
             <Button type="submit" disabled={busy}>
