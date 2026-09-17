@@ -17,15 +17,20 @@ export function MessageList({
   emails,
   loading,
   selectedId,
+  selectedIds,
   folder,
   onSelect,
   onToggleFlag,
 }: {
   emails: EmailRecord[];
   loading: boolean;
+  /** The single message currently open in the reading pane. */
   selectedId: number | null;
+  /** Messages checked for a bulk action (via Cmd/Ctrl+click) — independent of `selectedId`. */
+  selectedIds: Set<number>;
   folder: string;
-  onSelect: (email: EmailRecord) => void;
+  /** `event` carries the click's modifier keys so the caller can decide plain-click-to-read vs Cmd/Ctrl-click-to-toggle-selection. */
+  onSelect: (email: EmailRecord, event: React.MouseEvent) => void;
   onToggleFlag: (email: EmailRecord) => void;
 }) {
   if (loading && emails.length === 0) {
@@ -46,10 +51,11 @@ export function MessageList({
         {emails.map(email => (
           <li key={email.id}>
             <button
-              onClick={() => onSelect(email)}
+              onClick={e => onSelect(email, e)}
               className={cn(
                 "group flex w-full flex-col gap-0.5 px-3 py-2.5 text-left hover:bg-accent/60 transition-colors",
-                selectedId === email.id && "bg-accent"
+                selectedId === email.id && "bg-accent",
+                selectedIds.has(email.id) && "bg-primary/10 ring-1 ring-inset ring-primary/50"
               )}
             >
               <div className="flex items-center gap-2">

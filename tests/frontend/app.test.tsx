@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "../../src/App";
 
@@ -98,6 +98,8 @@ function installMockFetch() {
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse(SECOND_EMAIL);
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse({ ...EMAIL, isRead: true });
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse({ ...SECOND_EMAIL, isRead: true });
+    if (method === "DELETE" && path === "/api/accounts/me%40example.com/emails/10") return new Response(null, { status: 204 });
+    if (method === "DELETE" && path === "/api/accounts/me%40example.com/emails/11") return new Response(null, { status: 204 });
     if (method === "GET" && path === "/api/search") {
       // The mock doesn't replicate real matching (that's covered by backend tests) —
       // it just returns a canned hit so the UI wiring (fetch -> render -> select) is exercised.
@@ -226,5 +228,46 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.click(screen.getByTitle("Clear search"));
     await waitFor(() => expect(screen.queryByText(/Search:/)).toBeNull());
     expect(screen.getAllByText("Second message").length).toBeGreaterThan(0);
+  });
+
+  test("Ctrl/Cmd+click multi-selects messages for bulk mark-as-read and delete", async () => {
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    const firstRow = await screen.findByText("Hello there");
+    const secondRow = await screen.findByText("Second message");
+
+    // Ctrl+click toggles selection without opening either message in the reading pane.
+    fireEvent.click(firstRow, { ctrlKey: true });
+    await waitFor(() => expect(screen.getByText("1 selected")).toBeTruthy());
+    expect(screen.getByText("Select a message")).toBeTruthy();
+
+    fireEvent.click(secondRow, { ctrlKey: true });
+    await waitFor(() => expect(screen.getByText("2 selected")).toBeTruthy());
+
+    // Ctrl+click again deselects it.
+    fireEvent.click(secondRow, { ctrlKey: true });
+    await waitFor(() => expect(screen.getByText("1 selected")).toBeTruthy());
+    fireEvent.click(secondRow, { ctrlKey: true });
+    await waitFor(() => expect(screen.getByText("2 selected")).toBeTruthy());
+
+    // Bulk mark-as-read clears the selection once done.
+    await userEvent.click(screen.getByTitle("Mark as read"));
+    await waitFor(() => expect(screen.queryByText(/selected/)).toBeNull());
+
+    // Re-select both and bulk-delete them, with confirmation.
+    fireEvent.click(await screen.findByText("Hello there"), { ctrlKey: true });
+    fireEvent.click(screen.getByText("Second message"), { ctrlKey: true });
+    await waitFor(() => expect(screen.getByText("2 selected")).toBeTruthy());
+
+    await userEvent.click(screen.getByTitle("Delete"));
+    const dialog = await screen.findByRole("alertdialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(screen.queryByText("Hello there")).toBeNull());
+    expect(screen.queryByText("Second message")).toBeNull();
   });
 });

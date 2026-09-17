@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { AccountTree } from "@/components/sidebar/AccountTree";
 import { EmptyState } from "@/components/mail/EmptyState";
 import { MessageList } from "@/components/mail/MessageList";
+import { BulkActionBar } from "@/components/mail/BulkActionBar";
 import { SearchResultList } from "@/components/mail/SearchResultList";
 import { MessageView } from "@/components/mail/MessageView";
 import type { BodyView } from "@/components/mail/MessageBody";
@@ -39,6 +40,8 @@ export function AppShell() {
   const [selectedAccountEmail, setSelectedAccountEmail] = useState<string | null>(null);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [selectedEmailId, setSelectedEmailId] = useState<number | null>(null);
+  // Checked via Cmd/Ctrl+click, for bulk actions — independent of selectedEmailId (the reading pane).
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [pendingDeleteAccount, setPendingDeleteAccount] = useState<string | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeInitial, setComposeInitial] = useState<ComposeDraft | null>(null);
@@ -77,9 +80,23 @@ export function AppShell() {
     setSelectedAccountEmail(accountEmail);
     setSelectedFolder(folder);
     setSelectedEmailId(null);
+    setSelectedIds(new Set());
   }
 
-  function selectEmail(email: EmailRecord) {
+  // Plain click reads the message as usual (and drops any bulk selection, like every
+  // other mail client). Cmd/Ctrl+click instead toggles it in the bulk-action selection
+  // without touching the reading pane, so you can build a selection while still reading.
+  function selectEmail(email: EmailRecord, event: React.MouseEvent) {
+    if (event.metaKey || event.ctrlKey) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        if (next.has(email.id)) next.delete(email.id);
+        else next.add(email.id);
+        return next;
+      });
+      return;
+    }
+    setSelectedIds(new Set());
     setSelectedEmailId(email.id);
   }
 
@@ -90,6 +107,7 @@ export function AppShell() {
     setSelectedAccountEmail(result.accountEmail);
     setSelectedFolder(result.folder);
     setSelectedEmailId(result.id);
+    setSelectedIds(new Set());
   }
 
   async function toggleFlag(email: EmailRecord) {
@@ -121,6 +139,48 @@ export function AppShell() {
     removeLocal(selectedEmail.id);
     setSelectedEmailId(null);
     toast.success(`Moved to ${folder}`);
+  }
+
+  /** Runs one API call per selected message and reports how many of them actually succeeded. */
+  async function runBulkAction(action: (id: number) => Promise<unknown>, verb: string): Promise<number[]> {
+    if (!token || !selectedAccountEmail) return [];
+    const ids = [...selectedIds];
+    const outcomes = await Promise.allSettled(ids.map(action));
+    const succeeded = ids.filter((_, i) => outcomes[i]!.status === "fulfilled");
+    const failed = ids.length - succeeded.length;
+
+    if (failed > 0) toast.error(`${verb} ${succeeded.length}/${ids.length} message(s) — ${failed} failed`);
+    else toast.success(`${verb} ${ids.length} message(s)`);
+
+    setSelectedIds(new Set());
+    return succeeded;
+  }
+
+  async function bulkMarkRead(isRead: boolean) {
+    if (!token || !selectedAccountEmail) return;
+    const succeeded = await runBulkAction(
+      id => api.updateEmail(token, selectedAccountEmail, id, { isRead }),
+      isRead ? "Marked as read" : "Marked as unread"
+    );
+    succeeded.forEach(id => patchLocal(id, { isRead }));
+  }
+
+  async function bulkDelete() {
+    if (!token || !selectedAccountEmail) return;
+    const succeeded = await runBulkAction(id => api.deleteEmail(token, selectedAccountEmail, id), "Deleted");
+    succeeded.forEach(id => {
+      removeLocal(id);
+      if (selectedEmailId === id) setSelectedEmailId(null);
+    });
+  }
+
+  async function bulkMove(folder: string) {
+    if (!token || !selectedAccountEmail) return;
+    const succeeded = await runBulkAction(id => api.moveEmail(token, selectedAccountEmail, id, folder), `Moved to ${folder} —`);
+    succeeded.forEach(id => {
+      removeLocal(id);
+      if (selectedEmailId === id) setSelectedEmailId(null);
+    });
   }
 
   function openCompose(initial: ComposeDraft | null) {
@@ -195,14 +255,26 @@ export function AppShell() {
         </div>
 
         <div className="flex w-80 shrink-0 flex-col border-r">
-          <div className="flex items-center justify-between border-b px-3 py-2">
-            <span className="truncate text-sm font-medium">
-              {isSearching ? `Search: "${searchQuery.trim()}"` : selectedFolder ?? "—"}
-            </span>
-            <Button size="sm" disabled={!selectedAccountEmail} onClick={() => openCompose(null)}>
-              <PenSquare className="size-4" /> New
-            </Button>
-          </div>
+          {!isSearching && selectedIds.size > 0 ? (
+            <BulkActionBar
+              count={selectedIds.size}
+              folders={folders.filter(f => f.path !== selectedFolder)}
+              onMarkRead={() => bulkMarkRead(true)}
+              onMarkUnread={() => bulkMarkRead(false)}
+              onMove={bulkMove}
+              onDelete={bulkDelete}
+              onClear={() => setSelectedIds(new Set())}
+            />
+          ) : (
+            <div className="flex items-center justify-between border-b px-3 py-2">
+              <span className="truncate text-sm font-medium">
+                {isSearching ? `Search: "${searchQuery.trim()}"` : selectedFolder ?? "—"}
+              </span>
+              <Button size="sm" disabled={!selectedAccountEmail} onClick={() => openCompose(null)}>
+                <PenSquare className="size-4" /> New
+              </Button>
+            </div>
+          )}
           <div className="min-h-0 flex-1">
             {isSearching ? (
               <SearchResultList
@@ -216,6 +288,7 @@ export function AppShell() {
                 emails={emails}
                 loading={emailsLoading}
                 selectedId={selectedEmailId}
+                selectedIds={selectedIds}
                 folder={selectedFolder}
                 onSelect={selectEmail}
                 onToggleFlag={toggleFlag}
