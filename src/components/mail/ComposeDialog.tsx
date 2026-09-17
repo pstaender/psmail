@@ -91,7 +91,7 @@ export function ComposeDialog({
           <DialogTitle>New message</DialogTitle>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+        <div className="-mx-1 min-h-0 flex-1 space-y-3 overflow-y-auto px-1">
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <div className="space-y-1.5">
@@ -125,7 +125,13 @@ export function ComposeDialog({
 
           <div className="space-y-1.5">
             <Label htmlFor="compose-body">Message</Label>
-            <Textarea id="compose-body" rows={10} value={body} onChange={e => setBody(e.target.value)} />
+            <Textarea
+              id="compose-body"
+              rows={10}
+              className="font-mono"
+              value={body}
+              onChange={e => setBody(e.target.value)}
+            />
           </div>
 
           <div className="space-y-1.5">
