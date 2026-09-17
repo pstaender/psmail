@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { LogOut, Mail, PenSquare, Search, X } from "lucide-react";
+import { LogOut, Mail, PanelLeftOpen, PenSquare, Search, X } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { AccountTree } from "@/components/sidebar/AccountTree";
+import { ResizeHandle } from "@/components/layout/ResizeHandle";
 import { EmptyState } from "@/components/mail/EmptyState";
 import { MessageList } from "@/components/mail/MessageList";
 import { BulkActionBar } from "@/components/mail/BulkActionBar";
@@ -27,6 +28,8 @@ import { useEmails } from "@/hooks/useEmails";
 import { useFolders } from "@/hooks/useFolders";
 import { useEmailDetail } from "@/hooks/useEmailDetail";
 import { useSearchResults } from "@/hooks/useSearchResults";
+import { useResizableWidth } from "@/hooks/useResizableWidth";
+import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { forwardDraft, replyDraft } from "@/lib/compose";
@@ -53,6 +56,15 @@ export function AppShell() {
   const [searchQuery, setSearchQuery] = useState("");
   const { results: searchResults, loading: searchLoading } = useSearchResults(searchQuery);
   const isSearching = searchQuery.trim().length > 0;
+
+  const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorageState("psmail.sidebarCollapsed", false);
+  const { width: sidebarWidth, startResize: startSidebarResize } = useResizableWidth("psmail.sidebarWidth", 240, 160, 480);
+  const { width: messageListWidth, startResize: startMessageListResize } = useResizableWidth(
+    "psmail.messageListWidth",
+    320,
+    240,
+    640
+  );
 
   useEffect(() => {
     if (!selectedAccountEmail && accounts.length > 0) {
@@ -269,18 +281,36 @@ export function AppShell() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <div className="w-60 shrink-0">
-          <AccountTree
-            accounts={accounts}
-            loading={accountsLoading}
-            refreshAccounts={refreshAccounts}
-            selected={selected}
-            onSelectFolder={selectFolder}
-            onDeleteAccount={setPendingDeleteAccount}
-          />
-        </div>
+        {sidebarCollapsed ? (
+          <div className="flex w-9 shrink-0 flex-col items-center border-r bg-muted/20 pt-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              onClick={() => setSidebarCollapsed(false)}
+              title="Show accounts"
+            >
+              <PanelLeftOpen className="size-4" />
+            </Button>
+          </div>
+        ) : (
+          <>
+            <div style={{ width: sidebarWidth }} className="shrink-0">
+              <AccountTree
+                accounts={accounts}
+                loading={accountsLoading}
+                refreshAccounts={refreshAccounts}
+                selected={selected}
+                onSelectFolder={selectFolder}
+                onDeleteAccount={setPendingDeleteAccount}
+                onCollapse={() => setSidebarCollapsed(true)}
+              />
+            </div>
+            <ResizeHandle onPointerDown={startSidebarResize} />
+          </>
+        )}
 
-        <div className="flex w-80 shrink-0 flex-col border-r">
+        <div style={{ width: messageListWidth }} className="flex shrink-0 flex-col border-r">
           {!isSearching && selectedIds.size > 0 ? (
             <BulkActionBar
               count={selectedIds.size}
@@ -324,6 +354,8 @@ export function AppShell() {
             )}
           </div>
         </div>
+
+        <ResizeHandle onPointerDown={startMessageListResize} />
 
         <div className="min-w-0 flex-1">
           {selectedEmail && selectedAccountEmail ? (

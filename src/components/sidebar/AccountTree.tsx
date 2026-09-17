@@ -1,4 +1,5 @@
-import { Loader2 } from "lucide-react";
+import { Loader2, PanelLeftClose } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AccountRow } from "./AccountRow";
 import { AddAccountDialog } from "./AddAccountDialog";
@@ -11,6 +12,7 @@ export function AccountTree({
   selected,
   onSelectFolder,
   onDeleteAccount,
+  onCollapse,
 }: {
   accounts: Account[];
   loading: boolean;
@@ -18,11 +20,15 @@ export function AccountTree({
   selected: { accountEmail: string; folder: string } | null;
   onSelectFolder: (accountEmail: string, folder: string) => void;
   onDeleteAccount: (accountEmail: string) => void;
+  onCollapse: () => void;
 }) {
   return (
     <div className="flex h-full flex-col border-r bg-muted/20">
-      <div className="flex items-center gap-2 px-3 py-3">
+      <div className="flex items-center justify-between gap-2 px-3 py-3">
         <span className="text-sm font-semibold">Accounts</span>
+        <Button variant="ghost" size="icon" className="size-6" onClick={onCollapse} title="Collapse accounts">
+          <PanelLeftClose className="size-3.5" />
+        </Button>
       </div>
 
       <ScrollArea className="flex-1 px-2">

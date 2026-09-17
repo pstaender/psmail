@@ -321,4 +321,59 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // The reading pane never changed — Shift+click only affects the bulk-action selection.
     expect(screen.getAllByText("Hello there").length).toBeGreaterThan(0);
   });
+
+  test("collapsing the account sidebar persists across a reload", async () => {
+    const { unmount } = render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    expect(screen.getByText("Accounts")).toBeTruthy();
+
+    await userEvent.click(screen.getByTitle("Collapse accounts"));
+    await waitFor(() => expect(screen.queryByText("Accounts")).toBeNull());
+    expect(screen.getByTitle("Show accounts")).toBeTruthy();
+    expect(localStorage.getItem("psmail.sidebarCollapsed")).toBe("true");
+
+    await userEvent.click(screen.getByTitle("Show accounts"));
+    await waitFor(() => expect(screen.getByText("Accounts")).toBeTruthy());
+    expect(localStorage.getItem("psmail.sidebarCollapsed")).toBe("false");
+
+    // Collapse again, then simulate a reload: unmount and mount a fresh <App/> without touching localStorage.
+    await userEvent.click(screen.getByTitle("Collapse accounts"));
+    await waitFor(() => expect(screen.queryByText("Accounts")).toBeNull());
+    unmount();
+
+    // The session token was persisted too, so the fresh mount logs back in on its own — no login step here.
+    render(<App />);
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    expect(screen.queryByText("Accounts")).toBeNull();
+    expect(screen.getByTitle("Show accounts")).toBeTruthy();
+  });
+
+  test("resizing the message list column persists across a reload", async () => {
+    const { unmount } = render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    const handles = document.querySelectorAll('[role="separator"][aria-orientation="vertical"]');
+    expect(handles.length).toBe(2); // sidebar|list and list|reading-pane
+
+    const messageListHandle = handles[1]!;
+    fireEvent.pointerDown(messageListHandle, { clientX: 500 });
+    fireEvent.pointerMove(document, { clientX: 560 }); // +60px from the default 320px width
+    fireEvent.pointerUp(document);
+
+    await waitFor(() => expect(localStorage.getItem("psmail.messageListWidth")).toBe("380"));
+
+    unmount();
+
+    // The session token was persisted too, so the fresh mount logs back in on its own — no login step here.
+    render(<App />);
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    expect(localStorage.getItem("psmail.messageListWidth")).toBe("380");
+  });
 });
