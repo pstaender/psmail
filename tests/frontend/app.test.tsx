@@ -65,6 +65,16 @@ const EMAIL = {
   attachments: [],
 };
 
+const SECOND_EMAIL = {
+  ...EMAIL,
+  id: 11,
+  uid: 2,
+  subject: "Second message",
+  from: [{ name: "Bob", address: "bob@example.com" }],
+  plainText: "Hi from Bob",
+  htmlText: "<p>Hi <b>from</b> Bob</p>",
+};
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
@@ -83,9 +93,11 @@ function installMockFetch() {
     }
     if (method === "GET" && path === "/api/accounts") return jsonResponse([ACCOUNT]);
     if (method === "GET" && path === "/api/accounts/me%40example.com/folders") return jsonResponse(FOLDERS);
-    if (method === "GET" && path === "/api/accounts/me%40example.com/emails") return jsonResponse([EMAIL]);
+    if (method === "GET" && path === "/api/accounts/me%40example.com/emails") return jsonResponse([EMAIL, SECOND_EMAIL]);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse(EMAIL);
+    if (method === "GET" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse(SECOND_EMAIL);
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse({ ...EMAIL, isRead: true });
+    if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse({ ...SECOND_EMAIL, isRead: true });
 
     return jsonResponse({ error: `Unhandled mock route: ${method} ${path}` }, 404);
   }) as typeof fetch;
@@ -141,5 +153,37 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.click(screen.getByText("Add account"));
     expect(await screen.findByText("Add email account")).toBeTruthy();
     expect(screen.getByLabelText("Email address")).toBeTruthy();
+  });
+
+  test("remembers the last body view across messages, downgrading Full HTML to Safe HTML", async () => {
+    render(<App />);
+
+    function isTabSelected(name: string): boolean {
+      return screen.getByRole("tab", { name }).getAttribute("aria-selected") === "true";
+    }
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    // Open the first message and switch it to Full HTML.
+    await userEvent.click(await screen.findByText("Hello there"));
+    await userEvent.click(await screen.findByRole("tab", { name: "Full HTML" }));
+    await waitFor(() => expect(isTabSelected("Full HTML")).toBe(true));
+
+    // Switching to the second message must not carry Full HTML over — it should land on Safe HTML.
+    await userEvent.click(await screen.findByText("Second message"));
+    await waitFor(() => expect(screen.getAllByText("Second message").length).toBeGreaterThan(0));
+    await waitFor(() => expect(isTabSelected("Safe HTML")).toBe(true));
+    expect(isTabSelected("Full HTML")).toBe(false);
+
+    // Explicitly picking Plain text on the second message...
+    await userEvent.click(screen.getByRole("tab", { name: "Plain text" }));
+    await waitFor(() => expect(isTabSelected("Plain text")).toBe(true));
+
+    // ...should be remembered when going back to the first message.
+    await userEvent.click(await screen.findByText("Hello there"));
+    await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(0));
+    await waitFor(() => expect(isTabSelected("Plain text")).toBe(true));
   });
 });

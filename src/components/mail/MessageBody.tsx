@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ImageOff, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -9,16 +9,46 @@ import type { EmailRecord } from "../../server/types";
 
 const HAS_REMOTE_IMG = /<img[^>]+src=["']https?:\/\//i;
 
+export type BodyView = "text" | "plain" | "safe" | "full";
+
+/**
+ * Picks which tab a (possibly new) message should open on: reuses the
+ * caller's remembered choice when it's available for this message, but
+ * never carries "full" across to a message the user hasn't explicitly
+ * chosen it for — downgrades to "safe" instead. Falls back to the same
+ * default the app always used (Safe HTML if there's HTML, else Plain text)
+ * when there's no usable remembered choice.
+ */
+export function resolveInitialView(
+  preferred: BodyView | null,
+  availability: { text: boolean; plain: boolean; html: boolean }
+): BodyView {
+  const candidate = preferred === "full" ? "safe" : preferred;
+
+  if (candidate === "text" && availability.text) return "text";
+  if (candidate === "plain" && availability.plain) return "plain";
+  if (candidate === "safe" && availability.html) return "safe";
+
+  return availability.html ? "safe" : "plain";
+}
+
 function PlainTextView({ text }: { text: string }) {
   return <pre className="whitespace-pre-wrap break-words p-4 font-mono text-sm">{text}</pre>;
 }
 
-export function MessageBody({ email }: { email: EmailRecord }) {
+export function MessageBody({
+  email,
+  preferredView,
+  onViewChange,
+}: {
+  email: EmailRecord;
+  preferredView: BodyView | null;
+  onViewChange: (view: BodyView) => void;
+}) {
   const [showExternal, setShowExternal] = useState(false);
 
   const hasHtml = !!email.htmlText;
   const hasPlain = !!email.plainText;
-  const defaultTab = hasHtml ? "safe" : "plain";
 
   const clearestText = useMemo(
     () => buildClearestText({ plainText: email.plainText, htmlText: email.htmlText }),
@@ -40,12 +70,30 @@ export function MessageBody({ email }: { email: EmailRecord }) {
     [email.htmlText]
   );
 
+  // Resolved fresh per message (not per preferredView change): reuses the remembered
+  // tab if it's available here, downgrading "full" to "safe" for a message the user
+  // hasn't explicitly picked it for. Depending only on email.id keeps this stable
+  // while the user is still on the same message, even as onViewChange updates the prop.
+  const initialView = useMemo(
+    () => resolveInitialView(preferredView, { text: clearestText !== null, plain: hasPlain, html: hasHtml }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [email.id]
+  );
+
+  // Keeps the caller's remembered choice in sync with what's actually shown,
+  // so a "full" -> "safe" downgrade (or an unavailable-tab fallback) sticks
+  // for the next message too instead of trying to reapply "full" every time.
+  useEffect(() => {
+    onViewChange(initialView);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [email.id]);
+
   if (!hasHtml && !hasPlain) {
     return <p className="p-4 text-sm text-muted-foreground">This message has no readable body.</p>;
   }
 
   return (
-    <Tabs key={email.id} defaultValue={defaultTab} className="gap-0">
+    <Tabs key={email.id} defaultValue={initialView} onValueChange={value => onViewChange(value as BodyView)} className="gap-0">
       <TabsList className="mx-4 mt-3 w-fit">
         {clearestText !== null && <TabsTrigger value="text">Text</TabsTrigger>}
         {hasPlain && <TabsTrigger value="plain">Plain text</TabsTrigger>}

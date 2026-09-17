@@ -17,6 +17,7 @@ import { AccountTree } from "@/components/sidebar/AccountTree";
 import { EmptyState } from "@/components/mail/EmptyState";
 import { MessageList } from "@/components/mail/MessageList";
 import { MessageView } from "@/components/mail/MessageView";
+import type { BodyView } from "@/components/mail/MessageBody";
 import { ComposeDialog, type ComposeDraft } from "@/components/mail/ComposeDialog";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useEmails } from "@/hooks/useEmails";
@@ -37,6 +38,9 @@ export function AppShell() {
   const [pendingDeleteAccount, setPendingDeleteAccount] = useState<string | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeInitial, setComposeInitial] = useState<ComposeDraft | null>(null);
+  // Remembered across messages (and folder/account switches) so the next message
+  // opened reuses whatever body view the user was last reading with.
+  const [preferredBodyView, setPreferredBodyView] = useState<BodyView | null>(null);
 
   useEffect(() => {
     if (!selectedAccountEmail && accounts.length > 0) {
@@ -183,6 +187,8 @@ export function AppShell() {
               accountEmail={selectedAccountEmail}
               email={selectedEmail}
               folders={folders}
+              preferredView={preferredBodyView}
+              onViewChange={setPreferredBodyView}
               onReply={() => openCompose(replyDraft(selectedEmail))}
               onForward={() => openCompose(forwardDraft(selectedEmail))}
               onDelete={handleDelete}

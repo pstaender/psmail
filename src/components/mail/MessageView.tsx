@@ -1,5 +1,5 @@
 import { AttachmentList } from "./AttachmentList";
-import { MessageBody } from "./MessageBody";
+import { MessageBody, type BodyView } from "./MessageBody";
 import { MessageHeader } from "./MessageHeader";
 import { MessageToolbar } from "./MessageToolbar";
 import type { EmailRecord } from "../../server/types";
@@ -9,6 +9,8 @@ export function MessageView({
   accountEmail,
   email,
   folders,
+  preferredView,
+  onViewChange,
   onReply,
   onForward,
   onDelete,
@@ -18,6 +20,8 @@ export function MessageView({
   accountEmail: string;
   email: EmailRecord;
   folders: FolderInfo[];
+  preferredView: BodyView | null;
+  onViewChange: (view: BodyView) => void;
   onReply: () => void;
   onForward: () => void;
   onDelete: () => void;
@@ -38,7 +42,7 @@ export function MessageView({
       <MessageHeader email={email} />
       <AttachmentList accountEmail={accountEmail} emailId={email.id} attachments={email.attachments ?? []} />
       <div className="flex-1 overflow-y-auto">
-        <MessageBody email={email} />
+        <MessageBody email={email} preferredView={preferredView} onViewChange={onViewChange} />
       </div>
     </div>
   );
