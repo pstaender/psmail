@@ -250,9 +250,20 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await waitFor(() => expect(screen.getByText(/Search: "second"/)).toBeTruthy(), { timeout: 2000 });
     await waitFor(() => expect(screen.getAllByText("Second message").length).toBeGreaterThan(0), { timeout: 2000 });
 
-    // Opening the result reads it, same as opening any other message.
-    await userEvent.click(screen.getAllByText("Second message")[0]!);
+    const resultRow = screen.getByText("Second message").closest("li")!;
+    expect(resultRow.querySelector(".bg-primary")).toBeTruthy(); // unread dot
+
+    // Opening the result reads it, same as opening any other message — and (the bug this
+    // guards against) must update the result row in the still-visible search list too, not
+    // just the folder-scoped list that isn't even being shown right now.
+    await userEvent.click(within(resultRow).getByText("Second message"));
     await waitFor(() => expect(screen.getAllByText(/Bob/).length).toBeGreaterThan(0));
+    await waitFor(() => {
+      // "Second message" now also appears as the reading pane's heading, so scope back down
+      // to the search-result row (the <li>) specifically.
+      const row = screen.getAllByText("Second message").map(el => el.closest("li")).find(Boolean)!;
+      expect(row.querySelector(".bg-primary")).toBeNull();
+    });
 
     // Clearing the search returns to the normal folder view without losing the reading pane.
     await userEvent.click(screen.getByTitle("Clear search"));

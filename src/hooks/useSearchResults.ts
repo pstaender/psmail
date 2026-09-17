@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
 import type { SearchResult } from "../server/models/search";
 import { useAuth } from "../contexts/AuthContext";
@@ -44,5 +44,17 @@ export function useSearchResults(query: string) {
     };
   }, [token, query]);
 
-  return { results, loading, error };
+  // Search results are a separate copy of the data from the per-folder message list, so
+  // actions like mark-as-read (triggered while a result is open) need to patch this list too
+  // for the displayed unread state to stay in sync. `id` is safe as the sole key here even
+  // though results span accounts: email ids are globally unique (one shared `emails` table).
+  const patchLocal = useCallback((id: number, patch: Partial<SearchResult>) => {
+    setResults(prev => prev.map(r => (r.id === id ? { ...r, ...patch } : r)));
+  }, []);
+
+  const removeLocal = useCallback((id: number) => {
+    setResults(prev => prev.filter(r => r.id !== id));
+  }, []);
+
+  return { results, loading, error, patchLocal, removeLocal };
 }

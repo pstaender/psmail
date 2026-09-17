@@ -54,7 +54,12 @@ export function AppShell() {
   // opened reuses whatever body view the user was last reading with.
   const [preferredBodyView, setPreferredBodyView] = useState<BodyView | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const { results: searchResults, loading: searchLoading } = useSearchResults(searchQuery);
+  const {
+    results: searchResults,
+    loading: searchLoading,
+    patchLocal: patchSearchResult,
+    removeLocal: removeSearchResult,
+  } = useSearchResults(searchQuery);
   const isSearching = searchQuery.trim().length > 0;
 
   const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorageState("psmail.sidebarCollapsed", false);
@@ -80,11 +85,13 @@ export function AppShell() {
   const { folders, refresh: refreshFolders } = useFolders(selectedAccountEmail);
   const { email: selectedEmail, setEmail: setSelectedEmailDetail } = useEmailDetail(selectedAccountEmail, selectedEmailId);
 
-  // Mark-as-read on open, like every other mail client.
+  // Mark-as-read on open, like every other mail client. Patches both the folder-scoped list
+  // and the (separate) search results array, since a message can be open from either.
   useEffect(() => {
     if (selectedEmail && !selectedEmail.isRead && selectedAccountEmail && token) {
       api.updateEmail(token, selectedAccountEmail, selectedEmail.id, { isRead: true }).catch(() => {});
       patchLocal(selectedEmail.id, { isRead: true });
+      patchSearchResult(selectedEmail.id, { isRead: true });
       setSelectedEmailDetail({ ...selectedEmail, isRead: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -159,6 +166,7 @@ export function AppShell() {
     if (!token || !selectedAccountEmail || !selectedEmail) return;
     const isRead = !selectedEmail.isRead;
     patchLocal(selectedEmail.id, { isRead });
+    patchSearchResult(selectedEmail.id, { isRead });
     setSelectedEmailDetail({ ...selectedEmail, isRead });
     await api.updateEmail(token, selectedAccountEmail, selectedEmail.id, { isRead });
   }
@@ -167,6 +175,7 @@ export function AppShell() {
     if (!token || !selectedAccountEmail || !selectedEmail) return;
     await api.deleteEmail(token, selectedAccountEmail, selectedEmail.id);
     removeLocal(selectedEmail.id);
+    removeSearchResult(selectedEmail.id);
     setSelectedEmailId(null);
     toast.success("Message deleted");
   }
@@ -175,6 +184,9 @@ export function AppShell() {
     if (!token || !selectedAccountEmail || !selectedEmail) return;
     await api.moveEmail(token, selectedAccountEmail, selectedEmail.id, folder);
     removeLocal(selectedEmail.id);
+    // Unlike the folder-scoped list, a moved message still matches the search — just with a
+    // new folder — so it's patched in place rather than removed from the results.
+    patchSearchResult(selectedEmail.id, { folder });
     setSelectedEmailId(null);
     toast.success(`Moved to ${folder}`);
   }
