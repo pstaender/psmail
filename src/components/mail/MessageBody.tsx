@@ -3,13 +3,13 @@ import { ImageOff, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { sanitizeEmailHtml } from "@/lib/sanitizeHtml";
-import { buildClearestText } from "@/lib/textView";
+import { buildClearestText, markdownFromHtml } from "@/lib/textView";
 import { HtmlFrame } from "./HtmlFrame";
 import type { EmailRecord } from "../../server/types";
 
 const HAS_REMOTE_IMG = /<img[^>]+src=["']https?:\/\//i;
 
-export type BodyView = "text" | "plain" | "safe" | "full";
+export type BodyView = "text" | "md" | "plain" | "safe" | "full";
 
 /**
  * Picks which tab a (possibly new) message should open on: reuses the
@@ -26,6 +26,7 @@ export function resolveInitialView(
   const candidate = preferred === "full" ? "safe" : preferred;
 
   if (candidate === "text" && availability.text) return "text";
+  if (candidate === "md" && availability.html) return "md";
   if (candidate === "plain" && availability.plain) return "plain";
   if (candidate === "safe" && availability.html) return "safe";
 
@@ -54,6 +55,10 @@ export function MessageBody({
     () => buildClearestText({ plainText: email.plainText, htmlText: email.htmlText }),
     [email.plainText, email.htmlText]
   );
+
+  // Unlike "Text" (which prefers the plain-text part when there is one), "MD" always shows
+  // the HTML converted to Markdown, whenever there's HTML at all.
+  const markdownContent = useMemo(() => (email.htmlText ? markdownFromHtml(email.htmlText) : null), [email.htmlText]);
 
   const mightHaveRemoteImages = useMemo(() => (email.htmlText ? HAS_REMOTE_IMG.test(email.htmlText) : false), [email.htmlText]);
 
@@ -96,6 +101,7 @@ export function MessageBody({
     <Tabs key={email.id} defaultValue={initialView} onValueChange={value => onViewChange(value as BodyView)} className="gap-0">
       <TabsList className="mx-4 mt-3 w-fit">
         {clearestText !== null && <TabsTrigger value="text">Text</TabsTrigger>}
+        {hasHtml && <TabsTrigger value="md">MD</TabsTrigger>}
         {hasPlain && <TabsTrigger value="plain">Plain text</TabsTrigger>}
         {hasHtml && <TabsTrigger value="safe">Safe HTML</TabsTrigger>}
         {hasHtml && <TabsTrigger value="full">Full HTML</TabsTrigger>}
@@ -104,6 +110,12 @@ export function MessageBody({
       {clearestText !== null && (
         <TabsContent value="text">
           <PlainTextView text={clearestText} />
+        </TabsContent>
+      )}
+
+      {hasHtml && (
+        <TabsContent value="md">
+          <PlainTextView text={markdownContent!} />
         </TabsContent>
       )}
 

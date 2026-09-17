@@ -12,6 +12,7 @@ describe("resolveInitialView", () => {
 
   test("reuses the remembered choice when it's available for this message", () => {
     expect(resolveInitialView("text", { text: true, plain: true, html: true })).toBe("text");
+    expect(resolveInitialView("md", { text: true, plain: true, html: true })).toBe("md");
     expect(resolveInitialView("plain", { text: true, plain: true, html: true })).toBe("plain");
     expect(resolveInitialView("safe", { text: true, plain: true, html: true })).toBe("safe");
   });
@@ -27,5 +28,7 @@ describe("resolveInitialView", () => {
     expect(resolveInitialView("text", { text: false, plain: false, html: true })).toBe("safe");
     // Remembered "full" downgrades to "safe", but even Safe HTML isn't available (no HTML at all).
     expect(resolveInitialView("full", { text: true, plain: true, html: false })).toBe("plain");
+    // Remembered "md", but this message has no HTML at all.
+    expect(resolveInitialView("md", { text: true, plain: true, html: false })).toBe("plain");
   });
 });

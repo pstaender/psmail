@@ -176,6 +176,13 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(screen.getByText("Reply")).toBeTruthy();
     expect(screen.getByText("Delete")).toBeTruthy();
 
+    // MD tab sits between Text and Plain text, and shows the HTML converted to Markdown.
+    const tabs = screen.getAllByRole("tab").map(t => t.textContent);
+    expect(tabs.indexOf("Text")).toBeLessThan(tabs.indexOf("MD"));
+    expect(tabs.indexOf("MD")).toBeLessThan(tabs.indexOf("Plain text"));
+    await userEvent.click(screen.getByRole("tab", { name: "MD" }));
+    await waitFor(() => expect(screen.getByText(/\*\*from\*\*/)).toBeTruthy());
+
     // Reply opens the compose dialog with the MarkdownEditor pre-filled with the quoted original.
     await userEvent.click(screen.getByText("Reply"));
     expect(await screen.findByText("New message")).toBeTruthy();
