@@ -84,6 +84,17 @@ bun run cli account add --user <username> \
 bun run cli sync me@example.com --user <username> [--folder INBOX]
 ```
 
+## Testing the webclient with real sample mail
+
+Drop `.eml` files into `testmails/<folder>/` (e.g. `testmails/inbox/*.eml` — a folder name of `inbox` maps to `INBOX`, anything else maps to an IMAP folder of that name) and run:
+
+```bash
+bun run dev            # in one terminal — the API server must be running
+bun run test:mailbox   # in another — add --reset to start from a clean slate on re-runs
+```
+
+This starts Greenmail (via `docker compose -f docker/greenmail.yml up -d`, or reuses it if already running), appends each `.eml` as-is (headers, dates, everything — not resent, so nothing gets rewritten) into the matching mailbox, creates/reuses a P.S.Mail account pointed at it (`testmails@example.local` under the `default` user, both overridable with `--account`/`--user`), and triggers a sync. Then just open the webclient and sign in as `default`. `testmails/` is gitignored — real email content shouldn't end up in version control.
+
 Passwords can be passed with `--password`/`--imap-password`/`--smtp-password`, via `PSMAIL_PASSWORD`/`PSMAIL_IMAP_PASSWORD`/`PSMAIL_SMTP_PASSWORD` env vars, or you'll be prompted interactively. `sync` prints live progress (`Downloading email 3/43254`).
 
 ## Tests

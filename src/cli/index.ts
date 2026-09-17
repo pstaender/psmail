@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { ApiClient, CliApiError } from "./client";
 import { parseFlags, promptHidden } from "./args";
+import { renderProgress } from "./progress";
 
 async function resolvePassword(flags: Record<string, string | boolean>, flagName: string, envVar: string, promptText: string) {
   const flagValue = flags[flagName];
@@ -57,14 +58,6 @@ async function cmdAccountAdd(argv: string[]) {
   });
 
   console.log(`Created account #${account.id} "${account.email}"`);
-}
-
-function renderProgress(current: number, total: number) {
-  const width = 30;
-  const ratio = total > 0 ? current / total : 0;
-  const filled = Math.round(width * ratio);
-  const bar = "#".repeat(filled) + "-".repeat(width - filled);
-  process.stdout.write(`\r[${bar}] Downloading email ${current}/${total}`);
 }
 
 async function cmdSync(argv: string[]) {

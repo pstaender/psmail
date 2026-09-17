@@ -8,6 +8,7 @@
     "start": "NODE_ENV=production bun src/server/main.ts",
     "build": "bun run build.ts",
     "cli": "bun src/cli/index.ts",
+    "test:mailbox": "bun run scripts/setup-test-mailbox.ts",
     "test": "bun test tests/unit tests/integration",
     "test:frontend": "bun test --preload ./tests/setup/happydom.ts tests/frontend",
     "test:all": "bun run test && bun run test:frontend",

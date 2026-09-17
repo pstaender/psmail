@@ -56,8 +56,16 @@ export class ApiClient {
     return this.request<{ id: number; username: string }[]>("GET", "/api/users");
   }
 
+  listAccounts() {
+    return this.request<{ id: number; email: string }[]>("GET", "/api/accounts");
+  }
+
   createAccount(input: Record<string, unknown>) {
     return this.request<{ id: number; email: string }>("POST", "/api/accounts", input);
+  }
+
+  deleteAccount(accountEmail: string) {
+    return this.request<void>("DELETE", `/api/accounts/${encodeURIComponent(accountEmail)}`);
   }
 
   triggerDownload(accountEmail: string, folder?: string) {
