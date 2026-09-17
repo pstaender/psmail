@@ -1,6 +1,6 @@
 import Defuddle from "defuddle";
 import TurndownService from "turndown";
-import { stripAllQueryParams } from "./urls";
+import { stripTrackingParams } from "./trackingParams";
 
 /** Strips any stray HTML tags from a value that's supposed to already be plain text, decoding entities along the way. */
 function stripHtmlTags(text: string): string {
@@ -75,7 +75,7 @@ function createTurndownService(): TurndownService {
       const href = (node as HTMLAnchorElement).getAttribute("href");
       if (!href || isIrrelevantLinkText(text)) return text;
 
-      const cleaned = stripAllQueryParams(href);
+      const cleaned = stripTrackingParams(href);
       if (!/^https?:\/\//i.test(cleaned)) return text;
 
       return `[${text}](${cleaned})`;

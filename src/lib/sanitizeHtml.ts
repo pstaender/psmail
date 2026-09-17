@@ -1,5 +1,5 @@
 import DOMPurify from "dompurify";
-import { stripAllQueryParams } from "./urls";
+import { stripTrackingParams } from "./trackingParams";
 
 const BASE_FORBID_TAGS = ["script", "iframe", "object", "embed", "form", "base", "link", "meta"];
 
@@ -7,7 +7,7 @@ function rewriteLinks(root: Element) {
   root.querySelectorAll("a[href]").forEach(a => {
     const href = a.getAttribute("href");
     if (!href) return;
-    a.setAttribute("href", stripAllQueryParams(href));
+    a.setAttribute("href", stripTrackingParams(href));
     a.setAttribute("target", "_blank");
     a.setAttribute("rel", "noopener noreferrer nofollow");
   });
@@ -44,7 +44,7 @@ function blockExternalResources(root: Element) {
 export interface SanitizeOptions {
   /** When false (default), remote images/backgrounds are stripped and a placeholder marker is left instead. */
   allowExternalContent?: boolean;
-  /** When false (default), all query params are stripped from http(s) link hrefs. Safe-HTML always does this; Full-HTML leaves links untouched to show the email "as-is". */
+  /** When false (default), known tracking query params are stripped from http(s) link hrefs. Safe-HTML always does this; Full-HTML leaves links untouched to show the email "as-is". */
   stripLinkTracking?: boolean;
 }
 
@@ -53,7 +53,7 @@ export interface SanitizeOptions {
  * and dangerous embeds (DOMPurify defaults + an explicit forbid list) since
  * no legitimate email needs to run script in the reader — that applies to
  * both the "safe" and "full" view. What differs between the two is whether
- * external images/backgrounds are blocked and whether link query params
+ * external images/backgrounds are blocked and whether link tracking params
  * are stripped.
  */
 export function sanitizeEmailHtml(html: string, options: SanitizeOptions = {}): string {
