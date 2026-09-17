@@ -120,3 +120,11 @@ It's skipped by default.
 ## Stack
 
 Bun, React 19, TypeScript, shadcn/Tailwind, `bun:sqlite`, [imapflow](https://github.com/postalsys/imapflow), [nodemailer](https://nodemailer.com/), [mailparser](https://nodemailer.com/extras/mailparser/), [DOMPurify](https://github.com/cure53/DOMPurify). See `CLAUDE.md` for conventions.
+
+## Local testing
+
+Place test email in folder `./testmails/inbox`, then:
+
+* `podman compose -f docker/greenmail.yml up`
+* `bun run dev`
+* `bun run test:mailbox`

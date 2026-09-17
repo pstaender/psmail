@@ -86,12 +86,12 @@ export function ComposeDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-xl lg:max-w-[50rem]">
         <DialogHeader>
           <DialogTitle>New message</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-3">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <div className="space-y-1.5">
