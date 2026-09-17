@@ -3,6 +3,7 @@ import { ImageOff, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { sanitizeEmailHtml } from "@/lib/sanitizeHtml";
+import { buildClearestText } from "@/lib/textView";
 import { HtmlFrame } from "./HtmlFrame";
 import type { EmailRecord } from "../../server/types";
 
@@ -18,6 +19,11 @@ export function MessageBody({ email }: { email: EmailRecord }) {
   const hasHtml = !!email.htmlText;
   const hasPlain = !!email.plainText;
   const defaultTab = hasHtml ? "safe" : "plain";
+
+  const clearestText = useMemo(
+    () => buildClearestText({ plainText: email.plainText, htmlText: email.htmlText }),
+    [email.plainText, email.htmlText]
+  );
 
   const mightHaveRemoteImages = useMemo(() => (email.htmlText ? HAS_REMOTE_IMG.test(email.htmlText) : false), [email.htmlText]);
 
@@ -41,10 +47,17 @@ export function MessageBody({ email }: { email: EmailRecord }) {
   return (
     <Tabs key={email.id} defaultValue={defaultTab} className="gap-0">
       <TabsList className="mx-4 mt-3 w-fit">
+        {clearestText !== null && <TabsTrigger value="text">Text</TabsTrigger>}
         {hasPlain && <TabsTrigger value="plain">Plain text</TabsTrigger>}
         {hasHtml && <TabsTrigger value="safe">Safe HTML</TabsTrigger>}
         {hasHtml && <TabsTrigger value="full">Full HTML</TabsTrigger>}
       </TabsList>
+
+      {clearestText !== null && (
+        <TabsContent value="text">
+          <PlainTextView text={clearestText} />
+        </TabsContent>
+      )}
 
       {hasPlain && (
         <TabsContent value="plain">

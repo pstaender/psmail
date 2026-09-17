@@ -23,8 +23,9 @@ Open `http://localhost:3001` (configurable, see [Configuration](#configuration))
 - **Sidebar** — accounts and their folders (read live from IMAP), with unread counts from local sync state, a per-account "Sync now" button with live progress, and "Add account".
 - **Message list** — per-folder, with unread/flag indicators, attachment marker, and a snippet.
 - **Reading pane** — sender/recipient/subject/date header block, attachments with download, and three body views:
+  - **Text** — the clearest possible reading version. Uses the plain-text part if there is one (any stray HTML tags stripped); otherwise cleans up the HTML with [Defuddle](https://github.com/kepano/defuddle) (drops layout/boilerplate clutter — marketing email is almost all nested-table layout, which is exactly what its table-content extraction targets) and converts it to Markdown with [Turndown](https://github.com/mixmark-io/turndown). Images are dropped, boilerplate links (unsubscribe, privacy policy, view-in-browser, …) are de-linked to plain text, and invisible Unicode padding characters some templates hide preheader text in are stripped.
   - **Plain text**
-  - **Safe HTML** (default for HTML mail) — scripts/embeds always stripped; remote images and CSS backgrounds are blocked until you click "Show images"; link tracking params (`utm_*`, `fbclid`, `gclid`, …) are stripped from hrefs.
+  - **Safe HTML** (default for HTML mail) — scripts/embeds always stripped; remote images and CSS backgrounds are blocked until you click "Show images"; all query params are stripped from http(s) link hrefs (a curated tracking-param denylist missed too much in practice, so this is deliberately blunt).
   - **Full HTML** — shows the message as sent, remote content and links untouched. Scripts are still never executed (see below).
   - Both HTML views render inside a sandboxed `<iframe>` (no `allow-scripts`) as a defense-in-depth layer independent of the HTML sanitizer.
 - **Compose** — new/reply/forward, plain text body, file attachments, save draft or send.
