@@ -74,12 +74,12 @@ An email account's IMAP/SMTP passwords are encrypted at rest with a key derived 
 
 ## Search syntax
 
-Always case-insensitive; searches every account you own; bare words match the subject.
+Always case-insensitive; searches every account you own. A bare word matches if it's found in the subject **or** the sender (address or display name) — so `amazon gutscheine fahrrad` behaves like "sender has amazon, subject has gutscheine, subject has fahrrad" whenever that's how the words actually show up, even though the rule is really just "each word matches subject-or-sender", ANDed together.
 
-- `amazon gutschein` — subject contains "amazon" **and** contains "gutschein", independently, in any order.
-- `amazon*gutschein` — `*` is a wildcard, and unlike the bare-word AND above, this requires "amazon" to appear *before* "gutschein" (anything, or nothing, in between) — e.g. matches "Amazon Gutschein für dich", not just something starting with amazon and ending with gutschein.
+- `amazon gutschein` — matches (subject-or-sender has "amazon") **and** (subject-or-sender has "gutschein"), independently, in any order.
+- `amazon*gutschein` — `*` is a wildcard. Unlike the bare-word AND above, this requires "amazon" to appear *before* "gutschein" in the *same* field (anything, or nothing, in between) — e.g. matches a subject "Amazon Gutschein für dich", not just something starting with amazon and ending with gutschein.
 - `"Mountain Bike"` — quote a phrase to require it verbatim (as one contiguous phrase) instead of splitting it into independent AND'd words.
-- `from:someone@example.com` — filters by sender address or display name; combine with other terms, e.g. `from:someone@example.com amazon*gutschein`. Multiple `from:` terms are OR'd together.
+- `from:someone@example.com` — a dedicated, sender-only filter (never checks the subject), combinable with other terms, e.g. `from:someone@example.com amazon*gutschein`. Multiple `from:` terms are OR'd together.
 
 Implemented in `src/server/models/search.ts`; matching runs in JS (not SQL `LIKE`) so Unicode case-folding (e.g. `ä`/`Ä`) works correctly — stock SQLite's `LIKE`/`LOWER()` are ASCII-only without the ICU extension.
 

@@ -7,37 +7,37 @@ import { createEmail } from "../../src/server/models/emails";
 import { parseSearchQuery, searchEmails } from "../../src/server/models/search";
 
 describe("parseSearchQuery", () => {
-  test("splits bare words into independent AND'd subject terms", () => {
+  test("splits bare words into independent AND'd general terms", () => {
     expect(parseSearchQuery("amazon gutschein")).toEqual({
-      subjectTerms: ["amazon", "gutschein"],
+      generalTerms: ["amazon", "gutschein"],
       fromTerms: [],
     });
   });
 
   test("keeps a quoted phrase as one term instead of splitting it", () => {
     expect(parseSearchQuery('"Mountain Bike"')).toEqual({
-      subjectTerms: ["Mountain Bike"],
+      generalTerms: ["Mountain Bike"],
       fromTerms: [],
     });
   });
 
   test("extracts from: as a separate, ORed filter", () => {
     expect(parseSearchQuery("from:alice@example.com amazon*gutschein")).toEqual({
-      subjectTerms: ["amazon*gutschein"],
+      generalTerms: ["amazon*gutschein"],
       fromTerms: ["alice@example.com"],
     });
   });
 
   test("supports a quoted phrase after from:", () => {
     expect(parseSearchQuery('from:"jane doe" hello')).toEqual({
-      subjectTerms: ["hello"],
+      generalTerms: ["hello"],
       fromTerms: ["jane doe"],
     });
   });
 
   test("multiple from: terms are collected (matched with OR)", () => {
     expect(parseSearchQuery("from:alice@x.com from:bob@x.com")).toEqual({
-      subjectTerms: [],
+      generalTerms: [],
       fromTerms: ["alice@x.com", "bob@x.com"],
     });
   });
@@ -201,5 +201,95 @@ describe("searchEmails", () => {
     const page1 = searchEmails(db, user.id, "mountain", { limit: 1, offset: 0 });
     const page2 = searchEmails(db, user.id, "mountain", { limit: 1, offset: 1 });
     expect(page1.map(r => r.id)).not.toEqual(page2.map(r => r.id));
+  });
+
+  describe("bare terms also match the sender (not just the subject)", () => {
+    async function setupAmazonScenario(db: ReturnType<typeof createTestDb>) {
+      const user = await createUser(db, "carol", "pw");
+      const key = deriveEncryptionKey("pw", generateSalt());
+      const account = createAccount(
+        db,
+        user.id,
+        {
+          email: "me@example.com",
+          imapHost: "imap.example.com",
+          imapPort: 993,
+          imapSecure: true,
+          imapUsername: "me@example.com",
+          imapPassword: "x",
+          smtpHost: "smtp.example.com",
+          smtpPort: 465,
+          smtpSecure: true,
+          smtpUsername: "me@example.com",
+          smtpPassword: "x",
+        },
+        key
+      );
+
+      // "amazon" appears only in the sender address, nowhere in the subject.
+      createEmail(db, account.id, {
+        folder: "INBOX",
+        uid: 1,
+        isDraft: false,
+        subject: "Your order has shipped",
+        from: [{ address: "shipping@amazon.de" }],
+        date: "2024-02-01T00:00:00.000Z",
+      });
+      // Same: "amazon" only in the sender; subject has both other words.
+      createEmail(db, account.id, {
+        folder: "INBOX",
+        uid: 2,
+        isDraft: false,
+        subject: "Neues Fahrrad + Gutscheine warten auf dich",
+        from: [{ address: "deals@amazon.de" }],
+        date: "2024-02-02T00:00:00.000Z",
+      });
+      // Unrelated: no "amazon" anywhere.
+      createEmail(db, account.id, {
+        folder: "INBOX",
+        uid: 3,
+        isDraft: false,
+        subject: "Team lunch on Friday",
+        from: [{ address: "colleague@example.com" }],
+        date: "2024-02-03T00:00:00.000Z",
+      });
+
+      return { user };
+    }
+
+    test("a bare word alone matches sender-only occurrences, not just the subject", async () => {
+      const db = createTestDb();
+      const { user } = await setupAmazonScenario(db);
+
+      const results = searchEmails(db, user.id, "amazon");
+      expect(results).toHaveLength(2);
+      expect(results.map(r => r.subject).sort()).toEqual(
+        ["Neues Fahrrad + Gutscheine warten auf dich", "Your order has shipped"].sort()
+      );
+    });
+
+    test('"amazon gutscheine fahrrad" = from has amazon AND subject has gutscheine AND subject has fahrrad', async () => {
+      const db = createTestDb();
+      const { user } = await setupAmazonScenario(db);
+
+      const results = searchEmails(db, user.id, "amazon gutscheine fahrrad");
+      expect(results).toHaveLength(1);
+      expect(results[0]!.subject).toBe("Neues Fahrrad + Gutscheine warten auf dich");
+    });
+
+    test("still requires every word to match — a word absent from both subject and sender excludes it", async () => {
+      const db = createTestDb();
+      const { user } = await setupAmazonScenario(db);
+
+      expect(searchEmails(db, user.id, "amazon lunch")).toHaveLength(0);
+    });
+
+    test("explicit from: stays sender-only and doesn't start matching the subject", async () => {
+      const db = createTestDb();
+      const { user } = await setupAmazonScenario(db);
+
+      // "fahrrad" only appears in a subject, never in any sender — from:fahrrad must match nothing.
+      expect(searchEmails(db, user.id, "from:fahrrad")).toHaveLength(0);
+    });
   });
 });

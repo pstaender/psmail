@@ -14,7 +14,7 @@ export interface SearchResult {
 }
 
 interface ParsedQuery {
-  subjectTerms: string[];
+  generalTerms: string[];
   fromTerms: string[];
 }
 
@@ -38,24 +38,26 @@ function tokenizeQuery(query: string): string[] {
 }
 
 /**
- * Parses a search query into subject terms (ANDed — a bare "amazon
- * gutschein" means "contains amazon AND contains gutschein", independently
- * of order) and `from:` terms (ORed). Each term supports `*` as a wildcard;
- * a term with no `*` implicitly matches anywhere, i.e. is wrapped as
- * `*term*`. Quoting a phrase with `"..."` keeps it as a single term instead
- * of splitting it into separate AND'd words.
+ * Parses a search query into general terms (ANDed — a bare "amazon
+ * gutschein" means "matches amazon AND matches gutschein", independently
+ * of order; each term matches if it's found in *either* the subject or the
+ * sender, so a bare "amazon" finds mail from amazon.de even when the
+ * subject doesn't say "amazon") and `from:` terms (ORed, sender-only). Each
+ * term supports `*` as a wildcard; a term with no `*` implicitly matches
+ * anywhere, i.e. is wrapped as `*term*`. Quoting a phrase with `"..."` keeps
+ * it as a single term instead of splitting it into separate AND'd words.
  */
 export function parseSearchQuery(query: string): ParsedQuery {
-  const subjectTerms: string[] = [];
+  const generalTerms: string[] = [];
   const fromTerms: string[] = [];
 
   for (const token of tokenizeQuery(query)) {
     const fromMatch = /^from:(.+)$/i.exec(token);
     if (fromMatch) fromTerms.push(fromMatch[1]!);
-    else subjectTerms.push(token);
+    else generalTerms.push(token);
   }
 
-  return { subjectTerms, fromTerms };
+  return { generalTerms, fromTerms };
 }
 
 /**
@@ -123,14 +125,19 @@ export interface SearchOptions {
 
 /**
  * Searches every email across every account the given user owns — not just
- * the currently selected account/folder. Defaults to matching the subject;
- * combine with `from:addr` to also filter by sender. Always case-insensitive.
+ * the currently selected account/folder. A bare term matches if it's found
+ * in the subject OR the sender (so `amazon gutscheine fahrrad` behaves like
+ * "from has amazon, subject has gutscheine, subject has fahrrad" whenever
+ * "amazon" only shows up as a sender and the other words only show up in
+ * the subject — but it's really just "each word matches subject-or-from",
+ * ANDed together). `from:addr` is a dedicated, sender-only, OR'd filter on
+ * top of that. Always case-insensitive.
  */
 export function searchEmails(db: Database, userId: number, query: string, options: SearchOptions = {}): SearchResult[] {
-  const { subjectTerms, fromTerms } = parseSearchQuery(query);
-  if (subjectTerms.length === 0 && fromTerms.length === 0) return [];
+  const { generalTerms, fromTerms } = parseSearchQuery(query);
+  if (generalTerms.length === 0 && fromTerms.length === 0) return [];
 
-  const subjectRegexes = subjectTerms.map(wildcardToRegExp);
+  const generalRegexes = generalTerms.map(wildcardToRegExp);
   const fromRegexes = fromTerms.map(wildcardToRegExp);
 
   const rows = db
@@ -150,12 +157,10 @@ export function searchEmails(db: Database, userId: number, query: string, option
 
   for (const row of rows) {
     const subject = row.subject ?? "";
-    if (!subjectRegexes.every(re => re.test(subject))) continue;
+    const fromText = addressSearchText(parseAddresses(row.from_addr));
 
-    if (fromRegexes.length > 0) {
-      const fromText = addressSearchText(parseAddresses(row.from_addr));
-      if (!fromRegexes.some(re => re.test(fromText))) continue;
-    }
+    if (!generalRegexes.every(re => re.test(subject) || re.test(fromText))) continue;
+    if (fromRegexes.length > 0 && !fromRegexes.some(re => re.test(fromText))) continue;
 
     results.push(toSearchResult(row));
     if (results.length >= offset + limit) break;
