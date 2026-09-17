@@ -75,6 +75,16 @@ const SECOND_EMAIL = {
   htmlText: "<p>Hi <b>from</b> Bob</p>",
 };
 
+const THIRD_EMAIL = {
+  ...EMAIL,
+  id: 12,
+  uid: 3,
+  subject: "Third message",
+  from: [{ name: "Carol", address: "carol@example.com" }],
+  plainText: "Hi from Carol",
+  htmlText: "<p>Hi <b>from</b> Carol</p>",
+};
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
@@ -93,13 +103,18 @@ function installMockFetch() {
     }
     if (method === "GET" && path === "/api/accounts") return jsonResponse([ACCOUNT]);
     if (method === "GET" && path === "/api/accounts/me%40example.com/folders") return jsonResponse(FOLDERS);
-    if (method === "GET" && path === "/api/accounts/me%40example.com/emails") return jsonResponse([EMAIL, SECOND_EMAIL]);
+    if (method === "GET" && path === "/api/accounts/me%40example.com/emails") {
+      return jsonResponse([EMAIL, SECOND_EMAIL, THIRD_EMAIL]);
+    }
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse(EMAIL);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse(SECOND_EMAIL);
+    if (method === "GET" && path === "/api/accounts/me%40example.com/emails/12") return jsonResponse(THIRD_EMAIL);
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse({ ...EMAIL, isRead: true });
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse({ ...SECOND_EMAIL, isRead: true });
+    if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/12") return jsonResponse({ ...THIRD_EMAIL, isRead: true });
     if (method === "DELETE" && path === "/api/accounts/me%40example.com/emails/10") return new Response(null, { status: 204 });
     if (method === "DELETE" && path === "/api/accounts/me%40example.com/emails/11") return new Response(null, { status: 204 });
+    if (method === "DELETE" && path === "/api/accounts/me%40example.com/emails/12") return new Response(null, { status: 204 });
     if (method === "GET" && path === "/api/search") {
       // The mock doesn't replicate real matching (that's covered by backend tests) —
       // it just returns a canned hit so the UI wiring (fetch -> render -> select) is exercised.
@@ -269,5 +284,33 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
     await waitFor(() => expect(screen.queryByText("Hello there")).toBeNull());
     expect(screen.queryByText("Second message")).toBeNull();
+  });
+
+  test("Shift+click selects a range of messages, anchored at the last plain/Ctrl click", async () => {
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    const firstRow = await screen.findByText("Hello there");
+    const secondRow = await screen.findByText("Second message");
+    const thirdRow = await screen.findByText("Third message");
+
+    // Plain click sets the anchor (and opens the message) without entering multi-select.
+    await userEvent.click(firstRow);
+    await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(0));
+    expect(screen.queryByText(/selected/)).toBeNull();
+
+    // Shift+click the third message selects the whole range: first, second, and third.
+    fireEvent.click(thirdRow, { shiftKey: true });
+    await waitFor(() => expect(screen.getByText("3 selected")).toBeTruthy());
+
+    // Shift+click the second message shrinks the range back to the same fixed anchor (first).
+    fireEvent.click(secondRow, { shiftKey: true });
+    await waitFor(() => expect(screen.getByText("2 selected")).toBeTruthy());
+
+    // The reading pane never changed — Shift+click only affects the bulk-action selection.
+    expect(screen.getAllByText("Hello there").length).toBeGreaterThan(0);
   });
 });

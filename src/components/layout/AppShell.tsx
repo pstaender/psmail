@@ -42,6 +42,8 @@ export function AppShell() {
   const [selectedEmailId, setSelectedEmailId] = useState<number | null>(null);
   // Checked via Cmd/Ctrl+click, for bulk actions — independent of selectedEmailId (the reading pane).
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  // The reference point a Shift+click range is measured from — the last plain- or Cmd/Ctrl-clicked message.
+  const [selectionAnchorId, setSelectionAnchorId] = useState<number | null>(null);
   const [pendingDeleteAccount, setPendingDeleteAccount] = useState<string | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeInitial, setComposeInitial] = useState<ComposeDraft | null>(null);
@@ -81,12 +83,32 @@ export function AppShell() {
     setSelectedFolder(folder);
     setSelectedEmailId(null);
     setSelectedIds(new Set());
+    setSelectionAnchorId(null);
   }
 
   // Plain click reads the message as usual (and drops any bulk selection, like every
-  // other mail client). Cmd/Ctrl+click instead toggles it in the bulk-action selection
-  // without touching the reading pane, so you can build a selection while still reading.
+  // other mail client). Cmd/Ctrl+click toggles it in the bulk-action selection without
+  // touching the reading pane, so you can build a selection while still reading. Shift+click
+  // selects every message between the anchor (the last plain- or Cmd/Ctrl-clicked one) and
+  // this one, replacing the current selection — the anchor itself doesn't move, so repeated
+  // Shift+clicks grow/shrink the range from the same starting point.
   function selectEmail(email: EmailRecord, event: React.MouseEvent) {
+    if (event.shiftKey) {
+      const ids = emails.map(e => e.id);
+      const anchorIndex = selectionAnchorId !== null ? ids.indexOf(selectionAnchorId) : -1;
+      const targetIndex = ids.indexOf(email.id);
+
+      if (anchorIndex === -1 || targetIndex === -1) {
+        setSelectedIds(new Set([email.id]));
+      } else {
+        const [start, end] = anchorIndex <= targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+        setSelectedIds(new Set(ids.slice(start, end + 1)));
+      }
+
+      if (selectionAnchorId === null) setSelectionAnchorId(email.id);
+      return;
+    }
+
     if (event.metaKey || event.ctrlKey) {
       setSelectedIds(prev => {
         const next = new Set(prev);
@@ -94,10 +116,13 @@ export function AppShell() {
         else next.add(email.id);
         return next;
       });
+      setSelectionAnchorId(email.id);
       return;
     }
+
     setSelectedIds(new Set());
     setSelectedEmailId(email.id);
+    setSelectionAnchorId(email.id);
   }
 
   // A search result can belong to a different account/folder than the one currently
@@ -108,6 +133,7 @@ export function AppShell() {
     setSelectedFolder(result.folder);
     setSelectedEmailId(result.id);
     setSelectedIds(new Set());
+    setSelectionAnchorId(null);
   }
 
   async function toggleFlag(email: EmailRecord) {
