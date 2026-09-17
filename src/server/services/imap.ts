@@ -28,9 +28,23 @@ export async function withImapClient<T>(creds: ImapCredentials, fn: (client: Ima
   }
 }
 
-export async function listFolders(client: ImapFlow): Promise<string[]> {
+export interface ImapFolder {
+  path: string;
+  name: string;
+  delimiter: string;
+  specialUse: string | null;
+  flags: string[];
+}
+
+export async function listFolders(client: ImapFlow): Promise<ImapFolder[]> {
   const list = await client.list();
-  return list.map(entry => entry.path);
+  return list.map(entry => ({
+    path: entry.path,
+    name: entry.name,
+    delimiter: entry.delimiter,
+    specialUse: entry.specialUse ?? null,
+    flags: Array.from(entry.flags ?? []),
+  }));
 }
 
 export interface FetchedMessage {

@@ -188,6 +188,23 @@ export interface ListEmailsOptions {
   offset?: number;
 }
 
+export interface FolderCount {
+  folder: string;
+  total: number;
+  unread: number;
+}
+
+/** Local (already-synced) message counts per folder, for badges in the folder tree. */
+export function getFolderCounts(db: Database, accountId: number): FolderCount[] {
+  const rows = db
+    .query<{ folder: string; total: number; unread: number }, [number]>(
+      `SELECT folder, COUNT(*) as total, SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END) as unread
+       FROM emails WHERE account_id = ? GROUP BY folder`
+    )
+    .all(accountId);
+  return rows;
+}
+
 export function listEmails(db: Database, accountId: number, options: ListEmailsOptions = {}): EmailRecord[] {
   const limit = options.limit ?? 50;
   const offset = options.offset ?? 0;

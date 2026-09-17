@@ -1,6 +1,6 @@
 # P.S.Mail
 
-A minimal, fast webmail client. This repository currently contains the **backend API server** (IMAP/SMTP sync, sqlite storage, CLI) — no frontend yet.
+A minimal, fast webmail client: React/shadcn webclient + Bun API server (IMAP/SMTP sync, sqlite storage, CLI).
 
 ## Install
 
@@ -8,14 +8,28 @@ A minimal, fast webmail client. This repository currently contains the **backend
 bun install
 ```
 
-## Run the API server
+## Run
 
 ```bash
-bun run server        # dev, with --hot reload
-bun run server:start   # production
+bun run dev     # webclient + API, with --hot reload
+bun run start   # production
 ```
 
-The server listens on `http://localhost:3001` by default (configurable, see [Configuration](#configuration)). On first boot it creates a default user (`username: default`, empty password).
+Open `http://localhost:3001` (configurable, see [Configuration](#configuration)). On first boot the server creates a default user (`username: default`, empty password) — pick it on the login screen to get in immediately.
+
+## Webclient
+
+- **Login** — pick a profile (or create one) and sign in. Session token is kept in `localStorage`.
+- **Sidebar** — accounts and their folders (read live from IMAP), with unread counts from local sync state, a per-account "Sync now" button with live progress, and "Add account".
+- **Message list** — per-folder, with unread/flag indicators, attachment marker, and a snippet.
+- **Reading pane** — sender/recipient/subject/date header block, attachments with download, and three body views:
+  - **Plain text**
+  - **Safe HTML** (default for HTML mail) — scripts/embeds always stripped; remote images and CSS backgrounds are blocked until you click "Show images"; link tracking params (`utm_*`, `fbclid`, `gclid`, …) are stripped from hrefs.
+  - **Full HTML** — shows the message as sent, remote content and links untouched. Scripts are still never executed (see below).
+  - Both HTML views render inside a sandboxed `<iframe>` (no `allow-scripts`) as a defense-in-depth layer independent of the HTML sanitizer.
+- **Compose** — new/reply/forward, plain text body, file attachments, save draft or send.
+
+Two known limitations worth knowing about: moving/deleting/flagging a message only updates the local database — there's no two-way sync pushing those changes back to the IMAP server yet; and sync only runs when you trigger it (no background scheduler, despite `downloadIntervalSeconds` existing in settings).
 
 ## Configuration
 
@@ -46,6 +60,7 @@ Accounts are addressed in the URL **by email address** (URL-encoded), e.g. `/api
 - `POST /api/auth/login`, `POST /api/auth/logout`
 - `GET/POST /api/users`, `GET/PATCH/DELETE /api/users/:id`
 - `GET/POST /api/accounts`, `GET/PATCH/DELETE /api/accounts/:email`
+- `GET /api/accounts/:email/folders` — live IMAP folder list, merged with local message counts
 - `GET/POST /api/accounts/:email/emails`, `GET/PATCH/DELETE /api/accounts/:email/emails/:id`
 - `POST /api/accounts/:email/emails/:id/send`
 - `PATCH /api/accounts/:email/emails/:id/move/:folderName`
@@ -56,7 +71,7 @@ An email account's IMAP/SMTP passwords are encrypted at rest with a key derived 
 
 ## CLI
 
-The CLI talks to a running API server over HTTP — the same API the future webclient will use — so start the server first.
+The CLI talks to a running API server over HTTP — the same API the webclient uses — so start the server first.
 
 ```bash
 bun run cli user create <username> [--password <pw>]
@@ -74,10 +89,13 @@ Passwords can be passed with `--password`/`--imap-password`/`--smtp-password`, v
 ## Tests
 
 ```bash
-bun test
+bun run test            # backend: unit + integration (in-memory sqlite, no external services)
+bun run test:frontend   # headless render smoke test (happy-dom + testing-library, mocked API)
+bun run test:all        # both
+bun run typecheck
 ```
 
-Unit and integration tests run against an in-memory sqlite db and don't need any external service — imapflow itself is mocked in `tests/unit/sync.test.ts`.
+`tests/unit/sync.test.ts` mocks imapflow, so backend tests need no network. `tests/frontend/app.test.tsx` mounts the real `<App/>` against a mocked `fetch` and drives it through login → account tree → message list → reading pane → compose/add-account dialogs — there's no browser available in this environment, so this is the substitute for manually clicking through it.
 
 A separate end-to-end test exercises real IMAP/SMTP against [Greenmail](https://github.com/greenmail-mail-test/greenmail) in Docker:
 
@@ -86,8 +104,8 @@ docker compose -f docker/greenmail.yml up -d
 RUN_IMAP_INTEGRATION=1 bun test tests/integration/imap-sync.test.ts
 ```
 
-It's skipped by default (and by a plain `bun test` run).
+It's skipped by default.
 
 ## Stack
 
-Built with [Bun](https://bun.com), TypeScript, `bun:sqlite`, [imapflow](https://github.com/postalsys/imapflow), [nodemailer](https://nodemailer.com/), and [mailparser](https://nodemailer.com/extras/mailparser/). See `CLAUDE.md` for conventions.
+Bun, React 19, TypeScript, shadcn/Tailwind, `bun:sqlite`, [imapflow](https://github.com/postalsys/imapflow), [nodemailer](https://nodemailer.com/), [mailparser](https://nodemailer.com/extras/mailparser/), [DOMPurify](https://github.com/cure53/DOMPurify). See `CLAUDE.md` for conventions.
