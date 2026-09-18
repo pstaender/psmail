@@ -263,7 +263,7 @@ describe("hasUidPlusCapability", () => {
 });
 
 describe("fetchRemoteFlags", () => {
-  test("opens the folder and fetches flags for exactly the given UIDs", async () => {
+  test("opens the folder and fetches flags via one min:max UID range, not a list of every UID", async () => {
     const { client, calls } = createFakeClient({
       fetchResults: [
         { uid: 1, flags: new Set(["\\Seen"]) },
@@ -275,7 +275,7 @@ describe("fetchRemoteFlags", () => {
 
     expect(calls).toEqual([
       { method: "mailboxOpen", args: ["INBOX"] },
-      { method: "fetch", args: [{ uid: "1,3" }, { uid: true, flags: true }] },
+      { method: "fetch", args: ["1:3", { uid: true, flags: true }, { uid: true }] },
     ]);
     expect(result).toEqual(
       new Map([

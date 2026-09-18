@@ -123,10 +123,10 @@ export async function fetchNewMessages(
     10_000
   );
   try {
-    for await (const message of client.fetch(
-      { uid: range },
-      { uid: true, size: true, source: true }
-    )) {
+    // A range *string* plus {uid: true}: passing `{ uid: range }` instead is a search query,
+    // which imapflow answers with UID SEARCH and then a UID FETCH listing every hit — an
+    // argument that grows with the mailbox until the server rejects it as too long.
+    for await (const message of client.fetch(range, { uid: true, size: true, source: true }, { uid: true })) {
       if (message.uid <= sinceUid) continue;
       messages.push({ uid: message.uid, size: message.size ?? 0, source: message.source as Buffer });
       bytes += message.size ?? 0;
@@ -215,7 +215,12 @@ export async function fetchRemoteFlags(client: ImapFlow, folder: string, uids: n
   if (uids.length === 0) return result;
 
   await client.mailboxOpen(folder);
-  for await (const message of client.fetch({ uid: uids.join(",") }, { uid: true, flags: true })) {
+  // A single min:max range string (not `{ uid: ... }`, which imapflow treats as a search whose
+  // hits get listed in the UID FETCH) — a list of thousands of UIDs makes servers reject the
+  // command ("Too long argument"). Extra UIDs inside the range
+  // that we don't track are harmless — the caller only looks up the UIDs it asked about.
+  const range = `${Math.min(...uids)}:${Math.max(...uids)}`;
+  for await (const message of client.fetch(range, { uid: true, flags: true }, { uid: true })) {
     const flags = message.flags ?? new Set<string>();
     result.set(message.uid, { seen: flags.has("\\Seen"), flagged: flags.has("\\Flagged") });
   }
