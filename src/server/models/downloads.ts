@@ -93,3 +93,13 @@ export function failDownloadJob(db: Database, id: number, error: string): Downlo
     .get(error, id);
   return toJob(row!);
 }
+
+/** Jobs run in-process, so any pending/running job found at startup was orphaned by a killed server. */
+export function failInterruptedDownloadJobs(db: Database): number {
+  return db
+    .query(
+      `UPDATE downloads SET status = 'failed', error = 'Interrupted by server restart',
+       finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE status IN ('pending', 'running')`
+    )
+    .run().changes;
+}

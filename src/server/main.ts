@@ -2,6 +2,7 @@ import index from "../index.html";
 import { getDb } from "./db/client";
 import { loadSettings } from "./config/settings";
 import { ensureDefaultUser } from "./models/users";
+import { failInterruptedDownloadJobs } from "./models/downloads";
 import { authRoutes } from "./routes/auth";
 import { usersRoutes } from "./routes/users";
 import { accountsRoutes } from "./routes/accounts";
@@ -14,6 +15,7 @@ export async function startServer() {
   const settings = await loadSettings();
   const db = getDb();
   await ensureDefaultUser(db);
+  failInterruptedDownloadJobs(db);
 
   const routes = {
     ...authRoutes(db),

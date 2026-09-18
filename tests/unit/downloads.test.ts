@@ -6,6 +6,7 @@ import { createAccount } from "../../src/server/models/accounts";
 import {
   completeDownloadJob,
   createDownloadJob,
+  failInterruptedDownloadJobs,
   failDownloadJob,
   getDownloadJob,
   listDownloadJobs,
@@ -105,5 +106,19 @@ describe("downloads (job queue) model", () => {
 
     const jobs = listDownloadJobs(db, account.id);
     expect(jobs.map(j => j.id)).toEqual([second.id, first.id]);
+  });
+
+  test("failInterruptedDownloadJobs frees an account whose job was orphaned by a killed server", async () => {
+    const db = createTestDb();
+    const account = await setupAccount(db);
+    const running = createDownloadJob(db, account.id, "INBOX");
+    startDownloadJob(db, running.id, 10);
+
+    expect(failInterruptedDownloadJobs(db)).toBe(1);
+
+    const after = getDownloadJob(db, running.id);
+    expect(after.status).toBe("failed");
+    expect(after.error).toContain("restart");
+    expect(() => createDownloadJob(db, account.id, "INBOX")).not.toThrow();
   });
 });
