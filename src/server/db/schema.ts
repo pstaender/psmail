@@ -81,6 +81,9 @@ CREATE TABLE IF NOT EXISTS emails (
 CREATE INDEX IF NOT EXISTS idx_emails_account_id ON emails(account_id);
 CREATE INDEX IF NOT EXISTS idx_emails_account_folder ON emails(account_id, folder);
 CREATE INDEX IF NOT EXISTS idx_emails_message_id ON emails(message_id);
+-- Serves the folder listing (WHERE account_id AND folder ORDER BY date DESC, id DESC LIMIT n) straight
+-- off the index: no sort of the whole folder, so paging through 5k+ messages stays cheap.
+CREATE INDEX IF NOT EXISTS idx_emails_folder_date ON emails(account_id, folder, date DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS attachments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,6 +98,19 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_attachments_email_id ON attachments(email_id);
+
+-- Recipient autocomplete: one row per (account, address), maintained as mail is stored (see models/contacts.ts).
+CREATE TABLE IF NOT EXISTS contacts (
+  account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  address TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  name_lc TEXT NOT NULL DEFAULT '',
+  from_count INTEGER NOT NULL DEFAULT 0,
+  cc_count INTEGER NOT NULL DEFAULT 0,
+  sent_count INTEGER NOT NULL DEFAULT 0,
+  last_used TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (account_id, address)
+) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS downloads (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -106,7 +106,7 @@ export function AppShell() {
     }
   }, [accounts, selectedAccountEmail]);
 
-  const { emails, loading: emailsLoading, refresh: refreshEmails, patchLocal, removeLocal } = useEmails(
+  const { emails, loading: emailsLoading, loadingMore, hasMore, loadMore, refresh: refreshEmails, patchLocal, removeLocal } = useEmails(
     selectedAccountEmail,
     selectedFolder
   );
@@ -549,6 +549,9 @@ export function AppShell() {
               <MessageList
                 emails={emails}
                 loading={emailsLoading}
+                hasMore={hasMore}
+                loadingMore={loadingMore}
+                onLoadMore={loadMore}
                 selectedId={selectedEmailId}
                 selectedIds={selectedIds}
                 folder={selectedFolder}

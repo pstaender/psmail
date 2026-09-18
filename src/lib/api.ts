@@ -23,6 +23,15 @@ export interface LoginResult {
   user: { id: number; username: string };
 }
 
+export interface Contact {
+  address: string;
+  name: string;
+  fromCount: number;
+  ccCount: number;
+  sentCount: number;
+  lastUsed: string;
+}
+
 export interface BulkResult {
   id: number;
   ok: boolean;
@@ -37,7 +46,7 @@ function enc(value: string): string {
 async function request<T>(
   method: string,
   path: string,
-  opts: { token?: string; body?: unknown; formData?: FormData } = {}
+  opts: { token?: string; body?: unknown; formData?: FormData; signal?: AbortSignal } = {}
 ): Promise<T> {
   const headers: Record<string, string> = {};
   if (opts.token) headers.authorization = `Bearer ${opts.token}`;
@@ -50,7 +59,7 @@ async function request<T>(
     payload = JSON.stringify(opts.body);
   }
 
-  const res = await fetch(path, { method, headers, body: payload });
+  const res = await fetch(path, { method, headers, body: payload, signal: opts.signal });
 
   if (!res.ok) {
     const data = await res.json().catch(() => ({ error: res.statusText }));
@@ -90,6 +99,8 @@ export const api = {
     if (opts.offset) params.set("offset", String(opts.offset));
     return request<EmailRecord[]>("GET", `/api/accounts/${enc(accountEmail)}/emails?${params}`, { token });
   },
+  suggestContacts: (token: string, accountEmail: string, query: string, signal?: AbortSignal) =>
+    request<Contact[]>("GET", `/api/accounts/${enc(accountEmail)}/contacts?${new URLSearchParams({ q: query })}`, { token, signal }),
   getEmail: (token: string, accountEmail: string, emailId: number) =>
     request<EmailRecord>("GET", `/api/accounts/${enc(accountEmail)}/emails/${emailId}`, { token }),
   createDraft: (token: string, accountEmail: string, input: EmailInput) =>

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "../../src/App";
 import type { Account } from "../../src/server/types";
@@ -122,6 +122,8 @@ let capturedCreateDraftBody: Record<string, unknown> | null = null;
 // Same, for PATCH .../emails/13 (DRAFT_EMAIL) — asserts that editing an existing draft updates
 // it in place instead of creating a new one.
 let capturedUpdateDraftBody: Record<string, unknown> | null = null;
+// Every limit/offset the paged-emails mock (pagedEmailCount) was asked for, in order.
+const pagedRequests: { limit: number; offset: number }[] = [];
 
 function installMockFetch(
   opts: {
@@ -129,6 +131,8 @@ function installMockFetch(
     uidPlusSupported?: boolean;
     accountOverrides?: Partial<Account>;
     extraUsers?: { id: number; username: string }[];
+    /** When set, GET .../emails serves this many generated INBOX messages, honoring limit/offset like the real API. */
+    pagedEmailCount?: number;
   } = {}
 ) {
   // A fresh mutable copy per test (installMockFetch runs in beforeEach), so a PATCH in one
@@ -136,6 +140,7 @@ function installMockFetch(
   let currentAccount = { ...ACCOUNT, ...opts.accountOverrides };
   capturedCreateDraftBody = null;
   capturedUpdateDraftBody = null;
+  pagedRequests.length = 0;
 
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
@@ -174,7 +179,30 @@ function installMockFetch(
     }
     if (method === "GET" && path === "/api/accounts/me%40example.com/folders") return jsonResponse(FOLDERS);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails") {
+      if (opts.pagedEmailCount !== undefined) {
+        const params = new URL(url, "http://localhost").searchParams;
+        const limit = Number(params.get("limit") ?? 50);
+        const offset = Number(params.get("offset") ?? 0);
+        const all = Array.from({ length: opts.pagedEmailCount }, (_, i) => ({
+          ...EMAIL,
+          id: 1000 + i,
+          uid: 1000 + i,
+          isRead: true,
+          subject: `Generated ${i}`,
+        }));
+        pagedRequests.push({ limit, offset });
+        return jsonResponse(all.slice(offset, offset + limit));
+      }
       return jsonResponse([EMAIL, SECOND_EMAIL, THIRD_EMAIL, DRAFT_EMAIL]);
+    }
+    if (method === "GET" && path === "/api/accounts/me%40example.com/contacts") {
+      const q = (new URL(url, "http://localhost").searchParams.get("q") ?? "").toLowerCase();
+      return jsonResponse(
+        [
+          { address: "alice@example.com", name: "Alice Anderson", fromCount: 3, ccCount: 0, sentCount: 1, lastUsed: NOW },
+          { address: "albert@example.com", name: "", fromCount: 0, ccCount: 1, sentCount: 0, lastUsed: NOW },
+        ].filter(c => c.address.startsWith(q))
+      );
     }
     if (method === "POST" && path === "/api/accounts/me%40example.com/emails") {
       const body = init?.body ? JSON.parse(init.body as string) : {};
@@ -980,5 +1008,75 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Explicitly marking it unread again bumps the badge back up, same way.
     await userEvent.click(screen.getByRole("button", { name: /mark unread/i }));
     await waitFor(() => expect(document.querySelector('[data-slot="badge"]')?.textContent).toBe("1"));
+  });
+
+  test("recipient fields suggest contacts while typing, and accepting one fills in the address", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(screen.getByRole("button", { name: /new/i }));
+    const to = (await screen.findByLabelText("To")) as HTMLInputElement;
+    await userEvent.type(to, "al");
+
+    const options = await screen.findAllByRole("option");
+    expect(options.map(o => o.textContent)).toEqual(["Alice Anderson alice@example.com", "albert@example.com"]);
+
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+    expect(to.value).toBe("albert@example.com, ");
+    expect(screen.queryByRole("option")).toBeNull();
+
+    // A second recipient: only the token after the last comma is completed, and the first isn't offered again.
+    await userEvent.type(to, "al");
+    const again = await screen.findAllByRole("option");
+    expect(again.map(o => o.textContent)).toEqual(["Alice Anderson alice@example.com"]);
+    await userEvent.click(again[0]!);
+    expect(to.value).toBe("albert@example.com, Alice Anderson <alice@example.com>, ");
+  });
+
+  test("reaching the bottom of the message list loads the next page", async () => {
+    installMockFetch({ pagedEmailCount: 250 });
+    const observers: { callback: IntersectionObserverCallback }[] = [];
+    const originalIO = globalThis.IntersectionObserver;
+    globalThis.IntersectionObserver = class {
+      constructor(callback: IntersectionObserverCallback) {
+        observers.push({ callback });
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+      takeRecords() {
+        return [];
+      }
+    } as unknown as typeof IntersectionObserver;
+
+    try {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await waitFor(() => expect(screen.getAllByText("Generated 0").length).toBeGreaterThan(0), { timeout: 3000 });
+      expect(screen.queryByText("Generated 100")).toBeNull();
+      expect(pagedRequests[0]).toEqual({ limit: 100, offset: 0 });
+
+      // The end-of-list marker scrolls into view.
+      const fire = () =>
+        act(() => {
+          const latest = observers.at(-1)!;
+          latest.callback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+        });
+      fire();
+      await waitFor(() => expect(screen.getAllByText("Generated 100").length).toBeGreaterThan(0));
+      expect(pagedRequests.at(-1)).toEqual({ limit: 100, offset: 100 });
+
+      fire();
+      await waitFor(() => expect(screen.getAllByText("Generated 249").length).toBeGreaterThan(0));
+      expect(pagedRequests.at(-1)).toEqual({ limit: 100, offset: 200 });
+
+      // 250 < 300: that was the last page, so the marker (and its observer) is gone — no further request.
+      const requestCount = pagedRequests.length;
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(pagedRequests.length).toBe(requestCount);
+    } finally {
+      globalThis.IntersectionObserver = originalIO;
+    }
   });
 });

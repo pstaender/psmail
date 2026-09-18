@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Loader2, Paperclip, Star } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,9 @@ function participantLabel(email: EmailRecord, folder: string): string {
 export function MessageList({
   emails,
   loading,
+  hasMore,
+  loadingMore,
+  onLoadMore,
   selectedId,
   selectedIds,
   folder,
@@ -25,6 +29,10 @@ export function MessageList({
 }: {
   emails: EmailRecord[];
   loading: boolean;
+  /** More messages exist beyond those loaded; reaching the end of the list then calls `onLoadMore`. */
+  hasMore: boolean;
+  loadingMore: boolean;
+  onLoadMore: () => void;
   /** The single message currently open in the reading pane. */
   selectedId: number | null;
   /** Messages checked for a bulk action (via Cmd/Ctrl+click) — independent of `selectedId`. */
@@ -36,6 +44,23 @@ export function MessageList({
   /** Double-clicking a draft opens it for editing directly, instead of just reading it. */
   onEditDraft: (email: EmailRecord) => void;
 }) {
+  const sentinelRef = useRef<HTMLLIElement>(null);
+  const onLoadMoreRef = useRef(onLoadMore);
+  onLoadMoreRef.current = onLoadMore;
+
+  // Fires whenever the end-of-list marker scrolls into (or near) view. Depends on `emails.length` so
+  // that, if a freshly loaded page still doesn't fill the viewport, the marker is re-observed and the
+  // next page is requested too.
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node || !hasMore || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) onLoadMoreRef.current();
+    }, { rootMargin: "300px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, emails.length]);
+
   if (loading && emails.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -95,6 +120,11 @@ export function MessageList({
             </button>
           </li>
         ))}
+        {hasMore && (
+          <li ref={sentinelRef} className="flex h-10 items-center justify-center text-muted-foreground">
+            {loadingMore && <Loader2 className="size-4 animate-spin" />}
+          </li>
+        )}
       </ul>
     </ScrollArea>
   );

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RecipientInput } from "./RecipientInput";
 import { MarkdownEditor, type MarkdownEditorHandle } from "./MarkdownEditor";
 import { api, type FolderInfo } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
@@ -20,6 +21,7 @@ export interface ComposeDraft {
   id?: number;
   to?: string;
   cc?: string;
+  bcc?: string;
   subject?: string;
   body?: string;
   inReplyTo?: string | null;
@@ -51,6 +53,7 @@ export function ComposeDialog({
   const editorRef = useRef<MarkdownEditorHandle>(null);
   const [to, setTo] = useState("");
   const [cc, setCc] = useState("");
+  const [bcc, setBcc] = useState("");
   const [showCc, setShowCc] = useState(false);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
@@ -65,7 +68,8 @@ export function ComposeDialog({
     if (open) {
       setTo(initial?.to ?? "");
       setCc(initial?.cc ?? "");
-      setShowCc(!!initial?.cc);
+      setBcc(initial?.bcc ?? "");
+      setShowCc(!!initial?.cc || !!initial?.bcc);
       setSubject(initial?.subject ?? "");
       setBody(initial?.body ?? "");
       setFiles([]);
@@ -97,6 +101,7 @@ export function ComposeDialog({
         from: [senderName ? { address: accountEmail, name: senderName } : { address: accountEmail }],
         to: parseAddressList(to),
         cc: parseAddressList(cc),
+        bcc: parseAddressList(bcc),
         subject,
         plainText: body,
         inReplyTo: initial?.inReplyTo ?? null,
@@ -141,20 +146,26 @@ export function ComposeDialog({
           <div className="flex items-end gap-2">
             <div className="flex-1 space-y-1.5">
               <Label htmlFor="compose-to">To</Label>
-              <Input id="compose-to" value={to} onChange={e => setTo(e.target.value)} placeholder="name@example.com" />
+              <RecipientInput id="compose-to" accountEmail={accountEmail} value={to} onChange={setTo} placeholder="name@example.com" />
             </div>
             {!showCc && (
               <Button type="button" variant="link" size="sm" onClick={() => setShowCc(true)}>
-                Cc
+                Cc/Bcc
               </Button>
             )}
           </div>
 
           {showCc && (
-            <div className="space-y-1.5">
-              <Label htmlFor="compose-cc">Cc</Label>
-              <Input id="compose-cc" value={cc} onChange={e => setCc(e.target.value)} />
-            </div>
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="compose-cc">Cc</Label>
+                <RecipientInput id="compose-cc" accountEmail={accountEmail} value={cc} onChange={setCc} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="compose-bcc">Bcc</Label>
+                <RecipientInput id="compose-bcc" accountEmail={accountEmail} value={bcc} onChange={setBcc} />
+              </div>
+            </>
           )}
 
           <div className="space-y-1.5">

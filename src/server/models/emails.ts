@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { recordContacts } from "./contacts";
 import { NotFoundError, type AttachmentRecord, type EmailAddress, type EmailRecord } from "../types";
 
 type SqlBindings = (string | number | null)[];
@@ -179,7 +180,17 @@ export function createEmail(db: Database, accountId: number, input: EmailInput):
       input.size ?? null
     );
 
-  return toEmail(row!);
+  const created = toEmail(row!);
+  if (!created.isDraft) recordContactsFor(db, accountId, created);
+  return created;
+}
+
+/** Feeds a stored (non-draft) message into the account's autocomplete contacts. */
+function recordContactsFor(db: Database, accountId: number, email: EmailRecord, forceOutgoing = false): void {
+  const own = db.query<{ email: string }, [number]>("SELECT email FROM accounts WHERE id = ?").get(accountId)?.email;
+  if (!own) return;
+  const outgoing = forceOutgoing || email.from.some(a => a.address?.toLowerCase() === own.toLowerCase());
+  recordContacts(db, accountId, own, email, outgoing);
 }
 
 export interface ListEmailsOptions {
@@ -205,6 +216,15 @@ export function getFolderCounts(db: Database, accountId: number): FolderCount[] 
   return rows;
 }
 
+/**
+ * Columns for the message list. Deliberately leaves out the heavy bodies (html_text, headers_raw,
+ * ...) — loading those for every row made listing a few thousand messages slow — and returns just the
+ * first 200 characters of plain_text as the snippet. The full message comes from getEmail().
+ */
+const LIST_COLUMNS = `id, account_id, folder, uid, is_draft, is_read, is_flagged, message_id, in_reply_to,
+  from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject, date, size, created_at, updated_at,
+  substr(plain_text, 1, 200) AS plain_text`;
+
 export function listEmails(db: Database, accountId: number, options: ListEmailsOptions = {}): EmailRecord[] {
   const limit = options.limit ?? 50;
   const offset = options.offset ?? 0;
@@ -212,12 +232,12 @@ export function listEmails(db: Database, accountId: number, options: ListEmailsO
   const rows = options.folder
     ? db
         .query<EmailRow, [number, string, number, number]>(
-          "SELECT * FROM emails WHERE account_id = ? AND folder = ? ORDER BY date DESC, id DESC LIMIT ? OFFSET ?"
+          `SELECT ${LIST_COLUMNS} FROM emails WHERE account_id = ? AND folder = ? ORDER BY date DESC, id DESC LIMIT ? OFFSET ?`
         )
         .all(accountId, options.folder, limit, offset)
     : db
         .query<EmailRow, [number, number, number]>(
-          "SELECT * FROM emails WHERE account_id = ? ORDER BY date DESC, id DESC LIMIT ? OFFSET ?"
+          `SELECT ${LIST_COLUMNS} FROM emails WHERE account_id = ? ORDER BY date DESC, id DESC LIMIT ? OFFSET ?`
         )
         .all(accountId, limit, offset);
 
@@ -339,7 +359,10 @@ export function updateEmail(db: Database, id: number, input: EmailInput): EmailR
       id
     );
 
-  return toEmail(row!);
+  const updated = toEmail(row!);
+  // A draft turning into a sent message is the moment its recipients become contacts.
+  if (existing.is_draft && !updated.isDraft) recordContactsFor(db, existing.account_id, updated, true);
+  return updated;
 }
 
 /**

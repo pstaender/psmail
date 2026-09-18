@@ -40,6 +40,7 @@ export function editDraft(email: EmailRecord): ComposeDraft {
     id: email.id,
     to: formatAddressList(email.to),
     cc: formatAddressList(email.cc),
+    bcc: formatAddressList(email.bcc),
     subject: email.subject ?? "",
     body: email.plainText ?? "",
     inReplyTo: email.inReplyTo,

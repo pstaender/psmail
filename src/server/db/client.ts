@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { getDatabasePath } from "../config/paths";
 import { SCHEMA_SQL } from "./schema";
 import { runMigrations } from "./migrations";
+import { rebuildContactsIfEmpty } from "../models/contacts";
 
 let instance: Database | null = null;
 
@@ -24,6 +25,7 @@ export function getDb(path?: string): Database {
   instance.exec("PRAGMA foreign_keys = ON;");
   instance.exec(SCHEMA_SQL);
   runMigrations(instance);
+  rebuildContactsIfEmpty(instance);
   return instance;
 }
 
