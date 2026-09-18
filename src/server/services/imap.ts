@@ -85,6 +85,13 @@ export interface FetchedMessage {
   source: Buffer;
 }
 
+export interface FetchHooks {
+  /** Called once the folder is open, with how many messages it holds in total. */
+  onOpened?: (exists: number) => void;
+  /** Called after each message finishes downloading, with the running count. */
+  onDownloaded?: (count: number) => void;
+}
+
 /**
  * Opens `folder` and fetches every message whose UID is greater than
  * `sinceUid`, in ascending order. Used for incremental sync.
@@ -93,10 +100,12 @@ export async function fetchNewMessages(
   client: ImapFlow,
   folder: string,
   sinceUid: number,
-  log: (message: string) => void = () => {}
+  log: (message: string) => void = () => {},
+  hooks: FetchHooks = {}
 ): Promise<{ mailbox: MailboxObject; messages: FetchedMessage[] }> {
   log(`opening folder "${folder}"`);
   const mailbox = await client.mailboxOpen(folder);
+  hooks.onOpened?.(mailbox.exists);
   log(`opened: ${mailbox.exists} message(s) in folder, uidNext=${mailbox.uidNext}, uidValidity=${mailbox.uidValidity}`);
 
   const messages: FetchedMessage[] = [];
@@ -121,6 +130,7 @@ export async function fetchNewMessages(
       if (message.uid <= sinceUid) continue;
       messages.push({ uid: message.uid, size: message.size ?? 0, source: message.source as Buffer });
       bytes += message.size ?? 0;
+      hooks.onDownloaded?.(messages.length);
     }
   } finally {
     clearInterval(heartbeat);

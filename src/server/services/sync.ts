@@ -2,10 +2,11 @@ import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { getEmailAttachmentsDir, sanitizeSegment } from "../config/paths";
 import { addAttachment, createEmail, deleteEmail, findEmailByUid, listSyncedRefs, updateEmail } from "../models/emails";
-import { completeDownloadJob, failDownloadJob, startDownloadJob, updateDownloadProgress } from "../models/downloads";
+import { completeDownloadJob, failDownloadJob, startDownloadJob, updateDownloadProgress, updateDownloadTotal } from "../models/downloads";
 import type { AccountRow } from "../models/accounts";
 import {
   fetchNewMessages,
+  type FetchHooks,
   fetchRemoteFlags as fetchRemoteFlagsFromServer,
   withImapClient,
   type FetchedMessage,
@@ -43,12 +44,13 @@ export interface SyncProgress {
 async function defaultFetchMessages(
   creds: ImapCredentials,
   folder: string,
-  sinceUid: number
+  sinceUid: number,
+  hooks?: FetchHooks
 ): Promise<{ messages: FetchedMessage[] }> {
   syncLog(`connecting to ${creds.host}:${creds.port}...`);
   return withImapClient(creds, client => {
     syncLog("connected and authenticated");
-    return fetchNewMessages(client, folder, sinceUid, message => syncLog(message));
+    return fetchNewMessages(client, folder, sinceUid, message => syncLog(message), hooks);
   });
 }
 
@@ -61,7 +63,7 @@ async function defaultFetchRemoteFlags(
   return withImapClient(creds, client => fetchRemoteFlagsFromServer(client, folder, uids));
 }
 
-type FetchMessagesFn = (creds: ImapCredentials, folder: string, sinceUid: number) => Promise<{ messages: FetchedMessage[] }>;
+type FetchMessagesFn = (creds: ImapCredentials, folder: string, sinceUid: number, hooks?: FetchHooks) => Promise<{ messages: FetchedMessage[] }>;
 type FetchRemoteFlagsFn = (creds: ImapCredentials, folder: string, uids: number[]) => Promise<Map<number, RemoteFlagState>>;
 
 export interface RunSyncOptions {
@@ -152,10 +154,23 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
 
     stage = `fetching messages newer than UID ${sinceUid}`;
     syncLog(`${tag}: ${stage}`);
-    const { messages } = await fetchMessages(imapCredentials, folder, sinceUid);
+    // While the (single, all-at-once) download runs, expose its progress on the job row: the
+    // total is only an estimate (messages in the folder minus those already stored) until the
+    // download ends, when it's replaced by the exact count.
+    let started = false;
+    const { messages } = await fetchMessages(imapCredentials, folder, sinceUid, {
+      onOpened: exists => {
+        started = true;
+        const alreadyStored = listSyncedRefs(db, account.id, folder).length;
+        startDownloadJob(db, downloadJobId, Math.max(exists - alreadyStored, 0));
+      },
+      onDownloaded: count => updateDownloadProgress(db, downloadJobId, count),
+    });
     syncLog(`${tag}: server returned ${messages.length} new message(s)`);
 
-    startDownloadJob(db, downloadJobId, messages.length);
+    if (started) updateDownloadTotal(db, downloadJobId, messages.length);
+    else startDownloadJob(db, downloadJobId, messages.length);
+    updateDownloadProgress(db, downloadJobId, 0);
     onProgress?.({ current: 0, total: messages.length });
 
     let downloaded = 0;

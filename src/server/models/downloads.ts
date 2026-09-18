@@ -70,6 +70,11 @@ export function startDownloadJob(db: Database, id: number, progressTotal: number
   return toJob(row!);
 }
 
+/** Corrects the total once it's known exactly, without resetting started_at like startDownloadJob would. */
+export function updateDownloadTotal(db: Database, id: number, total: number): void {
+  db.query("UPDATE downloads SET progress_total = ? WHERE id = ?").run(total, id);
+}
+
 export function updateDownloadProgress(db: Database, id: number, current: number): void {
   db.query("UPDATE downloads SET progress_current = ? WHERE id = ?").run(current, id);
 }

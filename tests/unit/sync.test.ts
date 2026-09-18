@@ -127,6 +127,38 @@ describe("runSync", () => {
     expect(job2.progressCurrent).toBe(3);
   });
 
+  test("exposes download progress on the job row while messages are still being downloaded", async () => {
+    const { db, user, account } = await setup();
+    const job = createDownloadJob(db, account.id, "INBOX");
+
+    const seenMidDownload: { status: string; current: number; total: number }[] = [];
+    await runSync({
+      db,
+      account,
+      username: user.username,
+      folder: "INBOX",
+      downloadJobId: job.id,
+      imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      fetchMessages: async (creds, folder, sinceUid, hooks) => {
+        hooks?.onOpened?.(3);
+        for (let count = 1; count <= 3; count++) {
+          hooks?.onDownloaded?.(count);
+          const row = getDownloadJob(db, job.id);
+          seenMidDownload.push({ status: row.status, current: row.progressCurrent, total: row.progressTotal });
+        }
+        return fakeFetchMessages(creds, folder, sinceUid);
+      },
+      fetchRemoteFlags: fakeFetchRemoteFlagsNoop,
+    });
+
+    expect(seenMidDownload).toEqual([
+      { status: "running", current: 1, total: 3 },
+      { status: "running", current: 2, total: 3 },
+      { status: "running", current: 3, total: 3 },
+    ]);
+    expect(getDownloadJob(db, job.id).status).toBe("completed");
+  });
+
   test("incremental sync only fetches messages newer than the highest stored uid", async () => {
     const { db, user, account } = await setup();
 
