@@ -4,12 +4,21 @@ import { getEmailAttachmentsDir, sanitizeSegment } from "../config/paths";
 import { addAttachment, createEmail, findEmailByUid } from "../models/emails";
 import { completeDownloadJob, failDownloadJob, startDownloadJob, updateDownloadProgress } from "../models/downloads";
 import type { AccountRow } from "../models/accounts";
-import { fetchNewMessages, withImapClient, type ImapCredentials } from "./imap";
+import { fetchNewMessages, withImapClient, type FetchedMessage, type ImapCredentials } from "./imap";
 import { parseMessage } from "./messageParser";
 
 export interface SyncProgress {
   current: number;
   total: number;
+}
+
+/** The real IMAP fetch — connects, opens `folder`, and pulls everything newer than `sinceUid`. */
+async function defaultFetchMessages(
+  creds: ImapCredentials,
+  folder: string,
+  sinceUid: number
+): Promise<{ messages: FetchedMessage[] }> {
+  return withImapClient(creds, client => fetchNewMessages(client, folder, sinceUid));
 }
 
 export interface RunSyncOptions {
@@ -20,6 +29,14 @@ export interface RunSyncOptions {
   downloadJobId: number;
   folder?: string;
   onProgress?: (progress: SyncProgress) => void;
+  /**
+   * Overridable for tests, so they can hand runSync canned messages as a plain function
+   * argument instead of reaching for bun:test's mock.module — which replaces a module for
+   * the rest of the test *run*, not just the file that called it (see the emailImapSync.test.ts
+   * suite, which needs the real withImapClient elsewhere in the same run to hit an actually-
+   * unreachable host on purpose). Defaults to the real IMAP fetch.
+   */
+  fetchMessages?: (creds: ImapCredentials, folder: string, sinceUid: number) => Promise<{ messages: FetchedMessage[] }>;
 }
 
 /**
@@ -30,7 +47,16 @@ export interface RunSyncOptions {
  * progress display).
  */
 export async function runSync(options: RunSyncOptions): Promise<{ downloaded: number }> {
-  const { db, account, username, imapCredentials, downloadJobId, folder = "INBOX", onProgress } = options;
+  const {
+    db,
+    account,
+    username,
+    imapCredentials,
+    downloadJobId,
+    folder = "INBOX",
+    onProgress,
+    fetchMessages = defaultFetchMessages,
+  } = options;
 
   try {
     const maxUidRow = db
@@ -40,7 +66,7 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
       .get(account.id, folder);
     const sinceUid = maxUidRow?.max_uid ?? 0;
 
-    const { messages } = await withImapClient(imapCredentials, client => fetchNewMessages(client, folder, sinceUid));
+    const { messages } = await fetchMessages(imapCredentials, folder, sinceUid);
 
     startDownloadJob(db, downloadJobId, messages.length);
     onProgress?.({ current: 0, total: messages.length });

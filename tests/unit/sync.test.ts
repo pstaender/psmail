@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import { deriveEncryptionKey, generateSalt } from "../../src/server/crypto/secre
 import { createAccount, getAccountRow } from "../../src/server/models/accounts";
 import { createDownloadJob, getDownloadJob } from "../../src/server/models/downloads";
 import { findEmailByUid, listEmails } from "../../src/server/models/emails";
+import { runSync } from "../../src/server/services/sync";
 
 function rawMessage(opts: { uid: number; subject: string; withAttachment?: boolean }): string {
   const lines = [
@@ -33,13 +34,14 @@ const FAKE_MESSAGES = [
   { uid: 3, source: Buffer.from(rawMessage({ uid: 3, subject: "Third" })) },
 ].map(m => ({ ...m, size: m.source.length }));
 
-mock.module("../../src/server/services/imap", () => ({
-  withImapClient: async (_creds: unknown, fn: (client: unknown) => Promise<unknown>) => fn({}),
-  fetchNewMessages: async (_client: unknown, _folder: string, sinceUid: number) => ({
-    mailbox: { uidNext: FAKE_MESSAGES.length + 1 },
-    messages: FAKE_MESSAGES.filter(m => m.uid > sinceUid),
-  }),
-}));
+// runSync takes its IMAP fetch as an injectable option specifically so tests can hand it canned
+// messages this way, as a plain function argument — rather than bun:test's mock.module, which
+// replaces a module for the rest of the test *run*, not just this file (that bit other,
+// unrelated tests before; see emailImapSync.test.ts, which needs the real withImapClient
+// elsewhere in the same run to hit an actually-unreachable host on purpose).
+const fakeFetchMessages = async (_creds: unknown, _folder: string, sinceUid: number) => ({
+  messages: FAKE_MESSAGES.filter(m => m.uid > sinceUid),
+});
 
 describe("runSync", () => {
   let configDir: string;
@@ -80,7 +82,6 @@ describe("runSync", () => {
   }
 
   test("downloads all new messages, persisting fields and attachments", async () => {
-    const { runSync } = await import("../../src/server/services/sync");
     const { db, user, account } = await setup();
 
     const job = createDownloadJob(db, account.id, "INBOX");
@@ -93,6 +94,7 @@ describe("runSync", () => {
       folder: "INBOX",
       downloadJobId: job.id,
       imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      fetchMessages: fakeFetchMessages,
       onProgress: p => progressUpdates.push(p),
     });
 
@@ -115,7 +117,6 @@ describe("runSync", () => {
   });
 
   test("incremental sync only fetches messages newer than the highest stored uid", async () => {
-    const { runSync } = await import("../../src/server/services/sync");
     const { db, user, account } = await setup();
 
     const job1 = createDownloadJob(db, account.id, "INBOX");
@@ -126,6 +127,7 @@ describe("runSync", () => {
       folder: "INBOX",
       downloadJobId: job1.id,
       imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      fetchMessages: fakeFetchMessages,
     });
 
     const job2 = createDownloadJob(db, account.id, "INBOX");
@@ -136,6 +138,7 @@ describe("runSync", () => {
       folder: "INBOX",
       downloadJobId: job2.id,
       imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      fetchMessages: fakeFetchMessages,
     });
 
     // All 3 fake messages already exist locally now, so nothing new to persist.

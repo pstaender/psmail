@@ -82,3 +82,51 @@ export async function fetchNewMessages(
   messages.sort((a, b) => a.uid - b.uid);
   return { mailbox, messages };
 }
+
+export interface FlagChanges {
+  seen?: boolean;
+  flagged?: boolean;
+}
+
+/** Adds/removes \Seen and/or \Flagged on one message, by UID. Only the flags actually present in `changes` are touched. */
+export async function setMessageFlags(client: ImapFlow, folder: string, uid: number, changes: FlagChanges): Promise<void> {
+  await client.mailboxOpen(folder);
+
+  const toAdd: string[] = [];
+  const toRemove: string[] = [];
+  if (changes.seen === true) toAdd.push("\\Seen");
+  if (changes.seen === false) toRemove.push("\\Seen");
+  if (changes.flagged === true) toAdd.push("\\Flagged");
+  if (changes.flagged === false) toRemove.push("\\Flagged");
+
+  if (toAdd.length > 0) {
+    const ok = await client.messageFlagsAdd([uid], toAdd, { uid: true });
+    if (!ok) throw new Error(`Failed to add flags [${toAdd.join(", ")}] to UID ${uid} in "${folder}"`);
+  }
+  if (toRemove.length > 0) {
+    const ok = await client.messageFlagsRemove([uid], toRemove, { uid: true });
+    if (!ok) throw new Error(`Failed to remove flags [${toRemove.join(", ")}] from UID ${uid} in "${folder}"`);
+  }
+}
+
+/** Permanently deletes one message by UID: flags it \Deleted and expunges (imapflow's messageDelete does both). */
+export async function deleteMessage(client: ImapFlow, folder: string, uid: number): Promise<void> {
+  await client.mailboxOpen(folder);
+  const ok = await client.messageDelete([uid], { uid: true });
+  if (!ok) throw new Error(`Failed to delete UID ${uid} in "${folder}"`);
+}
+
+export interface MoveResult {
+  /** The message's new UID in the destination folder, when the server reported one (most do, via UIDPLUS/COPYUID). */
+  newUid: number | null;
+}
+
+/** Moves one message by UID into `destination` (via IMAP MOVE, or imapflow's COPY+expunge fallback if the server lacks it). */
+export async function moveMessage(client: ImapFlow, folder: string, uid: number, destination: string): Promise<MoveResult> {
+  await client.mailboxOpen(folder);
+  const result = await client.messageMove([uid], destination, { uid: true });
+  if (!result) throw new Error(`Failed to move UID ${uid} from "${folder}" to "${destination}"`);
+
+  const newUid = result.uidMap?.get(uid);
+  return { newUid: newUid !== undefined ? Number(newUid) : null };
+}

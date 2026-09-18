@@ -321,12 +321,25 @@ export function updateEmail(db: Database, id: number, input: EmailInput): EmailR
   return toEmail(row!);
 }
 
-export function moveEmail(db: Database, id: number, folder: string): EmailRecord {
-  const row = db
-    .query<EmailRow, [string, number]>(
-      `UPDATE emails SET folder = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *`
-    )
-    .get(folder, id);
+/**
+ * `newUid` is only relevant when the move was also pushed to IMAP: a MOVE re-assigns the
+ * message a UID scoped to the destination folder, so the local row must follow along (else
+ * a later single-message IMAP action on it would target the wrong/nonexistent UID). Omit it
+ * for a local-only move (read-only account, or a draft that was never on the server).
+ */
+export function moveEmail(db: Database, id: number, folder: string, newUid?: number | null): EmailRecord {
+  const row =
+    newUid === undefined
+      ? db
+          .query<EmailRow, [string, number]>(
+            `UPDATE emails SET folder = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *`
+          )
+          .get(folder, id)
+      : db
+          .query<EmailRow, [string, number | null, number]>(
+            `UPDATE emails SET folder = ?, uid = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *`
+          )
+          .get(folder, newUid, id);
   if (!row) throw new NotFoundError(`Email ${id} not found`);
   return toEmail(row);
 }

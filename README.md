@@ -32,7 +32,9 @@ Open `http://localhost:3001` (configurable, see [Configuration](#configuration))
 - **Compose** — new/reply/forward, file attachments, save draft or send. The body field is [TinyMDE](https://github.com/jefago/tiny-markdown-editor) (no command bar — just inline markdown formatting as you type), still saved/sent as plain text markdown, restyled to look like plain markdown rather than a color-coded/WYSIWYG editor (`src/components/mail/tinyMarkdownEditor.css`, adapted from [bucketnotes](https://github.com/pstaender/bucketnotes/blob/main/src/tinyMarkdownEditor.css)).
 - **Search** — the box in the header searches subjects across *every* account you own at once (not just the selected one). Selecting a result switches the sidebar/reading pane to that message's account and folder without losing your place in the results. See [Search syntax](#search-syntax).
 
-Two known limitations worth knowing about: moving/deleting/flagging a message only updates the local database — there's no two-way sync pushing those changes back to the IMAP server yet; and sync only runs when you trigger it (no background scheduler, despite `downloadIntervalSeconds` existing in settings).
+Marking a message read/unread, moving it, or deleting it pushes that change to the account's IMAP server too (flag add/remove, MOVE, and a real EXPUNGE — not move-to-Trash), unless the account is marked read-only or the message has no IMAP UID yet (a draft that was never synced), in which case it stays local-only exactly as before. The push happens before the local database is updated, so a failed push (bad connection, server rejects the write) leaves local state untouched and surfaces an error in the UI, which rolls back its optimistic update.
+
+A few related things worth knowing about: this sync is one-way (local → IMAP) — flag/move/delete changes made from another mail client are never pulled back down; sent messages are never appended to the account's IMAP Sent folder, so they won't show up there in other clients; bulk actions open one IMAP connection per message rather than a pooled/reused one; and sync (pulling new messages) only runs when you trigger it (no background scheduler, despite `downloadIntervalSeconds` existing in settings).
 
 ## Configuration
 
@@ -73,7 +75,7 @@ Accounts are addressed in the URL **by email address** (URL-encoded), e.g. `/api
 
 An email account's IMAP/SMTP passwords are encrypted at rest with a key derived from the owning user's login password (scrypt + AES-256-GCM). The derived key lives only in server memory for the lifetime of the session — restarting the server means logging in again before account credentials can be decrypted (e.g. to sync or send).
 
-Accounts also have a `readOnly` flag (editable via "Account settings" in the sidebar, or `readOnly: true/false` in the account create/update body). It's meant to guarantee local changes (flags, moves, deletes) never get uploaded to that account's IMAP server — but there's currently no code path that uploads such changes at all (see the two-way-sync limitation above), so today the flag is a no-op in practice. It's stored now so a future two-way sync has it ready to check.
+Accounts also have a `readOnly` flag (editable via "Account settings" in the sidebar, or `readOnly: true/false` in the account create/update body). When set, mark-as-read/unread, move, and delete stay local-only — the IMAP push described above is skipped entirely, so the account's mailbox on the server is never modified.
 
 ## Search syntax
 

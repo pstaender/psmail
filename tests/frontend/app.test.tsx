@@ -92,7 +92,7 @@ function jsonResponse(body: unknown, status = 200) {
 
 const originalFetch = global.fetch;
 
-function installMockFetch() {
+function installMockFetch(opts: { failEmailPatch?: number } = {}) {
   // A fresh mutable copy per test (installMockFetch runs in beforeEach), so a PATCH in one
   // test can't leak into another, and so GET /api/accounts reflects a prior PATCH within a test.
   let currentAccount = { ...ACCOUNT };
@@ -101,6 +101,16 @@ function installMockFetch() {
     const url = typeof input === "string" ? input : input.toString();
     const method = init?.method ?? "GET";
     const path = url.split("?")[0]!;
+
+    // Simulates a failed IMAP push (e.g. the real backend's write to the mail server
+    // failing) for one specific email id, to test the frontend's rollback-on-failure path.
+    if (
+      opts.failEmailPatch !== undefined &&
+      method === "PATCH" &&
+      path === `/api/accounts/me%40example.com/emails/${opts.failEmailPatch}`
+    ) {
+      return jsonResponse({ error: "simulated IMAP failure" }, 502);
+    }
 
     if (method === "GET" && path === "/api/users") return jsonResponse([USER]);
     if (method === "POST" && path === "/api/auth/login") {
@@ -320,6 +330,33 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
     await waitFor(() => expect(screen.queryByText("Hello there")).toBeNull());
     expect(screen.queryByText("Second message")).toBeNull();
+  });
+
+  test("a failed IMAP push rolls back the optimistic flag toggle and shows an error", async () => {
+    // Overrides the default beforeEach mock so this one email's PATCH simulates a failed
+    // IMAP write (e.g. the account isn't read-only but the mail server rejected/dropped it).
+    installMockFetch({ failEmailPatch: SECOND_EMAIL.id });
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    // Toggle the star directly from the message list, without opening the message — opening
+    // it would fire its own (non-rolling-back) mark-as-read PATCH first and muddy the test.
+    const secondRow = (await screen.findByText("Second message")).closest("li")!;
+    const starToggle = secondRow.querySelector('[role="button"]') as HTMLElement;
+    expect(starToggle).toBeTruthy();
+
+    fireEvent.click(starToggle);
+
+    // Optimistic update applies immediately...
+    await waitFor(() => expect(secondRow.querySelector("svg.fill-yellow-400")).toBeTruthy());
+
+    // ...then rolls back once the (mocked) IMAP push fails, with the failure surfaced. The
+    // toast shows the server's own error message (from the mocked 502 body), not a fallback.
+    await waitFor(() => expect(screen.getByText("simulated IMAP failure")).toBeTruthy());
+    await waitFor(() => expect(secondRow.querySelector("svg.fill-yellow-400")).toBeNull());
   });
 
   test("Shift+click selects a range of messages, anchored at the last plain/Ctrl click", async () => {

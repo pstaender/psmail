@@ -88,10 +88,15 @@ export function AppShell() {
   const { email: selectedEmail, setEmail: setSelectedEmailDetail } = useEmailDetail(selectedAccountEmail, selectedEmailId);
 
   // Mark-as-read on open, like every other mail client. Patches both the folder-scoped list
-  // and the (separate) search results array, since a message can be open from either.
+  // and the (separate) search results array, since a message can be open from either. Unlike
+  // toggleRead (an explicit click), this doesn't roll back the optimistic local update on a
+  // failed IMAP push — flipping the message back to unread right after the user just opened
+  // and read it would be a confusing flicker. It does still surface the failure via toast.
   useEffect(() => {
     if (selectedEmail && !selectedEmail.isRead && selectedAccountEmail && token) {
-      api.updateEmail(token, selectedAccountEmail, selectedEmail.id, { isRead: true }).catch(() => {});
+      api.updateEmail(token, selectedAccountEmail, selectedEmail.id, { isRead: true }).catch(err => {
+        toast.error(errorMessage(err, "Failed to sync read status to the mail server"));
+      });
       patchLocal(selectedEmail.id, { isRead: true });
       patchSearchResult(selectedEmail.id, { isRead: true });
       setSelectedEmailDetail({ ...selectedEmail, isRead: true });
@@ -157,25 +162,51 @@ export function AppShell() {
     setSelectionAnchorId(null);
   }
 
+  function errorMessage(err: unknown, fallback: string): string {
+    return err instanceof Error ? err.message : fallback;
+  }
+
+  // Flag/move/delete now push to the account's IMAP server (unless it's read-only), so these
+  // calls can genuinely fail (bad connection, server rejects the write, ...) in a way they
+  // couldn't when they only touched the local database. The optimistic local update is rolled
+  // back on failure so the UI doesn't drift from what the server actually has.
   async function toggleFlag(email: EmailRecord) {
     if (!token || !selectedAccountEmail) return;
     const isFlagged = !email.isFlagged;
     patchLocal(email.id, { isFlagged });
-    await api.updateEmail(token, selectedAccountEmail, email.id, { isFlagged });
+    try {
+      await api.updateEmail(token, selectedAccountEmail, email.id, { isFlagged });
+    } catch (err) {
+      patchLocal(email.id, { isFlagged: email.isFlagged });
+      toast.error(errorMessage(err, "Failed to update flag"));
+    }
   }
 
   async function toggleRead() {
     if (!token || !selectedAccountEmail || !selectedEmail) return;
-    const isRead = !selectedEmail.isRead;
+    const previousIsRead = selectedEmail.isRead;
+    const isRead = !previousIsRead;
     patchLocal(selectedEmail.id, { isRead });
     patchSearchResult(selectedEmail.id, { isRead });
     setSelectedEmailDetail({ ...selectedEmail, isRead });
-    await api.updateEmail(token, selectedAccountEmail, selectedEmail.id, { isRead });
+    try {
+      await api.updateEmail(token, selectedAccountEmail, selectedEmail.id, { isRead });
+    } catch (err) {
+      patchLocal(selectedEmail.id, { isRead: previousIsRead });
+      patchSearchResult(selectedEmail.id, { isRead: previousIsRead });
+      setSelectedEmailDetail({ ...selectedEmail, isRead: previousIsRead });
+      toast.error(errorMessage(err, "Failed to update read status"));
+    }
   }
 
   async function handleDelete() {
     if (!token || !selectedAccountEmail || !selectedEmail) return;
-    await api.deleteEmail(token, selectedAccountEmail, selectedEmail.id);
+    try {
+      await api.deleteEmail(token, selectedAccountEmail, selectedEmail.id);
+    } catch (err) {
+      toast.error(errorMessage(err, "Failed to delete message"));
+      return;
+    }
     removeLocal(selectedEmail.id);
     removeSearchResult(selectedEmail.id);
     setSelectedEmailId(null);
@@ -184,7 +215,12 @@ export function AppShell() {
 
   async function handleMove(folder: string) {
     if (!token || !selectedAccountEmail || !selectedEmail) return;
-    await api.moveEmail(token, selectedAccountEmail, selectedEmail.id, folder);
+    try {
+      await api.moveEmail(token, selectedAccountEmail, selectedEmail.id, folder);
+    } catch (err) {
+      toast.error(errorMessage(err, "Failed to move message"));
+      return;
+    }
     removeLocal(selectedEmail.id);
     // Unlike the folder-scoped list, a moved message still matches the search — just with a
     // new folder — so it's patched in place rather than removed from the results.
