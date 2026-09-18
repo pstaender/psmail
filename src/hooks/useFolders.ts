@@ -28,5 +28,21 @@ export function useFolders(accountEmail: string | null) {
     refresh();
   }, [refresh]);
 
-  return { folders, loading, error, refresh };
+  /**
+   * Optimistically nudges a folder's total/unread counts by a known delta, instead of waiting
+   * for a full refresh (which re-lists folders live from IMAP — too slow/heavy to do on every
+   * read/unread toggle, delete, or move). Clamped so a race with a real refresh can't leave
+   * either count negative.
+   */
+  const patchCounts = useCallback((folder: string, deltas: { total?: number; unread?: number }) => {
+    setFolders(prev =>
+      prev.map(f =>
+        f.path === folder
+          ? { ...f, total: Math.max(0, f.total + (deltas.total ?? 0)), unread: Math.max(0, f.unread + (deltas.unread ?? 0)) }
+          : f
+      )
+    );
+  }, []);
+
+  return { folders, loading, error, refresh, patchCounts };
 }

@@ -84,7 +84,8 @@ export function AppShell() {
     selectedAccountEmail,
     selectedFolder
   );
-  const { folders, refresh: refreshFolders } = useFolders(selectedAccountEmail);
+  const { folders, loading: foldersLoading, error: foldersError, refresh: refreshFolders, patchCounts: patchFolderCounts } =
+    useFolders(selectedAccountEmail);
   const { email: selectedEmail, setEmail: setSelectedEmailDetail } = useEmailDetail(selectedAccountEmail, selectedEmailId);
 
   // Mark-as-read on open, like every other mail client. Patches both the folder-scoped list
@@ -99,6 +100,7 @@ export function AppShell() {
       });
       patchLocal(selectedEmail.id, { isRead: true });
       patchSearchResult(selectedEmail.id, { isRead: true });
+      patchFolderCounts(selectedEmail.folder, { unread: -1 });
       setSelectedEmailDetail({ ...selectedEmail, isRead: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -188,12 +190,14 @@ export function AppShell() {
     const isRead = !previousIsRead;
     patchLocal(selectedEmail.id, { isRead });
     patchSearchResult(selectedEmail.id, { isRead });
+    patchFolderCounts(selectedEmail.folder, { unread: isRead ? -1 : 1 });
     setSelectedEmailDetail({ ...selectedEmail, isRead });
     try {
       await api.updateEmail(token, selectedAccountEmail, selectedEmail.id, { isRead });
     } catch (err) {
       patchLocal(selectedEmail.id, { isRead: previousIsRead });
       patchSearchResult(selectedEmail.id, { isRead: previousIsRead });
+      patchFolderCounts(selectedEmail.folder, { unread: isRead ? 1 : -1 });
       setSelectedEmailDetail({ ...selectedEmail, isRead: previousIsRead });
       toast.error(errorMessage(err, "Failed to update read status"));
     }
@@ -210,6 +214,8 @@ export function AppShell() {
     }
     removeLocal(selectedEmail.id);
     removeSearchResult(selectedEmail.id);
+    patchFolderCounts(selectedEmail.folder, { total: -1, unread: selectedEmail.isRead ? 0 : -1 });
+    if (result.softDeleted) patchFolderCounts("Trash", { total: 1, unread: selectedEmail.isRead ? 0 : 1 });
     setSelectedEmailId(null);
     toast.success(result.softDeleted ? "Moved to Trash" : "Message deleted");
   }
@@ -226,6 +232,8 @@ export function AppShell() {
     // Unlike the folder-scoped list, a moved message still matches the search — just with a
     // new folder — so it's patched in place rather than removed from the results.
     patchSearchResult(selectedEmail.id, { folder });
+    patchFolderCounts(selectedEmail.folder, { total: -1, unread: selectedEmail.isRead ? 0 : -1 });
+    patchFolderCounts(folder, { total: 1, unread: selectedEmail.isRead ? 0 : 1 });
     setSelectedEmailId(null);
     toast.success(`Moved to ${folder}`);
   }
@@ -258,33 +266,61 @@ export function AppShell() {
   }
 
   async function bulkMarkRead(isRead: boolean) {
-    if (!token || !selectedAccountEmail) return;
+    if (!token || !selectedAccountEmail || !selectedFolder) return;
     const succeeded = await runBulkAction(
       ids => api.bulkUpdateEmails(token, selectedAccountEmail, ids, { isRead }),
       isRead ? "Marked as read" : "Marked as unread"
     );
-    succeeded.forEach(r => patchLocal(r.id, { isRead }));
+    let unreadDelta = 0;
+    succeeded.forEach(r => {
+      const email = emails.find(e => e.id === r.id);
+      if (email && email.isRead !== isRead) unreadDelta += isRead ? -1 : 1;
+      patchLocal(r.id, { isRead });
+    });
+    if (unreadDelta !== 0) patchFolderCounts(selectedFolder, { unread: unreadDelta });
   }
 
   async function bulkDelete() {
-    if (!token || !selectedAccountEmail) return;
+    if (!token || !selectedAccountEmail || !selectedFolder) return;
     const succeeded = await runBulkAction(ids => api.bulkDeleteEmails(token, selectedAccountEmail, ids), "Deleted");
+    let totalDelta = 0;
+    let unreadDelta = 0;
+    let trashTotal = 0;
+    let trashUnread = 0;
     succeeded.forEach(r => {
+      const email = emails.find(e => e.id === r.id);
+      totalDelta -= 1;
+      if (email && !email.isRead) unreadDelta -= 1;
+      if (r.softDeleted) {
+        trashTotal += 1;
+        if (email && !email.isRead) trashUnread += 1;
+      }
       removeLocal(r.id);
       if (selectedEmailId === r.id) setSelectedEmailId(null);
     });
+    if (totalDelta !== 0 || unreadDelta !== 0) patchFolderCounts(selectedFolder, { total: totalDelta, unread: unreadDelta });
+    if (trashTotal !== 0 || trashUnread !== 0) patchFolderCounts("Trash", { total: trashTotal, unread: trashUnread });
   }
 
   async function bulkMove(folder: string) {
-    if (!token || !selectedAccountEmail) return;
+    if (!token || !selectedAccountEmail || !selectedFolder) return;
     const succeeded = await runBulkAction(
       ids => api.bulkMoveEmails(token, selectedAccountEmail, ids, folder),
       `Moved to ${folder} —`
     );
+    let totalDelta = 0;
+    let unreadDelta = 0;
     succeeded.forEach(r => {
+      const email = emails.find(e => e.id === r.id);
+      totalDelta -= 1;
+      if (email && !email.isRead) unreadDelta -= 1;
       removeLocal(r.id);
       if (selectedEmailId === r.id) setSelectedEmailId(null);
     });
+    if (totalDelta !== 0 || unreadDelta !== 0) {
+      patchFolderCounts(selectedFolder, { total: totalDelta, unread: unreadDelta });
+      patchFolderCounts(folder, { total: -totalDelta, unread: -unreadDelta });
+    }
   }
 
   function openCompose(initial: ComposeDraft | null) {
@@ -371,6 +407,13 @@ export function AppShell() {
                 onDeleteAccount={setPendingDeleteAccount}
                 onEditAccount={setEditingAccountEmail}
                 onCollapse={() => setSidebarCollapsed(true)}
+                sharedFolders={{
+                  accountEmail: selectedAccountEmail,
+                  folders,
+                  loading: foldersLoading,
+                  error: foldersError,
+                  refresh: refreshFolders,
+                }}
               />
             </div>
             <ResizeHandle onPointerDown={startSidebarResize} />

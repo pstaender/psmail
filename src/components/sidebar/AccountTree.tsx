@@ -1,7 +1,7 @@
 import { Loader2, PanelLeftClose } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { AccountRow } from "./AccountRow";
+import { AccountRow, type SharedFolders } from "./AccountRow";
 import { AddAccountDialog } from "./AddAccountDialog";
 import type { Account } from "../../server/types";
 
@@ -14,6 +14,7 @@ export function AccountTree({
   onDeleteAccount,
   onEditAccount,
   onCollapse,
+  sharedFolders,
 }: {
   accounts: Account[];
   loading: boolean;
@@ -23,6 +24,13 @@ export function AccountTree({
   onDeleteAccount: (accountEmail: string) => void;
   onEditAccount: (accountEmail: string) => void;
   onCollapse: () => void;
+  /**
+   * The already-fetched folder list for whichever account is currently selected — AppShell
+   * fetches this anyway (for the move-to-folder menus) and keeps its unread counts patched
+   * optimistically on read/flag/delete/move, so the matching row here reuses it instead of
+   * fetching (and staying stale) on its own. See AccountRow.
+   */
+  sharedFolders: SharedFolders;
 }) {
   return (
     <div className="flex h-full flex-col border-r bg-muted/20">
@@ -48,6 +56,7 @@ export function AccountTree({
               onSelectFolder={onSelectFolder}
               onDeleteAccount={onDeleteAccount}
               onEditAccount={onEditAccount}
+              sharedFolders={sharedFolders}
             />
           ))}
         </div>

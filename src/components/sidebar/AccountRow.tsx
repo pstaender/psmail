@@ -41,21 +41,36 @@ function folderIcon(folder: FolderInfo) {
   }
 }
 
+export interface SharedFolders {
+  accountEmail: string | null;
+  folders: FolderInfo[];
+  loading: boolean;
+  error: string | null;
+  refresh: () => void;
+}
+
 export function AccountRow({
   account,
   selected,
   onSelectFolder,
   onDeleteAccount,
   onEditAccount,
+  sharedFolders,
 }: {
   account: Account;
   selected: { accountEmail: string; folder: string } | null;
   onSelectFolder: (accountEmail: string, folder: string) => void;
   onDeleteAccount: (accountEmail: string) => void;
   onEditAccount: (accountEmail: string) => void;
+  sharedFolders: SharedFolders;
 }) {
   const [expanded, setExpanded] = useState(true);
-  const { folders, loading, error, refresh } = useFolders(expanded ? account.email : null);
+  const usingShared = sharedFolders.accountEmail === account.email;
+  // When AppShell already has this account's folders loaded (it fetches them anyway, for the
+  // move-to-folder menus, and keeps unread counts patched on read/flag/delete/move), reuse that
+  // instead of fetching an independent copy that would only ever catch up on a full refresh.
+  const own = useFolders(usingShared ? null : expanded ? account.email : null);
+  const { folders, loading, error, refresh } = usingShared ? sharedFolders : own;
   const { isRunning, start, job } = useSync(account.email, refresh);
 
   return (

@@ -529,4 +529,25 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.click(screen.getByRole("button", { name: /check server capabilities/i }));
     await waitFor(() => expect(screen.getByText(/This server supports UIDPLUS/)).toBeTruthy());
   });
+
+  test("marking a message read/unread updates the sidebar's unread badge immediately, without a reload", async () => {
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    // FOLDERS starts with unread: 1, rendered as a badge next to the INBOX row in the sidebar.
+    await waitFor(() => expect(document.querySelector('[data-slot="badge"]')?.textContent).toBe("1"));
+
+    // Opening the unread message auto-marks it read — the badge should drop right away, not
+    // just after the next sync/reload of the folder list.
+    await userEvent.click(await screen.findByText("Hello there"));
+    await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(0));
+    await waitFor(() => expect(document.querySelector('[data-slot="badge"]')).toBeNull());
+
+    // Explicitly marking it unread again bumps the badge back up, same way.
+    await userEvent.click(screen.getByRole("button", { name: /mark unread/i }));
+    await waitFor(() => expect(document.querySelector('[data-slot="badge"]')?.textContent).toBe("1"));
+  });
 });
