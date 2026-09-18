@@ -35,7 +35,12 @@ const ACCOUNT: Account = {
   createdAt: NOW,
   updatedAt: NOW,
 };
-const FOLDERS = [{ path: "INBOX", name: "INBOX", delimiter: "/", specialUse: "\\Inbox", flags: [], total: 1, unread: 1 }];
+const FOLDERS = [
+  { path: "INBOX", name: "INBOX", delimiter: "/", specialUse: "\\Inbox", flags: [], total: 1, unread: 1 },
+  // Named "Entwürfe" (German), not "Drafts" — this account's Drafts folder isn't literally
+  // named "Drafts" on the server, exercising the specialUse-based lookup in ComposeDialog.
+  { path: "Entwürfe", name: "Entwürfe", delimiter: "/", specialUse: "\\Drafts", flags: [], total: 0, unread: 0 },
+];
 const EMAIL = {
   id: 10,
   accountId: 1,
@@ -95,12 +100,18 @@ function jsonResponse(body: unknown, status = 200) {
 
 const originalFetch = global.fetch;
 
+// Captures the body of the most recent POST .../emails (create draft) call, for tests that
+// need to inspect what folder a saved draft was actually sent under — reset per installMockFetch
+// call (mirrors currentAccount's per-test freshness, just below).
+let capturedCreateDraftBody: Record<string, unknown> | null = null;
+
 function installMockFetch(
   opts: { failEmailPatch?: number; uidPlusSupported?: boolean; accountOverrides?: Partial<Account> } = {}
 ) {
   // A fresh mutable copy per test (installMockFetch runs in beforeEach), so a PATCH in one
   // test can't leak into another, and so GET /api/accounts reflects a prior PATCH within a test.
   let currentAccount = { ...ACCOUNT, ...opts.accountOverrides };
+  capturedCreateDraftBody = null;
 
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
@@ -134,6 +145,11 @@ function installMockFetch(
     if (method === "GET" && path === "/api/accounts/me%40example.com/folders") return jsonResponse(FOLDERS);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails") {
       return jsonResponse([EMAIL, SECOND_EMAIL, THIRD_EMAIL]);
+    }
+    if (method === "POST" && path === "/api/accounts/me%40example.com/emails") {
+      const body = init?.body ? JSON.parse(init.body as string) : {};
+      capturedCreateDraftBody = body;
+      return jsonResponse({ ...EMAIL, id: 999, isDraft: true, uid: null, ...body }, 201);
     }
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse(EMAIL);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse(SECOND_EMAIL);
@@ -246,6 +262,22 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.click(screen.getByText("Add account"));
     expect(await screen.findByText("Add email account")).toBeTruthy();
     expect(screen.getByLabelText("Email address")).toBeTruthy();
+  });
+
+  test("saving a draft uses the account's real Drafts folder path, not a hardcoded English name", async () => {
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(screen.getByRole("button", { name: /new/i }));
+    expect(await screen.findByText("New message")).toBeTruthy();
+    await userEvent.type(screen.getByLabelText("Subject"), "Draft folder check");
+    await userEvent.click(screen.getByRole("button", { name: /save draft/i }));
+
+    await waitFor(() => expect(screen.queryByText("New message")).toBeNull());
+    expect(capturedCreateDraftBody?.folder).toBe("Entwürfe");
   });
 
   test("remembers the last body view across messages, downgrading Full HTML to Safe HTML", async () => {
@@ -389,7 +421,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
     await userEvent.click(screen.getByTitle("Delete"));
     const dialog = await screen.findByRole("alertdialog");
-    expect(within(dialog).getByText(/permanently otherwise/)).toBeTruthy();
+    expect(within(dialog).getByText(/delete/i, { selector: "[data-slot=alert-dialog-title]" })).toBeTruthy();
     await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
 
     await waitFor(() => expect(screen.queryByText("Third message")).toBeNull());

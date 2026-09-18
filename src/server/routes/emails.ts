@@ -19,12 +19,22 @@ import {
 import { json, noContent, parseIntParam, readJsonBody, requireAuth, requiredParam, withErrorHandling } from "../http";
 import { getEmailAttachmentsDir, sanitizeSegment } from "../config/paths";
 import { sendDraftEmail, type AttachmentWithData } from "../services/smtp";
-import { appendMessage, deleteMessage, moveMessage, setMessageFlags, withImapClient, type FlagChanges } from "../services/imap";
+import {
+  appendMessage,
+  deleteMessage,
+  listFolders,
+  moveMessage,
+  setMessageFlags,
+  withImapClient,
+  type FlagChanges,
+} from "../services/imap";
+import { resolveSpecialFolder } from "../../lib/folders";
 import { getUserRowById } from "../models/users";
 import { ApiError, NotFoundError, type EmailRecord } from "../types";
 import { getOwnedAccountByEmailParam } from "./accounts";
 
 const TRASH_FOLDER = "Trash";
+const SENT_FOLDER = "Sent";
 
 /** Throws NotFoundError unless the email row belongs to the given account. */
 function getOwnedEmail(db: Database, emailId: number, accountId: number) {
@@ -48,11 +58,11 @@ export function canPushToImap(account: AccountRow, uid: number | null): boolean 
  * UIDPLUS: the underlying move falls back to COPY + a bare EXPUNGE on servers without the MOVE
  * extension, and without UIDPLUS that EXPUNGE can also purge other unrelated \Deleted-flagged
  * messages sitting in the same folder. `skipSoftDelete` opts back into a permanent delete even
- * when soft-delete would otherwise be available. Deleting something already in Trash is always
- * permanent — there's no Trash-in-Trash.
+ * when soft-delete would otherwise be available. Deleting something already in Trash (whatever
+ * its real path — see `trashFolder`) is always permanent — there's no Trash-in-Trash.
  */
-export function wantsSoftDelete(account: AccountRow, folder: string): boolean {
-  return account.imap_uidplus === 1 && !account.skip_soft_delete && folder !== TRASH_FOLDER;
+export function wantsSoftDelete(account: AccountRow, folder: string, trashFolder: string): boolean {
+  return account.imap_uidplus === 1 && !account.skip_soft_delete && folder !== trashFolder;
 }
 
 function imapCredentialsFor(account: AccountRow, imapPassword: string) {
@@ -83,7 +93,12 @@ async function performFlagUpdate(
   return updateEmail(db, existing.id, patch);
 }
 
-/** Deletes (or soft-deletes) a message: pushes to IMAP first when applicable, then mirrors the same outcome locally. */
+/**
+ * Deletes (or soft-deletes) a message: pushes to IMAP first when applicable, then mirrors the
+ * same outcome locally. The real Trash folder path is resolved from the live IMAP listing
+ * (not assumed to be literally named "Trash" — see resolveSpecialFolder), falling back to that
+ * literal only when nothing on the server is recognizable as one.
+ */
 export async function performDelete(
   db: Database,
   account: AccountRow,
@@ -91,9 +106,12 @@ export async function performDelete(
   client?: ImapFlow
 ): Promise<{ softDeleted: boolean }> {
   if (canPushToImap(account, existing.uid)) {
-    if (wantsSoftDelete(account, existing.folder)) {
-      const result = await moveMessage(client!, existing.folder, existing.uid!, TRASH_FOLDER);
-      moveEmail(db, existing.id, TRASH_FOLDER, result.newUid);
+    const liveFolders = client ? await listFolders(client) : [];
+    const trashFolder = resolveSpecialFolder(liveFolders, "\\Trash", TRASH_FOLDER);
+
+    if (wantsSoftDelete(account, existing.folder, trashFolder)) {
+      const result = await moveMessage(client!, existing.folder, existing.uid!, trashFolder);
+      moveEmail(db, existing.id, trashFolder, result.newUid);
       return { softDeleted: true };
     }
     await deleteMessage(client!, existing.folder, existing.uid!);
@@ -339,14 +357,21 @@ export function emailsRoutes(db: Database) {
         // Best-effort: SMTP has already irrevocably delivered the message by this point, so a
         // failure here (bad connection, server rejects the write, ...) must not fail the request
         // — that would look like sending itself failed and risk a confusing resend. It just means
-        // this message won't show up in the Sent folder from other IMAP clients/webmail.
+        // this message won't show up in the Sent folder from other IMAP clients/webmail. The real
+        // Sent path is resolved from the live IMAP listing (not assumed to be literally named
+        // "Sent" — see resolveSpecialFolder), falling back to that literal if the connection fails
+        // before it gets that far.
         let sentUid: number | null = null;
+        let sentFolder = SENT_FOLDER;
         if (!account.read_only) {
           try {
-            const result = await withImapClient(imapCredentialsFor(account, imapPassword), client =>
-              appendMessage(client, "Sent", composed.raw, ["\\Seen"])
-            );
-            sentUid = result.uid;
+            sentFolder = await withImapClient(imapCredentialsFor(account, imapPassword), async client => {
+              const liveFolders = await listFolders(client);
+              const target = resolveSpecialFolder(liveFolders, "\\Sent", SENT_FOLDER);
+              const result = await appendMessage(client, target, composed.raw, ["\\Seen"]);
+              sentUid = result.uid;
+              return target;
+            });
           } catch (error) {
             console.error(`Failed to append sent message to IMAP Sent folder for ${account.email}:`, error);
           }
@@ -354,7 +379,7 @@ export function emailsRoutes(db: Database) {
 
         const sent = updateEmail(db, emailId, {
           isDraft: false,
-          folder: "Sent",
+          folder: sentFolder,
           uid: sentUid,
           messageId: composed.messageId,
           date: new Date().toISOString(),

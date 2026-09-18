@@ -56,11 +56,16 @@ function createFakeClient(
     append?: unknown;
     capabilities?: Map<string, boolean | number>;
     fetchResults?: { uid: number; flags: Set<string> }[];
+    list?: unknown[];
   } = {}
 ) {
   const calls: { method: string; args: unknown[] }[] = [];
   const client = {
     capabilities: overrides.capabilities ?? new Map<string, boolean | number>(),
+    list: async (...args: unknown[]) => {
+      calls.push({ method: "list", args });
+      return overrides.list ?? [];
+    },
     mailboxOpen: async (...args: unknown[]) => {
       calls.push({ method: "mailboxOpen", args });
       return {};
@@ -263,23 +268,30 @@ describe("wantsSoftDelete", () => {
   const baseAccount = { imap_uidplus: 1, skip_soft_delete: 0 } as AccountRow;
 
   test("true when the server supports UIDPLUS and skipSoftDelete is off", () => {
-    expect(wantsSoftDelete(baseAccount, "INBOX")).toBe(true);
+    expect(wantsSoftDelete(baseAccount, "INBOX", "Trash")).toBe(true);
   });
 
   test("false when the server's UIDPLUS support is unknown (never checked)", () => {
-    expect(wantsSoftDelete({ ...baseAccount, imap_uidplus: null }, "INBOX")).toBe(false);
+    expect(wantsSoftDelete({ ...baseAccount, imap_uidplus: null }, "INBOX", "Trash")).toBe(false);
   });
 
   test("false when the server doesn't support UIDPLUS", () => {
-    expect(wantsSoftDelete({ ...baseAccount, imap_uidplus: 0 }, "INBOX")).toBe(false);
+    expect(wantsSoftDelete({ ...baseAccount, imap_uidplus: 0 }, "INBOX", "Trash")).toBe(false);
   });
 
   test("false when the account opted out via skipSoftDelete", () => {
-    expect(wantsSoftDelete({ ...baseAccount, skip_soft_delete: 1 }, "INBOX")).toBe(false);
+    expect(wantsSoftDelete({ ...baseAccount, skip_soft_delete: 1 }, "INBOX", "Trash")).toBe(false);
   });
 
   test("false for a message already in Trash — no Trash-in-Trash", () => {
-    expect(wantsSoftDelete(baseAccount, "Trash")).toBe(false);
+    expect(wantsSoftDelete(baseAccount, "Trash", "Trash")).toBe(false);
+  });
+
+  test("compares against whatever the real Trash path actually is, not a hardcoded literal", () => {
+    // The account's real Trash folder is "Papierkorb" (German), not "Trash" — a message
+    // already there must still be treated as "already in Trash" and not soft-deleted again.
+    expect(wantsSoftDelete(baseAccount, "Papierkorb", "Papierkorb")).toBe(false);
+    expect(wantsSoftDelete(baseAccount, "INBOX", "Papierkorb")).toBe(true);
   });
 });
 
@@ -333,6 +345,21 @@ describe("performDelete", () => {
 
     expect(result).toEqual({ softDeleted: false });
     expect(() => getEmailRow(db, email.id)).toThrow();
+  });
+
+  test("soft-deletes into the server's real Trash folder even when it isn't literally named \"Trash\"", async () => {
+    const { db, accountId } = await setupRealAccount();
+    const email = createEmail(db, accountId, { folder: "INBOX", uid: 42, isDraft: false });
+    const { client, calls } = createFakeClient({
+      list: [{ path: "Papierkorb", name: "Papierkorb", delimiter: "/", specialUse: "\\Trash", flags: [] }],
+      move: { path: "INBOX", destination: "Papierkorb", uidMap: new Map([[42, 99]]) },
+    });
+
+    const result = await performDelete(db, baseAccount, getEmailRow(db, email.id), client);
+
+    expect(result).toEqual({ softDeleted: true });
+    expect(calls.some(c => c.method === "messageMove" && c.args[1] === "Papierkorb")).toBe(true);
+    expect(getEmailRow(db, email.id).folder).toBe("Papierkorb");
   });
 });
 

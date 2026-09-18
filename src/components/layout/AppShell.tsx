@@ -32,8 +32,9 @@ import { useSearchResults } from "@/hooks/useSearchResults";
 import { useResizableWidth } from "@/hooks/useResizableWidth";
 import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import { useAuth } from "@/contexts/AuthContext";
-import { api, type BulkResult } from "@/lib/api";
+import { api, type BulkResult, type FolderInfo } from "@/lib/api";
 import { forwardDraft, replyDraft } from "@/lib/compose";
+import { resolveSpecialFolder } from "@/lib/folders";
 import type { Account, EmailRecord } from "../../server/types";
 import type { SearchResult } from "../../server/models/search";
 
@@ -41,16 +42,19 @@ import type { SearchResult } from "../../server/models/search";
  * Whether deleting `email` would move it to Trash instead of permanently expunging it —
  * mirrors wantsSoftDelete in server/routes/emails.ts. Used purely to decide whether the
  * delete confirmation dialog is worth showing at all: skip it when the action is easily
- * undone (just move it back out of Trash), only ask when it's actually permanent.
+ * undone (just move it back out of Trash), only ask when it's actually permanent. `folders`
+ * (the account's live IMAP listing, already fetched anyway) resolves the real Trash path —
+ * the server doesn't always call it literally "Trash" — so this stays in sync with what the
+ * backend will actually decide.
  */
-function willSoftDelete(account: Account | null, email: EmailRecord): boolean {
+function willSoftDelete(account: Account | null, email: EmailRecord, folders: FolderInfo[]): boolean {
   return (
     !!account &&
     !account.readOnly &&
     email.uid !== null &&
     account.supportsUidPlus === true &&
     !account.skipSoftDelete &&
-    email.folder !== "Trash"
+    email.folder !== resolveSpecialFolder(folders, "\\Trash", "Trash")
   );
 }
 
@@ -256,7 +260,12 @@ export function AppShell() {
     removeLocal(selectedEmail.id);
     removeSearchResult(selectedEmail.id);
     patchFolderCounts(selectedEmail.folder, { total: -1, unread: selectedEmail.isRead ? 0 : -1 });
-    if (result.softDeleted) patchFolderCounts("Trash", { total: 1, unread: selectedEmail.isRead ? 0 : 1 });
+    if (result.softDeleted) {
+      patchFolderCounts(resolveSpecialFolder(folders, "\\Trash", "Trash"), {
+        total: 1,
+        unread: selectedEmail.isRead ? 0 : 1,
+      });
+    }
     setSelectedEmailId(null);
     toast.success(result.softDeleted ? "Moved to Trash" : "Message deleted");
   }
@@ -340,7 +349,9 @@ export function AppShell() {
       if (selectedEmailId === r.id) setSelectedEmailId(null);
     });
     if (totalDelta !== 0 || unreadDelta !== 0) patchFolderCounts(selectedFolder, { total: totalDelta, unread: unreadDelta });
-    if (trashTotal !== 0 || trashUnread !== 0) patchFolderCounts("Trash", { total: trashTotal, unread: trashUnread });
+    if (trashTotal !== 0 || trashUnread !== 0) {
+      patchFolderCounts(resolveSpecialFolder(folders, "\\Trash", "Trash"), { total: trashTotal, unread: trashUnread });
+    }
   }
 
   async function bulkMove(folder: string) {
@@ -375,12 +386,12 @@ export function AppShell() {
     if (!isSearching && selectedIds.size > 0) {
       const selectedEmails = emails.filter(e => selectedIds.has(e.id));
       if (selectedEmails.length === 0) return;
-      if (selectedEmails.every(e => willSoftDelete(selectedAccount, e))) bulkDelete();
+      if (selectedEmails.every(e => willSoftDelete(selectedAccount, e, folders))) bulkDelete();
       else setConfirmDelete({ mode: "bulk", count: selectedEmails.length });
       return;
     }
     if (selectedEmail) {
-      if (willSoftDelete(selectedAccount, selectedEmail)) handleDelete();
+      if (willSoftDelete(selectedAccount, selectedEmail, folders)) handleDelete();
       else setConfirmDelete({ mode: "single", count: 1 });
     }
   }
@@ -559,6 +570,7 @@ export function AppShell() {
       {selectedAccountEmail && (
         <ComposeDialog
           accountEmail={selectedAccountEmail}
+          folders={folders}
           open={composeOpen}
           onOpenChange={setComposeOpen}
           initial={composeInitial}
@@ -597,7 +609,8 @@ export function AppShell() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete {confirmDelete?.count > 1 ? confirmDelete.count : ''} message{(confirmDelete?.count ?? 1) === 1 ? "" : "s"}?
+              Delete {confirmDelete && confirmDelete.count > 1 ? confirmDelete.count : ""} message
+              {(confirmDelete?.count ?? 1) === 1 ? "" : "s"}?
             </AlertDialogTitle>
             <AlertDialogDescription>
               {/*This also deletes {(confirmDelete?.count ?? 1) === 1 ? "it" : "them"} from the account's mail server,

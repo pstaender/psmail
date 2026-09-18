@@ -257,4 +257,26 @@ describe.skipIf(!RUN)("IMAP sync against a real server (Greenmail)", () => {
     const after = await api("GET", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/emails/${target.id}`, { token });
     expect(after.json.isRead).toBe(true);
   });
+
+  test("a draft stays reachable in the sidebar even when Greenmail has no server-side Drafts folder", async () => {
+    const draft = await api("POST", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/emails`, {
+      token,
+      body: { subject: "Local-only draft", plainText: "No Drafts folder on this server" },
+    });
+    expect(draft.status).toBe(201);
+    // Greenmail's minimal test setup only auto-creates INBOX — nothing here should assume
+    // otherwise, since that's exactly the "no Drafts folder at all" case this test is for.
+    expect(draft.json.folder).toBe("Drafts");
+
+    const folders = await api("GET", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/folders`, { token });
+    expect(folders.status).toBe(200);
+    const draftsFolder = folders.json.find((f: { path: string }) => f.path === "Drafts");
+    expect(draftsFolder).toBeDefined();
+    expect(draftsFolder.total).toBeGreaterThanOrEqual(1);
+
+    const draftsEmails = await api("GET", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/emails?folder=Drafts`, {
+      token,
+    });
+    expect(draftsEmails.json.some((e: { id: number }) => e.id === draft.json.id)).toBe(true);
+  });
 });

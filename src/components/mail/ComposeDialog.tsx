@@ -5,9 +5,10 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MarkdownEditor, type MarkdownEditorHandle } from "./MarkdownEditor";
-import { api } from "@/lib/api";
+import { api, type FolderInfo } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { parseAddressList } from "@/lib/addresses";
+import { resolveSpecialFolder } from "@/lib/folders";
 import type { EmailRecord } from "../../server/types";
 
 export interface ComposeDraft {
@@ -20,12 +21,15 @@ export interface ComposeDraft {
 
 export function ComposeDialog({
   accountEmail,
+  folders,
   open,
   onOpenChange,
   initial,
   onSent,
 }: {
   accountEmail: string;
+  /** The account's live IMAP folder list — used to find the real Drafts folder path (see saveAndMaybeSend). */
+  folders: FolderInfo[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initial: ComposeDraft | null;
@@ -60,6 +64,10 @@ export function ComposeDialog({
     setError(null);
     try {
       const draft: EmailRecord = await api.createDraft(token, accountEmail, {
+        // Not every server literally names it "Drafts" (some use a localized name, e.g.
+        // "Entwürfe") — without this, the draft could be saved under a folder path that never
+        // matches anything in the live IMAP folder list, making it look like it vanished.
+        folder: resolveSpecialFolder(folders, "\\Drafts", "Drafts"),
         from: [{ address: accountEmail }],
         to: parseAddressList(to),
         cc: parseAddressList(cc),
