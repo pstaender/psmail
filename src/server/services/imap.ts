@@ -92,24 +92,40 @@ export interface FetchedMessage {
 export async function fetchNewMessages(
   client: ImapFlow,
   folder: string,
-  sinceUid: number
+  sinceUid: number,
+  log: (message: string) => void = () => {}
 ): Promise<{ mailbox: MailboxObject; messages: FetchedMessage[] }> {
+  log(`opening folder "${folder}"`);
   const mailbox = await client.mailboxOpen(folder);
+  log(`opened: ${mailbox.exists} message(s) in folder, uidNext=${mailbox.uidNext}, uidValidity=${mailbox.uidValidity}`);
 
   const messages: FetchedMessage[] = [];
   const range = `${sinceUid + 1}:*`;
 
   if (mailbox.uidNext !== undefined && mailbox.uidNext <= sinceUid + 1) {
+    log(`nothing to fetch (uidNext ${mailbox.uidNext} <= ${sinceUid + 1})`);
     return { mailbox, messages };
   }
 
-  for await (const message of client.fetch(
-    { uid: range },
-    { uid: true, size: true, source: true }
-  )) {
-    if (message.uid <= sinceUid) continue;
-    messages.push({ uid: message.uid, size: message.size ?? 0, source: message.source as Buffer });
+  log(`downloading full sources for UID range ${range}`);
+  let bytes = 0;
+  const heartbeat = setInterval(
+    () => log(`still downloading: ${messages.length} message(s), ${(bytes / 1048576).toFixed(1)} MB so far`),
+    10_000
+  );
+  try {
+    for await (const message of client.fetch(
+      { uid: range },
+      { uid: true, size: true, source: true }
+    )) {
+      if (message.uid <= sinceUid) continue;
+      messages.push({ uid: message.uid, size: message.size ?? 0, source: message.source as Buffer });
+      bytes += message.size ?? 0;
+    }
+  } finally {
+    clearInterval(heartbeat);
   }
+  log(`download finished: ${messages.length} message(s), ${(bytes / 1048576).toFixed(1)} MB`);
 
   messages.sort((a, b) => a.uid - b.uid);
   return { mailbox, messages };

@@ -45,7 +45,11 @@ async function defaultFetchMessages(
   folder: string,
   sinceUid: number
 ): Promise<{ messages: FetchedMessage[] }> {
-  return withImapClient(creds, client => fetchNewMessages(client, folder, sinceUid));
+  syncLog(`connecting to ${creds.host}:${creds.port}...`);
+  return withImapClient(creds, client => {
+    syncLog("connected and authenticated");
+    return fetchNewMessages(client, folder, sinceUid, message => syncLog(message));
+  });
 }
 
 /** The real IMAP flag lookup — connects and reads the current \Seen/\Flagged state of the given UIDs. */
