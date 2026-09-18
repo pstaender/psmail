@@ -354,6 +354,22 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(screen.queryByText("Second message")).toBeNull();
   });
 
+  test("bulk-deleting a single Ctrl/Cmd-selected message skips the confirmation dialog", async () => {
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    fireEvent.click(await screen.findByText("Third message"), { ctrlKey: true });
+    await waitFor(() => expect(screen.getByText("1 selected")).toBeTruthy());
+
+    await userEvent.click(screen.getByTitle("Delete"));
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("Third message")).toBeNull());
+  });
+
   test("a failed IMAP push rolls back the optimistic flag toggle and shows an error", async () => {
     // Overrides the default beforeEach mock so this one email's PATCH simulates a failed
     // IMAP write (e.g. the account isn't read-only but the mail server rejected/dropped it).

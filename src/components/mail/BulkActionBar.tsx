@@ -6,7 +6,6 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
-  AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
@@ -66,7 +65,7 @@ export function BulkActionBar({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(true)} title="Delete">
+        <Button variant="ghost" size="sm" onClick={() => (count > 1 ? setConfirmDelete(true) : onDelete())} title="Delete">
           <Trash2 className="size-4" />
         </Button>
       </div>
@@ -75,10 +74,6 @@ export function BulkActionBar({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {count} message{count === 1 ? "" : "s"}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This also deletes {count === 1 ? "it" : "them"} from the account's mail server, unless the account is
-              read-only — moved to Trash first if the server supports that safely, or permanently otherwise.
-            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
