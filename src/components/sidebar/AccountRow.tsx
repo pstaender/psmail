@@ -124,7 +124,7 @@ export function AccountRow({
 
       {isRunning && job && (
         <p className="pl-8 text-xs text-muted-foreground">
-          Syncing {job.progressCurrent}/{job.progressTotal || "?"}…
+          Syncing{(job.progressTotal > 0 ? ` ${job.progressCurrent}/{job.progressTotal}` : "")}…
         </p>
       )}
 

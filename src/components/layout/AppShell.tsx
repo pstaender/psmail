@@ -597,17 +597,17 @@ export function AppShell() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete {confirmDelete?.count ?? 1} message{(confirmDelete?.count ?? 1) === 1 ? "" : "s"}?
+              Delete {confirmDelete?.count > 1 ? confirmDelete.count : ''} message{(confirmDelete?.count ?? 1) === 1 ? "" : "s"}?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This also deletes {(confirmDelete?.count ?? 1) === 1 ? "it" : "them"} from the account's mail server,
+              {/*This also deletes {(confirmDelete?.count ?? 1) === 1 ? "it" : "them"} from the account's mail server,
               unless the account is read-only — moved to Trash first if the server supports that safely, or
-              permanently otherwise.
+              permanently otherwise.*/}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDeleteAction}>Delete</AlertDialogAction>
+            <AlertDialogAction onClick={confirmDeleteAction} autoFocus={true}>Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
