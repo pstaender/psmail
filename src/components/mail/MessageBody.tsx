@@ -1,3 +1,4 @@
+import "./MessageBody.css";
 import { useEffect, useMemo, useState } from "react";
 import { ImageOff, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -35,7 +36,7 @@ export function resolveInitialView(
 }
 
 function PlainTextView({ text }: { text: string }) {
-  return <pre className="whitespace-pre-wrap break-words p-4 font-mono text-sm">{text}</pre>;
+  return <pre className="whitespace-pre-wrap break-words p-4 font-mono text-sm plain-text-view">{text}</pre>;
 }
 
 /** Renders markdown looking like the compose editor (inline formatting, de-emphasized markup) instead of a raw/plain text dump — used for the "Text" and "MD" tabs, both of which are markdown, unlike "Plain text" (the literal MIME plain-text part). Non-editable, real HTML — see RenderPureMarkdown. */
