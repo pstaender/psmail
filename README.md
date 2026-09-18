@@ -79,7 +79,7 @@ Accounts are addressed in the URL **by email address** (URL-encoded), e.g. `/api
 - `POST /api/accounts/:email/emails/:id/send`
 - `PATCH /api/accounts/:email/emails/:id/move/:folderName`
 - `POST/GET/DELETE /api/accounts/:email/emails/:id/attachments[/:attachmentId]`
-- `GET/POST /api/accounts/:email/downloads`, `GET /api/accounts/:email/downloads/:id` — the sync job queue; only one active job per account at a time. Jobs run in-process, so on server startup any job still pending/running (orphaned by a killed server) is marked `failed` ("Interrupted by server restart"), freeing the account to sync again. Sync errors are also shown as toasts in the UI.
+- `GET/POST /api/accounts/:email/downloads`, `GET /api/accounts/:email/downloads/:id` — the sync job queue; only one active job per account at a time. Jobs run in-process, so on server startup any job still pending/running (orphaned by a killed server) is marked `failed` ("Interrupted by server restart"), freeing the account to sync again. Sync errors are also shown as toasts in the UI. The server console narrates each sync (`[sync …]` lines: connection target, reconcile/fetch stages, message counts, timing) and on failure logs the stage it died in plus IMAP details (error code, server response text) — the same text is stored as the job's `error`.
 - `GET /api/search?q=...` — searches across every account the caller owns; see [Search syntax](#search-syntax).
 
 An email account's IMAP/SMTP passwords are encrypted at rest with a key derived from the owning user's login password (scrypt + AES-256-GCM). The derived key lives only in server memory for the lifetime of the session — restarting the server means logging in again before account credentials can be decrypted (e.g. to sync or send).

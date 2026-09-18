@@ -14,6 +14,26 @@ import {
 } from "./imap";
 import { parseMessage } from "./messageParser";
 
+/** Sync narration for the server console; silent under `bun test` (NODE_ENV=test) to keep test output readable. */
+function syncLog(message: string, ...rest: unknown[]) {
+  if (process.env.NODE_ENV === "test") return;
+  console.log(`[sync ${new Date().toISOString()}] ${message}`, ...rest);
+}
+
+/** imapflow errors carry the server's actual complaint in fields beyond `message` (which is often just "Command failed"). */
+function describeError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const extra = error as Error & { code?: string; responseStatus?: string; responseText?: string; serverResponseCode?: string; authenticationFailed?: boolean };
+  const details = [
+    extra.code && `code=${extra.code}`,
+    extra.responseStatus && `status=${extra.responseStatus}`,
+    extra.serverResponseCode && `serverCode=${extra.serverResponseCode}`,
+    extra.responseText && `response="${extra.responseText}"`,
+    extra.authenticationFailed && "authenticationFailed",
+  ].filter(Boolean);
+  return details.length > 0 ? `${error.message} (${details.join(", ")})` : error.message;
+}
+
 export interface SyncProgress {
   current: number;
   total: number;
@@ -111,7 +131,12 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
     fetchRemoteFlags = defaultFetchRemoteFlags,
   } = options;
 
+  const tag = `job #${downloadJobId} ${account.email}/${folder}`;
+  const startedAt = Date.now();
+  let stage = "reconciling existing messages";
+
   try {
+    syncLog(`${tag}: starting (IMAP ${imapCredentials.username}@${imapCredentials.host}:${imapCredentials.port}, ${imapCredentials.secure ? "TLS" : "no TLS"})`);
     await reconcileExisting(db, account.id, folder, imapCredentials, fetchRemoteFlags);
 
     const maxUidRow = db
@@ -121,13 +146,17 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
       .get(account.id, folder);
     const sinceUid = maxUidRow?.max_uid ?? 0;
 
+    stage = `fetching messages newer than UID ${sinceUid}`;
+    syncLog(`${tag}: ${stage}`);
     const { messages } = await fetchMessages(imapCredentials, folder, sinceUid);
+    syncLog(`${tag}: server returned ${messages.length} new message(s)`);
 
     startDownloadJob(db, downloadJobId, messages.length);
     onProgress?.({ current: 0, total: messages.length });
 
     let downloaded = 0;
     for (const message of messages) {
+      stage = `processing UID ${message.uid}`;
       if (!findEmailByUid(db, account.id, folder, message.uid)) {
         const parsed = await parseMessage(message.source);
 
@@ -179,14 +208,20 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
       }
 
       downloaded += 1;
+      if (downloaded % 25 === 0 || downloaded === messages.length) {
+        syncLog(`${tag}: ${downloaded}/${messages.length} stored`);
+      }
       updateDownloadProgress(db, downloadJobId, downloaded);
       onProgress?.({ current: downloaded, total: messages.length });
     }
 
     completeDownloadJob(db, downloadJobId);
+    syncLog(`${tag}: completed, ${downloaded} message(s) in ${Date.now() - startedAt}ms`);
     return { downloaded };
   } catch (error) {
-    failDownloadJob(db, downloadJobId, error instanceof Error ? error.message : String(error));
+    const description = describeError(error);
+    syncLog(`${tag}: FAILED while ${stage} after ${Date.now() - startedAt}ms: ${description}`);
+    failDownloadJob(db, downloadJobId, `${description} (while ${stage})`);
     throw error;
   }
 }
