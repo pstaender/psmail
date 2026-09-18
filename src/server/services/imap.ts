@@ -18,14 +18,46 @@ export function createImapClient(creds: ImapCredentials): ImapFlow {
   });
 }
 
+/**
+ * Runs `fn()`, then always runs `teardown()` afterward — but a teardown failure (however it
+ * fails) never overrides `fn`'s own result or error. A plain `try { return await fn() }
+ * finally { await teardown() }` gets this wrong: a rejected `finally` block replaces a
+ * successful return from `try` with its own error. That matters here because `fn` (e.g.
+ * deleteMessage inside performDelete) may have already updated the local database before
+ * teardown ever runs — if teardown's failure were allowed to surface as this call's result,
+ * a caller that's fail-closed on error (leave local state alone if the push failed) would
+ * wrongly leave the database changed while reporting the request as failed. Kept
+ * dependency-free (no IMAP types) so it's directly unit-testable; `teardown` is expected to
+ * handle its own failures internally and never reject, but this still holds even if it does.
+ */
+export async function runWithTeardown<T>(fn: () => Promise<T>, teardown: () => Promise<void>): Promise<T> {
+  let result: T;
+  try {
+    result = await fn();
+  } catch (error) {
+    await teardown().catch(() => {});
+    throw error;
+  }
+  await teardown().catch(() => {});
+  return result;
+}
+
 export async function withImapClient<T>(creds: ImapCredentials, fn: (client: ImapFlow) => Promise<T>): Promise<T> {
   const client = createImapClient(creds);
   await client.connect();
-  try {
-    return await fn(client);
-  } finally {
-    await client.logout().catch(() => client.close());
-  }
+
+  return runWithTeardown(
+    () => fn(client),
+    async () => {
+      await client.logout().catch(() => {
+        try {
+          client.close();
+        } catch {
+          // Best-effort teardown — see the doc comment above.
+        }
+      });
+    }
+  );
 }
 
 export interface ImapFolder {

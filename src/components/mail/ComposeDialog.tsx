@@ -11,6 +11,10 @@ import { parseAddressList } from "@/lib/addresses";
 import { resolveSpecialFolder } from "@/lib/folders";
 import type { AttachmentRecord, EmailRecord } from "../../server/types";
 
+function formatSizeMB(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
 export interface ComposeDraft {
   /** Present when editing an existing draft in place (see editDraft in lib/compose.ts) — saving updates that same row instead of creating a new one. */
   id?: number;
@@ -40,7 +44,8 @@ export function ComposeDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initial: ComposeDraft | null;
-  onSent: () => void;
+  /** `sent` is true when the draft was actually sent, false when it was just saved. */
+  onSent: (sent: boolean) => void;
 }) {
   const { token } = useAuth();
   const editorRef = useRef<MarkdownEditorHandle>(null);
@@ -109,7 +114,7 @@ export function ComposeDialog({
         await api.sendEmail(token, accountEmail, draft.id);
       }
 
-      onSent();
+      onSent(send);
       onOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -179,6 +184,7 @@ export function ComposeDialog({
                 <span key={attachment.id} className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs">
                   <Paperclip className="size-3" />
                   {attachment.filename}
+                  <span className="text-muted-foreground">{formatSizeMB(attachment.size)}</span>
                   <button type="button" onClick={() => removeExistingAttachment(attachment.id)}>
                     <X className="size-3" />
                   </button>
@@ -188,6 +194,7 @@ export function ComposeDialog({
                 <span key={i} className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs">
                   <Paperclip className="size-3" />
                   {file.name}
+                  <span className="text-muted-foreground">{formatSizeMB(file.size)}</span>
                   <button type="button" onClick={() => setFiles(prev => prev.filter((_, idx) => idx !== i))}>
                     <X className="size-3" />
                   </button>

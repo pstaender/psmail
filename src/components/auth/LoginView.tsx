@@ -40,6 +40,31 @@ export function LoginView() {
     }
   }
 
+  /**
+   * Clicking a profile tries logging in with an empty password first — if the account has
+   * none set, this succeeds immediately and the password prompt never has to appear at all.
+   * Any failure here is expected and silent (not a real login mistake yet, just a probe): it
+   * just falls through to expanding the password form, exactly as clicking used to always do.
+   */
+  async function selectUser(user: User) {
+    if (selected?.id === user.id) {
+      setSelected(null);
+      setPassword("");
+      return;
+    }
+    setSelected(user);
+    setPassword("");
+    setError(null);
+    setBusy(true);
+    try {
+      await login(user.username, "");
+    } catch {
+      // Needs a real password — the form below (already showing, since `selected` is set) is the fallback.
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submitCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!username.trim()) return;
@@ -80,8 +105,9 @@ export function LoginView() {
                     <div key={user.id}>
                       <button
                         type="button"
-                        onClick={() => setSelected(selected?.id === user.id ? null : user)}
-                        className="w-full flex items-center gap-3 rounded-md border px-3 py-2 text-left hover:bg-accent transition-colors"
+                        onClick={() => selectUser(user)}
+                        disabled={busy}
+                        className="w-full flex items-center gap-3 rounded-md border px-3 py-2 text-left hover:bg-accent transition-colors disabled:pointer-events-none disabled:opacity-50"
                       >
                         <Avatar className="size-8">
                           <AvatarFallback>{user.username.slice(0, 2).toUpperCase()}</AvatarFallback>

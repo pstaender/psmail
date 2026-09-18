@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { LogOut, Mail, PanelLeftOpen, PenSquare, Search, X } from "lucide-react";
 import {
   AlertDialog,
@@ -81,6 +81,7 @@ export function AppShell() {
   // opened reuses whatever body view the user was last reading with.
   const [preferredBodyView, setPreferredBodyView] = useState<BodyView | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const {
     results: searchResults,
     loading: searchLoading,
@@ -131,11 +132,23 @@ export function AppShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEmail?.id]);
 
+  // Cmd/Ctrl+K focuses the search input, from anywhere (even while typing in another field) —
+  // unlike Backspace/Delete below, skipped only while a dialog is open (Radix would trap focus
+  // inside it anyway, so this couldn't reach the search input then even without the guard).
+  //
   // Backspace/Delete deletes the open message (or the bulk selection, if there is one), same
   // as clicking the Delete button — skipped while typing anywhere (an input/textarea/editable
   // area, e.g. compose or search) or while a dialog that could itself need the key is open.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        if (composeOpen || editingAccountEmail !== null || pendingDeleteAccount !== null || confirmDelete !== null) return;
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+
       if (e.key !== "Backspace" && e.key !== "Delete") return;
 
       const target = e.target as HTMLElement | null;
@@ -440,6 +453,7 @@ export function AppShell() {
         <div className="relative w-full max-w-md">
           <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
+            ref={searchInputRef}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder='Search all mail…'
@@ -457,7 +471,7 @@ export function AppShell() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-sm text-muted-foreground">{username}</span>
+          {username !== "default" && <span className="text-sm text-muted-foreground">{username}</span>}
           <Button variant="ghost" size="icon" onClick={logout} title="Sign out">
             <LogOut className="size-4" />
           </Button>
@@ -579,10 +593,10 @@ export function AppShell() {
           open={composeOpen}
           onOpenChange={setComposeOpen}
           initial={composeInitial}
-          onSent={() => {
+          onSent={sent => {
             refreshEmails();
             refreshFolders();
-            toast.success("Saved");
+            toast.success(sent ? "E-Mail sent" : "Saved");
           }}
         />
       )}

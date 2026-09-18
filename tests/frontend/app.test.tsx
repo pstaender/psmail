@@ -124,7 +124,12 @@ let capturedCreateDraftBody: Record<string, unknown> | null = null;
 let capturedUpdateDraftBody: Record<string, unknown> | null = null;
 
 function installMockFetch(
-  opts: { failEmailPatch?: number; uidPlusSupported?: boolean; accountOverrides?: Partial<Account> } = {}
+  opts: {
+    failEmailPatch?: number;
+    uidPlusSupported?: boolean;
+    accountOverrides?: Partial<Account>;
+    extraUsers?: { id: number; username: string }[];
+  } = {}
 ) {
   // A fresh mutable copy per test (installMockFetch runs in beforeEach), so a PATCH in one
   // test can't leak into another, and so GET /api/accounts reflects a prior PATCH within a test.
@@ -147,9 +152,15 @@ function installMockFetch(
       return jsonResponse({ error: "simulated IMAP failure" }, 502);
     }
 
-    if (method === "GET" && path === "/api/users") return jsonResponse([USER]);
+    if (method === "GET" && path === "/api/users") return jsonResponse(opts.extraUsers ? [USER, ...opts.extraUsers] : [USER]);
     if (method === "POST" && path === "/api/auth/login") {
-      return jsonResponse({ token: "test-token", expiresAt: NOW, user: { id: 1, username: "default" } });
+      const body = init?.body ? JSON.parse(init.body as string) : {};
+      // "secure" needs a real password; everyone else (in particular "default") logs in with
+      // an empty one — for testing LoginView's "try an empty password first" behavior.
+      if (body.username === "secure" && body.password !== "secret123") {
+        return jsonResponse({ error: "Invalid credentials" }, 401);
+      }
+      return jsonResponse({ token: "test-token", expiresAt: NOW, user: { id: 1, username: body.username } });
     }
     if (method === "GET" && path === "/api/accounts") return jsonResponse([currentAccount]);
     if (method === "PATCH" && path === "/api/accounts/me%40example.com") {
@@ -169,6 +180,9 @@ function installMockFetch(
       const body = init?.body ? JSON.parse(init.body as string) : {};
       capturedCreateDraftBody = body;
       return jsonResponse({ ...EMAIL, id: 999, isDraft: true, uid: null, ...body }, 201);
+    }
+    if (method === "POST" && /^\/api\/accounts\/me%40example\.com\/emails\/\d+\/send$/.test(path)) {
+      return jsonResponse({ ...EMAIL, id: 999, isDraft: false, folder: "Sent" });
     }
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse(EMAIL);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse(SECOND_EMAIL);
@@ -236,13 +250,11 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("renders login, signs in, and opens a message end to end", async () => {
     render(<App />);
 
-    // Login screen
+    // Login screen — clicking the profile logs straight in (an empty password works, so
+    // LoginView skips the password prompt entirely), no separate "Sign in" click needed.
     await waitFor(() => expect(screen.getByText("P.S.Mail")).toBeTruthy());
     const userButton = await screen.findByText("default");
     await userEvent.click(userButton);
-
-    const signInButton = await screen.findByRole("button", { name: /sign in/i });
-    await userEvent.click(signInButton);
 
     // Main app shell + account tree
     await waitFor(() => expect(screen.getByText("me@example.com")).toBeTruthy(), { timeout: 3000 });
@@ -294,11 +306,61 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(screen.getByLabelText("Email address")).toBeTruthy();
   });
 
-  test("the Text/MD reading-pane tabs render via a read-only MarkdownEditor (no typing possible)", async () => {
+  test("clicking a profile with no password set logs in directly, skipping the password prompt", async () => {
     render(<App />);
 
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+
+    // No password prompt ever appeared — went straight to the app shell.
+    expect(screen.queryByPlaceholderText("Password")).toBeNull();
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+  });
+
+  test("clicking a profile that needs a real password falls through to the password prompt", async () => {
+    installMockFetch({ extraUsers: [{ id: 2, username: "secure" }] });
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("secure"));
+
+    // The silent empty-password attempt failed, so the form is shown instead of logging in.
+    const passwordField = await screen.findByPlaceholderText("Password");
+    expect(screen.queryByRole("button", { name: /sign in/i })).toBeTruthy();
+
+    await userEvent.type(passwordField, "secret123");
+    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+  });
+
+  test("the header hides the username when it's \"default\"", async () => {
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    // The login screen (the only other place "default" appeared) is gone now, so if this text
+    // is still absent, the header itself isn't showing the username either.
+    expect(screen.queryByText("default")).toBeNull();
+  });
+
+  test("the header shows a non-default username", async () => {
+    installMockFetch({ extraUsers: [{ id: 2, username: "secure" }] });
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("secure"));
+    await userEvent.type(await screen.findByPlaceholderText("Password"), "secret123");
+    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    expect(screen.getByText("secure")).toBeTruthy();
+  });
+
+  test("the Text/MD reading-pane tabs render via a read-only MarkdownEditor (no typing possible)", async () => {
+    render(<App />);
+
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
+    await userEvent.click(await screen.findByText("default"));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     await userEvent.click(await screen.findByText("Hello there"));
@@ -315,8 +377,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("saving a draft uses the account's real Drafts folder path, not a hardcoded English name", async () => {
     render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     await userEvent.click(screen.getByRole("button", { name: /new/i }));
@@ -332,8 +395,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     installMockFetch({ accountOverrides: { signature: "Cheers,\nAlice" } });
     render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     await userEvent.click(screen.getByRole("button", { name: /new/i }));
@@ -346,8 +410,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     installMockFetch({ accountOverrides: { senderName: "Alice Example" } });
     render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     await userEvent.click(screen.getByRole("button", { name: /new/i }));
@@ -359,11 +424,41 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     );
   });
 
-  test("opening a draft shows an Edit draft button after Delete, and editing it updates the same draft", async () => {
+  test("sending a message shows an \"E-Mail sent\" toast, distinct from just saving a draft", async () => {
     render(<App />);
 
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(screen.getByRole("button", { name: /new/i }));
+    expect(await screen.findByText("New message")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => expect(screen.getByText("E-Mail sent")).toBeTruthy());
+  });
+
+  test("adding an attachment in compose shows its filename and size in MB", async () => {
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(screen.getByRole("button", { name: /new/i }));
+    expect(await screen.findByText("New message")).toBeTruthy();
+
+    const file = new File([new Uint8Array(2 * 1024 * 1024)], "photo.png", { type: "image/png" }); // exactly 2 MB
+    await userEvent.upload(screen.getByLabelText("Attach files"), file);
+
+    expect(await screen.findByText("photo.png")).toBeTruthy();
+    expect(screen.getByText("2.00 MB")).toBeTruthy();
+  });
+
+  test("opening a draft shows an Edit draft button after Delete, and editing it updates the same draft", async () => {
+    render(<App />);
+
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
+    await userEvent.click(await screen.findByText("default"));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     await userEvent.click(await screen.findByText("Unfinished draft"));
@@ -391,8 +486,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("double-clicking a draft in the list opens it for editing directly", async () => {
     render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     const draftRow = await screen.findByText("Unfinished draft");
@@ -405,8 +501,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("double-clicking a non-draft message doesn't open the compose dialog", async () => {
     render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     const row = await screen.findByText("Hello there");
@@ -423,8 +520,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       return screen.getByRole("tab", { name }).getAttribute("aria-selected") === "true";
     }
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     // Open the first message and switch it to Full HTML.
@@ -448,11 +546,27 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await waitFor(() => expect(isTabSelected("Plain text")).toBe(true));
   });
 
-  test("searching switches the message list to results and opening one reads it", async () => {
+  test("Cmd/Ctrl+K focuses the search input from anywhere on the page", async () => {
     render(<App />);
 
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    const searchBox = screen.getByPlaceholderText(/search all mail/i);
+    // Focus something else first, so the shortcut moving focus is actually observable.
+    (document.body as HTMLElement).focus();
+    expect(document.activeElement).not.toBe(searchBox);
+
+    await userEvent.keyboard("{Control>}k{/Control}");
+    expect(document.activeElement).toBe(searchBox);
+  });
+
+  test("searching switches the message list to results and opening one reads it", async () => {
+    render(<App />);
+
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
+    await userEvent.click(await screen.findByText("default"));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     const searchBox = screen.getByPlaceholderText(/search all mail/i);
@@ -486,8 +600,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("Ctrl/Cmd+click multi-selects messages for bulk mark-as-read and delete", async () => {
     render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     const firstRow = await screen.findByText("Hello there");
@@ -530,8 +645,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     installMockFetch({ accountOverrides: { supportsUidPlus: true } });
     render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     fireEvent.click(await screen.findByText("Third message"), { ctrlKey: true });
@@ -548,8 +664,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // permanently — that's irreversible, so it's always confirmed first, even for just one.
     render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     fireEvent.click(await screen.findByText("Third message"), { ctrlKey: true });
@@ -567,8 +684,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     installMockFetch({ accountOverrides: { supportsUidPlus: true } });
     render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     await userEvent.click(await screen.findByText("Third message"));
@@ -584,8 +702,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     installMockFetch({ accountOverrides: { supportsUidPlus: true } });
     render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     await userEvent.click(await screen.findByText("Third message"));
@@ -605,8 +724,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     installMockFetch({ failEmailPatch: SECOND_EMAIL.id });
     render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     // Toggle the star directly from the message list, without opening the message — opening
@@ -629,8 +749,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("Shift+click selects a range of messages, anchored at the last plain/Ctrl click", async () => {
     render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     const firstRow = await screen.findByText("Hello there");
@@ -657,8 +778,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("collapsing the account sidebar persists across a reload", async () => {
     const { unmount } = render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     expect(screen.getByText("Accounts")).toBeTruthy();
@@ -687,8 +809,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("resizing the message list column persists across a reload", async () => {
     const { unmount } = render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     const handles = document.querySelectorAll('[role="separator"][aria-orientation="vertical"]');
@@ -712,8 +835,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("editing account settings prefills the form and can toggle read-only", async () => {
     render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     // No lock icon before the change.
@@ -746,8 +870,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("account settings are organized into Server/Safety/Signature tabs", async () => {
     render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     await userEvent.click(screen.getByTitle("More actions"));
@@ -778,8 +903,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     installMockFetch({ accountOverrides: { senderName: "Alice", signature: "Cheers,\nAlice" } });
     render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     await userEvent.click(screen.getByTitle("More actions"));
@@ -814,8 +940,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     installMockFetch({ uidPlusSupported: true });
     render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     await userEvent.click(screen.getByTitle("More actions"));
@@ -833,8 +960,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("marking a message read/unread updates the sidebar's unread badge immediately, without a reload", async () => {
     render(<App />);
 
+    // Clicking the profile logs straight in now (an empty password works, so LoginView skips
+    // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
     // FOLDERS starts with unread: 1, rendered as a badge next to the INBOX row in the sidebar.

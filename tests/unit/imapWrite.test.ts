@@ -6,6 +6,7 @@ import {
   fetchRemoteFlags,
   hasUidPlusCapability,
   moveMessage,
+  runWithTeardown,
   setMessageFlags,
 } from "../../src/server/services/imap";
 import { canPushToImap, performDelete, wantsSoftDelete } from "../../src/server/routes/emails";
@@ -100,6 +101,61 @@ function createFakeClient(
   };
   return { client: client as unknown as ImapFlow, calls };
 }
+
+describe("runWithTeardown", () => {
+  test("returns fn's result, and still runs teardown", async () => {
+    let teardownRan = false;
+    const result = await runWithTeardown(
+      async () => "ok",
+      async () => {
+        teardownRan = true;
+      }
+    );
+    expect(result).toBe("ok");
+    expect(teardownRan).toBe(true);
+  });
+
+  test("a teardown failure never masks fn's successful result — the whole point of this function", async () => {
+    // This is the exact bug: fn (e.g. deleteMessage, which already updated the local database
+    // by the time this runs) succeeded, but the connection then failed to close cleanly. The
+    // caller must still see fn's real result, not a spurious failure.
+    const result = await runWithTeardown(
+      async () => "ok",
+      async () => {
+        throw new Error("logout failed");
+      }
+    );
+    expect(result).toBe("ok");
+  });
+
+  test("fn's own error is preserved even when teardown also fails", async () => {
+    await expect(
+      runWithTeardown(
+        async () => {
+          throw new Error("the real failure");
+        },
+        async () => {
+          throw new Error("teardown also failed");
+        }
+      )
+    ).rejects.toThrow("the real failure");
+  });
+
+  test("fn's error propagates normally when teardown succeeds", async () => {
+    let teardownRan = false;
+    await expect(
+      runWithTeardown(
+        async () => {
+          throw new Error("boom");
+        },
+        async () => {
+          teardownRan = true;
+        }
+      )
+    ).rejects.toThrow("boom");
+    expect(teardownRan).toBe(true);
+  });
+});
 
 describe("setMessageFlags", () => {
   test("opens the folder, then adds \\Seen when marking read", async () => {
