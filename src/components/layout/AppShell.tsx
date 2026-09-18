@@ -33,7 +33,7 @@ import { useResizableWidth } from "@/hooks/useResizableWidth";
 import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import { useAuth } from "@/contexts/AuthContext";
 import { api, type BulkResult, type FolderInfo } from "@/lib/api";
-import { editDraft, forwardDraft, replyDraft } from "@/lib/compose";
+import { editDraft, forwardDraft, replyDraft, withSignature } from "@/lib/compose";
 import { resolveSpecialFolder } from "@/lib/folders";
 import type { Account, EmailRecord } from "../../server/types";
 import type { SearchResult } from "../../server/models/search";
@@ -403,8 +403,10 @@ export function AppShell() {
     setConfirmDelete(null);
   }
 
+  // New/reply/forward get the account's signature appended; continuing an existing draft
+  // (editDraft sets `id`) doesn't — its body is already the draft's own finalized content.
   function openCompose(initial: ComposeDraft | null) {
-    setComposeInitial(initial);
+    setComposeInitial(initial?.id === undefined ? withSignature(initial, selectedAccount?.signature ?? null) : initial);
     setComposeOpen(true);
   }
 
@@ -572,6 +574,7 @@ export function AppShell() {
       {selectedAccountEmail && (
         <ComposeDialog
           accountEmail={selectedAccountEmail}
+          senderName={selectedAccount?.senderName ?? null}
           folders={folders}
           open={composeOpen}
           onOpenChange={setComposeOpen}

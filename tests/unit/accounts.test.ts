@@ -217,4 +217,39 @@ describe("accounts model", () => {
       expect(updated.supportsUidPlus).toBe(true);
     });
   });
+
+  describe("senderName and signature", () => {
+    test("default to null when not given", async () => {
+      const db = createTestDb();
+      const user = await createUser(db, "alice", "pw");
+      const key = deriveEncryptionKey("pw", generateSalt());
+
+      const account = createAccount(db, user.id, sampleAccountInput, key);
+      expect(account.senderName).toBeNull();
+      expect(account.signature).toBeNull();
+    });
+
+    test("are stored at creation and can be updated independently", async () => {
+      const db = createTestDb();
+      const user = await createUser(db, "alice", "pw");
+      const key = deriveEncryptionKey("pw", generateSalt());
+
+      const account = createAccount(
+        db,
+        user.id,
+        { ...sampleAccountInput, senderName: "Alice Example", signature: "Cheers,\nAlice" },
+        key
+      );
+      expect(account.senderName).toBe("Alice Example");
+      expect(account.signature).toBe("Cheers,\nAlice");
+
+      const updated = updateAccount(db, account.id, { senderName: "Alice E." }, key);
+      expect(updated.senderName).toBe("Alice E.");
+      expect(updated.signature).toBe("Cheers,\nAlice"); // untouched
+
+      const cleared = updateAccount(db, account.id, { signature: "" }, key);
+      expect(cleared.signature).toBe("");
+      expect(cleared.senderName).toBe("Alice E."); // untouched
+    });
+  });
 });

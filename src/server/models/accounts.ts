@@ -21,6 +21,8 @@ interface AccountRow {
   skip_soft_delete: number;
   /** NULL = never checked; 0/1 = the server's UIDPLUS support as of the last check (see checkImapCapabilities in services/imap.ts). */
   imap_uidplus: number | null;
+  sender_name: string | null;
+  signature: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -46,6 +48,10 @@ export interface CreateAccountInput {
    * refreshed via checkImapCapabilities) needed for that move to be done safely.
    */
   skipSoftDelete?: boolean;
+  /** Used as the From display name on outgoing mail sent from this account, instead of the bare address. */
+  senderName?: string;
+  /** Markdown, appended to the body of new/reply/forward compositions from this account (not edits of an existing draft). */
+  signature?: string;
 }
 
 export type UpdateAccountInput = Partial<CreateAccountInput>;
@@ -67,6 +73,8 @@ function toAccount(row: AccountRow): Account {
     readOnly: !!row.read_only,
     skipSoftDelete: !!row.skip_soft_delete,
     supportsUidPlus: row.imap_uidplus === null ? null : !!row.imap_uidplus,
+    senderName: row.sender_name,
+    signature: row.signature,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -76,13 +84,17 @@ export function createAccount(db: Database, userId: number, input: CreateAccount
   const row = db
     .query<
       AccountRow,
-      [number, string, string | null, string, number, number, string, string, string, number, number, string, string, number, number]
+      [
+        number, string, string | null, string, number, number, string, string, string, number, number, string, string,
+        number, number, string | null, string | null,
+      ]
     >(
       `INSERT INTO accounts (
         user_id, email, display_name,
         imap_host, imap_port, imap_secure, imap_username, imap_password_encrypted,
-        smtp_host, smtp_port, smtp_secure, smtp_username, smtp_password_encrypted, read_only, skip_soft_delete
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        smtp_host, smtp_port, smtp_secure, smtp_username, smtp_password_encrypted, read_only, skip_soft_delete,
+        sender_name, signature
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING *`
     )
     .get(
@@ -100,7 +112,9 @@ export function createAccount(db: Database, userId: number, input: CreateAccount
       input.smtpUsername,
       encryptSecret(input.smtpPassword, encryptionKey),
       input.readOnly ? 1 : 0,
-      input.skipSoftDelete ? 1 : 0
+      input.skipSoftDelete ? 1 : 0,
+      input.senderName ?? null,
+      input.signature ?? null
     );
 
   return toAccount(row!);
@@ -161,18 +175,23 @@ export function updateAccount(db: Database, id: number, input: UpdateAccountInpu
     // checked against — if the connection details changed, forget it until checkImapCapabilities
     // (services/imap.ts) re-checks the (possibly different) server on the next opportunity.
     imap_uidplus: imapConnectionChanged ? null : existing.imap_uidplus,
+    sender_name: input.senderName !== undefined ? input.senderName : existing.sender_name,
+    signature: input.signature !== undefined ? input.signature : existing.signature,
   };
 
   const row = db
     .query<
       AccountRow,
-      [string, string | null, string, number, number, string, string, string, number, number, string, string, number, number, number | null, number]
+      [
+        string, string | null, string, number, number, string, string, string, number, number, string, string, number,
+        number, number | null, string | null, string | null, number,
+      ]
     >(
       `UPDATE accounts SET
         email = ?, display_name = ?,
         imap_host = ?, imap_port = ?, imap_secure = ?, imap_username = ?, imap_password_encrypted = ?,
         smtp_host = ?, smtp_port = ?, smtp_secure = ?, smtp_username = ?, smtp_password_encrypted = ?, read_only = ?,
-        skip_soft_delete = ?, imap_uidplus = ?,
+        skip_soft_delete = ?, imap_uidplus = ?, sender_name = ?, signature = ?,
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       WHERE id = ?
       RETURNING *`
@@ -193,6 +212,8 @@ export function updateAccount(db: Database, id: number, input: UpdateAccountInpu
       merged.read_only,
       merged.skip_soft_delete,
       merged.imap_uidplus,
+      merged.sender_name,
+      merged.signature,
       id
     );
 

@@ -25,6 +25,7 @@ export interface ComposeDraft {
 
 export function ComposeDialog({
   accountEmail,
+  senderName,
   folders,
   open,
   onOpenChange,
@@ -32,6 +33,8 @@ export function ComposeDialog({
   onSent,
 }: {
   accountEmail: string;
+  /** Used as the From display name on outgoing mail, instead of the bare address. */
+  senderName: string | null;
   /** The account's live IMAP folder list — used to find the real Drafts folder path (see saveAndMaybeSend). */
   folders: FolderInfo[];
   open: boolean;
@@ -86,7 +89,7 @@ export function ComposeDialog({
         // "Entwürfe") — without this, the draft could be saved under a folder path that never
         // matches anything in the live IMAP folder list, making it look like it vanished.
         folder: resolveSpecialFolder(folders, "\\Drafts", "Drafts"),
-        from: [{ address: accountEmail }],
+        from: [senderName ? { address: accountEmail, name: senderName } : { address: accountEmail }],
         to: parseAddressList(to),
         cc: parseAddressList(cc),
         subject,

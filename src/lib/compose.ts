@@ -46,3 +46,15 @@ export function editDraft(email: EmailRecord): ComposeDraft {
     attachments: email.attachments ?? [],
   };
 }
+
+/**
+ * Appends the account's signature to a fresh composition's body — only meant for a brand new
+ * message, reply, or forward, never for editDraft's result (that body is already the draft's
+ * own finalized content; re-appending a signature to it on every edit would just keep piling
+ * up copies).
+ */
+export function withSignature(draft: ComposeDraft | null, signature: string | null): ComposeDraft {
+  if (!signature) return draft ?? {};
+  const body = draft?.body ? `${draft.body}\n\n-- \n${signature}` : `\n\n-- \n${signature}`;
+  return { ...draft, body };
+}

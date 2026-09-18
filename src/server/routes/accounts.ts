@@ -53,6 +53,8 @@ function validateCreateInput(body: Partial<CreateAccountInput>): CreateAccountIn
     smtpPassword: body.smtpPassword!,
     readOnly: body.readOnly ?? false,
     skipSoftDelete: body.skipSoftDelete ?? false,
+    senderName: body.senderName,
+    signature: body.signature,
   };
 }
 

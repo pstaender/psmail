@@ -32,6 +32,8 @@ const ACCOUNT: Account = {
   readOnly: false,
   skipSoftDelete: false,
   supportsUidPlus: null,
+  senderName: null,
+  signature: null,
   createdAt: NOW,
   updatedAt: NOW,
 };
@@ -264,12 +266,17 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(tabs.indexOf("Text")).toBeLessThan(tabs.indexOf("MD"));
     expect(tabs.indexOf("MD")).toBeLessThan(tabs.indexOf("Plain text"));
     await userEvent.click(screen.getByRole("tab", { name: "MD" }));
-    await waitFor(() => expect(screen.getByText(/\*\*from\*\*/)).toBeTruthy());
+    // Rendered via the read-only MarkdownEditor now, so "**" and "from" are separate inline
+    // elements (mark + bold text) rather than one plain-text node — check the panel's overall
+    // text instead of matching a single element.
+    await waitFor(() => expect(screen.getByRole("tabpanel").textContent).toContain("**from**"));
 
     // Reply opens the compose dialog with the MarkdownEditor pre-filled with the quoted original.
+    // Scoped to the dialog specifically — the reading pane behind it also has a (read-only)
+    // MarkdownEditor rendering the MD tab, and that one isn't what's being checked here.
     await userEvent.click(screen.getByText("Reply"));
-    expect(await screen.findByText("New message")).toBeTruthy();
-    const replyBody = document.querySelector(".psmail-markdown-editor .TinyMDE");
+    const composeDialog = (await screen.findByText("New message")).closest('[role="dialog"]') as HTMLElement;
+    const replyBody = composeDialog.querySelector(".psmail-markdown-editor .TinyMDE");
     expect(replyBody).toBeTruthy();
     expect(replyBody!.textContent).toContain("Hi from Alice");
     await userEvent.keyboard("{Escape}");
@@ -287,6 +294,24 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(screen.getByLabelText("Email address")).toBeTruthy();
   });
 
+  test("the Text/MD reading-pane tabs render via a read-only MarkdownEditor (no typing possible)", async () => {
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(await screen.findByText("Hello there"));
+    await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(0));
+    await userEvent.click(screen.getByRole("tab", { name: "Text" }));
+
+    await waitFor(() => {
+      const editor = screen.getByRole("tabpanel").querySelector(".psmail-markdown-editor .TinyMDE");
+      expect(editor).toBeTruthy();
+      expect(editor!.getAttribute("contenteditable")).toBe("false");
+    });
+  });
+
   test("saving a draft uses the account's real Drafts folder path, not a hardcoded English name", async () => {
     render(<App />);
 
@@ -301,6 +326,37 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
     await waitFor(() => expect(screen.queryByText("New message")).toBeNull());
     expect(capturedCreateDraftBody?.folder).toBe("Entwürfe");
+  });
+
+  test("composing a new message appends the account's signature to the body", async () => {
+    installMockFetch({ accountOverrides: { signature: "Cheers,\nAlice" } });
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(screen.getByRole("button", { name: /new/i }));
+    const composeDialog = (await screen.findByText("New message")).closest('[role="dialog"]') as HTMLElement;
+    const body = composeDialog.querySelector(".psmail-markdown-editor .TinyMDE");
+    expect(body!.textContent).toContain("Cheers,");
+  });
+
+  test("sending uses the account's sender name as the From display name", async () => {
+    installMockFetch({ accountOverrides: { senderName: "Alice Example" } });
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(screen.getByRole("button", { name: /new/i }));
+    expect(await screen.findByText("New message")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /save draft/i }));
+
+    await waitFor(() =>
+      expect(capturedCreateDraftBody?.from).toEqual([{ address: "me@example.com", name: "Alice Example" }])
+    );
   });
 
   test("opening a draft shows an Edit draft button after Delete, and editing it updates the same draft", async () => {
@@ -672,16 +728,86 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.click(screen.getByText("Account settings"));
 
     expect(await screen.findByText("Account settings", { selector: "[data-slot=dialog-title]" })).toBeTruthy();
+    // Server tab (the default) has the connection fields.
     const hostField = screen.getByLabelText("Host", { selector: "#edit-imap-host" }) as HTMLInputElement;
     expect(hostField.value).toBe("imap.example.com");
     // Password fields are never prefilled (the API never returns them).
     expect((screen.getByLabelText("Password", { selector: "#edit-imap-pass" }) as HTMLInputElement).value).toBe("");
 
+    // Read-only lives on the Safety tab.
+    await userEvent.click(screen.getByRole("tab", { name: "Safety" }));
     await userEvent.click(screen.getByLabelText("Read-only"));
     await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
     await waitFor(() => expect(screen.queryByText("Account settings", { selector: "[data-slot=dialog-title]" })).toBeNull());
     await waitFor(() => expect(screen.getByTitle("Read-only")).toBeTruthy());
+  });
+
+  test("account settings are organized into Server/Safety/Signature tabs", async () => {
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(screen.getByTitle("More actions"));
+    await userEvent.click(screen.getByText("Account settings"));
+    expect(await screen.findByText("Account settings", { selector: "[data-slot=dialog-title]" })).toBeTruthy();
+
+    // Server (the default tab): connection fields, none of Safety's or Signature's.
+    expect(screen.getByLabelText("Host", { selector: "#edit-imap-host" })).toBeTruthy();
+    expect(screen.queryByLabelText("Read-only")).toBeNull();
+    expect(screen.queryByLabelText("Sender name")).toBeNull();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Safety" }));
+    expect(screen.getByLabelText("Read-only")).toBeTruthy();
+    expect(screen.getByLabelText("Always delete permanently")).toBeTruthy();
+    expect(screen.queryByLabelText("Host", { selector: "#edit-imap-host" })).toBeNull();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Signature" }));
+    expect(screen.getByLabelText("Sender name")).toBeTruthy();
+    // aria-label on the MarkdownEditor's contenteditable surface, set in an effect after TinyMDE
+    // mounts — give that a moment rather than assuming it's synchronous with the tab switch.
+    // (Not screen.getByLabelText: the Signature *tabpanel* itself is also labelled "Signature",
+    // via aria-labelledby pointing at its tab trigger, so that query would match two elements.)
+    await waitFor(() => expect(document.querySelector('.TinyMDE[aria-label="Signature"]')).toBeTruthy());
+    expect(screen.queryByLabelText("Read-only")).toBeNull();
+  });
+
+  test("the Signature tab pre-fills sender name/signature, and sender name can be edited and reloaded", async () => {
+    installMockFetch({ accountOverrides: { senderName: "Alice", signature: "Cheers,\nAlice" } });
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(screen.getByTitle("More actions"));
+    await userEvent.click(screen.getByText("Account settings"));
+    await userEvent.click(await screen.findByRole("tab", { name: "Signature" }));
+
+    expect((screen.getByLabelText("Sender name") as HTMLInputElement).value).toBe("Alice");
+    // Not screen.getByLabelText: the Signature tabpanel itself is also labelled "Signature" via
+    // aria-labelledby (pointing at its tab trigger), so that query would match two elements.
+    const signatureEditor = await waitFor(() => {
+      const el = document.querySelector('.TinyMDE[aria-label="Signature"]');
+      if (!el) throw new Error("signature editor not mounted yet");
+      return el as HTMLElement;
+    });
+    expect(signatureEditor.textContent).toContain("Cheers");
+    // Writable here, unlike the reading pane's Text/MD tabs.
+    expect(signatureEditor.getAttribute("contenteditable")).not.toBe("false");
+
+    await userEvent.clear(screen.getByLabelText("Sender name"));
+    await userEvent.type(screen.getByLabelText("Sender name"), "Alice Example");
+    await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    await waitFor(() => expect(screen.queryByText("Account settings", { selector: "[data-slot=dialog-title]" })).toBeNull());
+
+    // Reopen — round-tripped through the (mocked) PATCH + account refetch.
+    await userEvent.click(screen.getByTitle("More actions"));
+    await userEvent.click(screen.getByText("Account settings"));
+    await userEvent.click(await screen.findByRole("tab", { name: "Signature" }));
+    expect((screen.getByLabelText("Sender name") as HTMLInputElement).value).toBe("Alice Example");
   });
 
   test("checking IMAP capabilities updates the soft-delete availability hint", async () => {
@@ -695,6 +821,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.click(screen.getByTitle("More actions"));
     await userEvent.click(screen.getByText("Account settings"));
     expect(await screen.findByText("Account settings", { selector: "[data-slot=dialog-title]" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("tab", { name: "Safety" }));
 
     // Never checked yet (the fixture starts with supportsUidPlus: null).
     expect(screen.getByText(/Server capability not checked yet/)).toBeTruthy();

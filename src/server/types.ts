@@ -23,6 +23,10 @@ export interface Account {
   skipSoftDelete: boolean;
   /** Whether the IMAP server supports UIDPLUS, as of the last check — null if never checked. Soft-delete (move to Trash) is only offered when this is true. */
   supportsUidPlus: boolean | null;
+  /** From display name used on outgoing mail sent from this account, instead of the bare address. */
+  senderName: string | null;
+  /** Markdown, appended to new/reply/forward compositions from this account. */
+  signature: string | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -14,14 +14,20 @@ export interface MarkdownEditorHandle {
  * a fully controlled input: re-syncing `value` on every render would fight the editor's own cursor
  * position and undo stack. Callers that need a fresh editor (a different draft) should remount this
  * component (e.g. via `key`) rather than expect prop-driven content updates.
+ *
+ * `readOnly` renders the exact same inline-formatted view (bold, headers, lists, de-emphasized
+ * markup characters, ...) with editing turned off — TinyMDE has no built-in read-only mode since
+ * its rendering IS the editing surface, so this just disables the underlying contenteditable
+ * surface's native typing/IME instead of falling back to a plain/raw text dump.
  */
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, {
   initialValue: string;
-  onChange: (value: string) => void;
+  onChange?: (value: string) => void;
   placeholder?: string;
   className?: string;
   "aria-label"?: string;
-}>(function MarkdownEditor({ initialValue, onChange, placeholder, className, "aria-label": ariaLabel }, ref) {
+  readOnly?: boolean;
+}>(function MarkdownEditor({ initialValue, onChange, placeholder, className, "aria-label": ariaLabel, readOnly }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<Editor | null>(null);
   const onChangeRef = useRef(onChange);
@@ -40,8 +46,13 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, {
     // role/aria-label belong on the actual contenteditable surface TinyMDE creates (a child
     // of `container`), not the wrapper div — that's what a screen reader will focus into.
     if (ariaLabel) editor.e?.setAttribute("aria-label", ariaLabel);
+    if (readOnly) {
+      editor.e?.setAttribute("contenteditable", "false");
+      editor.e?.setAttribute("aria-readonly", "true");
+      editor.e?.setAttribute("tabindex", "-1");
+    }
 
-    const handleChange = ({ content }: { content: string }) => onChangeRef.current(content);
+    const handleChange = ({ content }: { content: string }) => onChangeRef.current?.(content);
     editor.addEventListener("change", handleChange);
 
     return () => {
@@ -53,5 +64,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return <div ref={containerRef} className={cn("psmail-markdown-editor", className)} />;
+  return (
+    <div ref={containerRef} className={cn("psmail-markdown-editor", readOnly && "psmail-markdown-editor--readonly", className)} />
+  );
 });

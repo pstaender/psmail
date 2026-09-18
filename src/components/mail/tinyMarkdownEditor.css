@@ -36,6 +36,12 @@
   word-break: break-word;
 }
 
+/* read-only: same rendering, just no text-cursor/pointer affordances implying it's editable */
+.psmail-markdown-editor--readonly .TinyMDE,
+.psmail-markdown-editor--readonly .TinyMDE .TMCheckbox {
+  cursor: default;
+}
+
 .psmail-markdown-editor .TinyMDE.TinyMDE_empty {
   position: relative;
 }
