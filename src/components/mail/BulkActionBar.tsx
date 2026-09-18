@@ -76,8 +76,8 @@ export function BulkActionBar({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {count} message{count === 1 ? "" : "s"}?</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes {count === 1 ? "it" : "them"} from P.S.Mail's local database. Nothing is (yet) deleted on the mail
-              server.
+              This also deletes {count === 1 ? "it" : "them"} from the account's mail server, unless the account is
+              read-only — moved to Trash first if the server supports that safely, or permanently otherwise.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

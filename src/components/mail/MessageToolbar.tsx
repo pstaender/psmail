@@ -76,7 +76,8 @@ export function MessageToolbar({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this message?</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes it from P.S.Mail's local database. It is not (yet) deleted on the mail server.
+              This also deletes it from the account's mail server, unless the account is read-only — moved to Trash
+              first if the server supports that safely, or permanently otherwise.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
