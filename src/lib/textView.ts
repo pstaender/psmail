@@ -78,6 +78,10 @@ function createTurndownService(): TurndownService {
       const cleaned = stripTrackingParams(href);
       if (!/^https?:\/\//i.test(cleaned)) return text;
 
+      if (text === cleaned) {
+        return text;
+      }
+
       return `[${text}](${cleaned})`;
     },
   });
