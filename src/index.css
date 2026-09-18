@@ -15,3 +15,16 @@
     @apply m-0 bg-background text-foreground overflow-hidden;
   }
 }
+
+/*
+ * Radix's ScrollArea wraps its children in a div with an inline `display: table; min-width:
+ * 100%` (see ScrollAreaViewport in @radix-ui/react-scroll-area) so horizontal scroll areas can
+ * auto-size to their widest content. None of this app's scroll areas (sidebar, message list,
+ * search results) need that, and a table-display box sizes to its content instead of being
+ * constrained by the viewport — which breaks `truncate` (text-overflow: ellipsis) on anything
+ * inside it. !important is the only way to override an inline style.
+ */
+[data-radix-scroll-area-viewport] > div {
+  display: block !important;
+  min-width: 0 !important;
+}
