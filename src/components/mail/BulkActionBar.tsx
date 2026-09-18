@@ -1,19 +1,14 @@
-import { useState } from "react";
 import { FolderInput, Mail, MailOpen, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import type { FolderInfo } from "@/lib/api";
 
-/** Toolbar shown instead of the folder header once one or more messages are checked (Cmd/Ctrl+click). */
+/**
+ * Toolbar shown instead of the folder header once one or more messages are checked (Cmd/Ctrl+click).
+ * The delete confirmation (skipped when every selected message would only be soft-deleted, i.e.
+ * moved to Trash rather than expunged) is owned by AppShell instead of here, since the same
+ * gating/dialog is shared with the reading pane's Delete and the Backspace/Delete keyboard shortcut.
+ */
 export function BulkActionBar({
   count,
   folders,
@@ -31,8 +26,6 @@ export function BulkActionBar({
   onDelete: () => void;
   onClear: () => void;
 }) {
-  const [confirmDelete, setConfirmDelete] = useState(false);
-
   return (
     <div className="flex items-center justify-between gap-2 border-b bg-accent/40 px-3 py-2">
       <div className="flex items-center gap-1.5">
@@ -65,22 +58,10 @@ export function BulkActionBar({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Button variant="ghost" size="sm" onClick={() => (count > 1 ? setConfirmDelete(true) : onDelete())} title="Delete">
+        <Button variant="ghost" size="sm" onClick={onDelete} title="Delete">
           <Trash2 className="size-4" />
         </Button>
       </div>
-
-      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {count} message{count === 1 ? "" : "s"}?</AlertDialogTitle>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={onDelete}>Delete</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

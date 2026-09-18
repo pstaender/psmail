@@ -34,14 +34,32 @@ import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import { useAuth } from "@/contexts/AuthContext";
 import { api, type BulkResult } from "@/lib/api";
 import { forwardDraft, replyDraft } from "@/lib/compose";
-import type { EmailRecord } from "../../server/types";
+import type { Account, EmailRecord } from "../../server/types";
 import type { SearchResult } from "../../server/models/search";
+
+/**
+ * Whether deleting `email` would move it to Trash instead of permanently expunging it —
+ * mirrors wantsSoftDelete in server/routes/emails.ts. Used purely to decide whether the
+ * delete confirmation dialog is worth showing at all: skip it when the action is easily
+ * undone (just move it back out of Trash), only ask when it's actually permanent.
+ */
+function willSoftDelete(account: Account | null, email: EmailRecord): boolean {
+  return (
+    !!account &&
+    !account.readOnly &&
+    email.uid !== null &&
+    account.supportsUidPlus === true &&
+    !account.skipSoftDelete &&
+    email.folder !== "Trash"
+  );
+}
 
 export function AppShell() {
   const { token, username, logout } = useAuth();
   const { accounts, loading: accountsLoading, refresh: refreshAccounts } = useAccounts();
 
   const [selectedAccountEmail, setSelectedAccountEmail] = useState<string | null>(null);
+  const selectedAccount = accounts.find(a => a.email === selectedAccountEmail) ?? null;
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [selectedEmailId, setSelectedEmailId] = useState<number | null>(null);
   // Checked via Cmd/Ctrl+click, for bulk actions — independent of selectedEmailId (the reading pane).
@@ -49,6 +67,9 @@ export function AppShell() {
   // The reference point a Shift+click range is measured from — the last plain- or Cmd/Ctrl-clicked message.
   const [selectionAnchorId, setSelectionAnchorId] = useState<number | null>(null);
   const [pendingDeleteAccount, setPendingDeleteAccount] = useState<string | null>(null);
+  // Set only when the pending delete is NOT a soft-delete (i.e. it would be permanent) — see
+  // requestDelete/willSoftDelete. `count` is just for the confirmation dialog's copy.
+  const [confirmDelete, setConfirmDelete] = useState<{ mode: "single" | "bulk"; count: number } | null>(null);
   const [editingAccountEmail, setEditingAccountEmail] = useState<string | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeInitial, setComposeInitial] = useState<ComposeDraft | null>(null);
@@ -105,6 +126,26 @@ export function AppShell() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEmail?.id]);
+
+  // Backspace/Delete deletes the open message (or the bulk selection, if there is one), same
+  // as clicking the Delete button — skipped while typing anywhere (an input/textarea/editable
+  // area, e.g. compose or search) or while a dialog that could itself need the key is open.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Backspace" && e.key !== "Delete") return;
+
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      if (composeOpen || editingAccountEmail !== null || pendingDeleteAccount !== null || confirmDelete !== null) return;
+      if (!(!isSearching && selectedIds.size > 0) && !selectedEmail) return;
+
+      e.preventDefault();
+      requestDelete();
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
 
   function selectFolder(accountEmail: string, folder: string) {
     setSelectedAccountEmail(accountEmail);
@@ -323,6 +364,34 @@ export function AppShell() {
     }
   }
 
+  /**
+   * Entry point for every "delete" trigger (the reading pane's Delete button, the bulk action
+   * bar's Delete button, and the Backspace/Delete keyboard shortcut): deletes right away when
+   * every message involved would only be soft-deleted (moved to Trash, easily undone), and
+   * otherwise asks for confirmation first since that outcome is permanent. Bulk and single are
+   * mutually exclusive by construction — selecting one clears the other (see selectEmail).
+   */
+  function requestDelete() {
+    if (!isSearching && selectedIds.size > 0) {
+      const selectedEmails = emails.filter(e => selectedIds.has(e.id));
+      if (selectedEmails.length === 0) return;
+      if (selectedEmails.every(e => willSoftDelete(selectedAccount, e))) bulkDelete();
+      else setConfirmDelete({ mode: "bulk", count: selectedEmails.length });
+      return;
+    }
+    if (selectedEmail) {
+      if (willSoftDelete(selectedAccount, selectedEmail)) handleDelete();
+      else setConfirmDelete({ mode: "single", count: 1 });
+    }
+  }
+
+  function confirmDeleteAction() {
+    if (!confirmDelete) return;
+    if (confirmDelete.mode === "bulk") bulkDelete();
+    else handleDelete();
+    setConfirmDelete(null);
+  }
+
   function openCompose(initial: ComposeDraft | null) {
     setComposeInitial(initial);
     setComposeOpen(true);
@@ -428,7 +497,7 @@ export function AppShell() {
               onMarkRead={() => bulkMarkRead(true)}
               onMarkUnread={() => bulkMarkRead(false)}
               onMove={bulkMove}
-              onDelete={bulkDelete}
+              onDelete={requestDelete}
               onClear={() => setSelectedIds(new Set())}
             />
           ) : (
@@ -477,7 +546,7 @@ export function AppShell() {
               onViewChange={setPreferredBodyView}
               onReply={() => openCompose(replyDraft(selectedEmail))}
               onForward={() => openCompose(forwardDraft(selectedEmail))}
-              onDelete={handleDelete}
+              onDelete={requestDelete}
               onMove={handleMove}
               onToggleRead={toggleRead}
             />
@@ -520,6 +589,25 @@ export function AppShell() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={confirmDeleteAccount}>Remove</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmDelete !== null} onOpenChange={open => !open && setConfirmDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {confirmDelete?.count ?? 1} message{(confirmDelete?.count ?? 1) === 1 ? "" : "s"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This also deletes {(confirmDelete?.count ?? 1) === 1 ? "it" : "them"} from the account's mail server,
+              unless the account is read-only — moved to Trash first if the server supports that safely, or
+              permanently otherwise.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteAction}>Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

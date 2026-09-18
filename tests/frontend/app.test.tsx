@@ -95,10 +95,12 @@ function jsonResponse(body: unknown, status = 200) {
 
 const originalFetch = global.fetch;
 
-function installMockFetch(opts: { failEmailPatch?: number; uidPlusSupported?: boolean } = {}) {
+function installMockFetch(
+  opts: { failEmailPatch?: number; uidPlusSupported?: boolean; accountOverrides?: Partial<Account> } = {}
+) {
   // A fresh mutable copy per test (installMockFetch runs in beforeEach), so a PATCH in one
   // test can't leak into another, and so GET /api/accounts reflects a prior PATCH within a test.
-  let currentAccount = { ...ACCOUNT };
+  let currentAccount = { ...ACCOUNT, ...opts.accountOverrides };
 
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
@@ -354,7 +356,10 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(screen.queryByText("Second message")).toBeNull();
   });
 
-  test("bulk-deleting a single Ctrl/Cmd-selected message skips the confirmation dialog", async () => {
+  test("bulk-deleting skips the confirmation dialog when every selected message would only be soft-deleted", async () => {
+    // supportsUidPlus: true (and the fixture emails are all non-draft, non-readonly, outside
+    // Trash) means Delete would just move them to Trash — safely undoable, so no need to ask.
+    installMockFetch({ accountOverrides: { supportsUidPlus: true } });
     render(<App />);
 
     await userEvent.click(await screen.findByText("default"));
@@ -368,6 +373,62 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
     expect(screen.queryByRole("alertdialog")).toBeNull();
     await waitFor(() => expect(screen.queryByText("Third message")).toBeNull());
+  });
+
+  test("bulk-deleting asks for confirmation when it would be permanent, regardless of selection size", async () => {
+    // The default fixture has supportsUidPlus: null (never checked), so Delete always expunges
+    // permanently — that's irreversible, so it's always confirmed first, even for just one.
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    fireEvent.click(await screen.findByText("Third message"), { ctrlKey: true });
+    await waitFor(() => expect(screen.getByText("1 selected")).toBeTruthy());
+
+    await userEvent.click(screen.getByTitle("Delete"));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText(/permanently otherwise/)).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(screen.queryByText("Third message")).toBeNull());
+  });
+
+  test("pressing Delete on an open message deletes it directly when soft-delete is active", async () => {
+    installMockFetch({ accountOverrides: { supportsUidPlus: true } });
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(await screen.findByText("Third message"));
+    await waitFor(() => expect(screen.getAllByText("Third message").length).toBeGreaterThan(0));
+
+    await userEvent.keyboard("{Delete}");
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("Third message")).toBeNull());
+  });
+
+  test("pressing Backspace while typing in the search box never deletes the open message", async () => {
+    installMockFetch({ accountOverrides: { supportsUidPlus: true } });
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(await screen.findByText("Third message"));
+    await waitFor(() => expect(screen.getAllByText("Third message").length).toBeGreaterThan(0));
+
+    const searchBox = screen.getByPlaceholderText(/search all mail/i);
+    await userEvent.click(searchBox);
+    await userEvent.keyboard("{Backspace}");
+
+    // Give an incorrect delete a moment to happen, then confirm it didn't.
+    await waitFor(() => expect(screen.getAllByText("Third message").length).toBeGreaterThan(0));
   });
 
   test("a failed IMAP push rolls back the optimistic flag toggle and shows an error", async () => {

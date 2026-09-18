@@ -1,21 +1,16 @@
-import { useState } from "react";
 import { FolderInput, Forward, Mail, Reply, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import type { EmailRecord } from "../../server/types";
 import type { FolderInfo } from "@/lib/api";
 
+/**
+ * The delete confirmation (skipped entirely when the message would only be soft-deleted, i.e.
+ * moved to Trash rather than expunged) is owned by AppShell instead of here, since the same
+ * gating/dialog is shared with BulkActionBar's Delete and the Backspace/Delete keyboard
+ * shortcut.
+ */
 export function MessageToolbar({
   email,
   folders,
@@ -33,8 +28,6 @@ export function MessageToolbar({
   onMove: (folder: string) => void;
   onToggleRead: () => void;
 }) {
-  const [confirmDelete, setConfirmDelete] = useState(false);
-
   return (
     <div className="flex items-center gap-1 border-b px-3 py-1.5">
       <Button variant="ghost" size="sm" onClick={onReply}>
@@ -67,25 +60,9 @@ export function MessageToolbar({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(true)}>
+      <Button variant="ghost" size="sm" onClick={onDelete}>
         <Trash2 className="size-4" /> Delete
       </Button>
-
-      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this message?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This also deletes it from the account's mail server, unless the account is read-only — moved to Trash
-              first if the server supports that safely, or permanently otherwise.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={onDelete}>Delete</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
