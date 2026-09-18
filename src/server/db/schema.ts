@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS accounts (
   smtp_username TEXT NOT NULL,
   smtp_password_encrypted TEXT NOT NULL,
   read_only INTEGER NOT NULL DEFAULT 0,
+  skip_soft_delete INTEGER NOT NULL DEFAULT 0,
+  imap_uidplus INTEGER,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   UNIQUE(user_id, email)

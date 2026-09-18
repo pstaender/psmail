@@ -1,16 +1,19 @@
 import type { Database } from "bun:sqlite";
 import {
   createAccount,
+  decryptAccountCredentials,
   deleteAccount,
   getAccount,
   getAccountByEmail,
   listAccounts,
+  setImapUidPlus,
   updateAccount,
   type AccountRow,
   type CreateAccountInput,
   type UpdateAccountInput,
 } from "../models/accounts";
 import { json, readJsonBody, requireAuth, requiredParam, withErrorHandling } from "../http";
+import { checkImapCapabilities } from "../services/imap";
 import { ApiError } from "../types";
 
 /** Accounts are addressed in the URL by their email address (e.g. /api/accounts/me%40example.com). */
@@ -49,6 +52,7 @@ function validateCreateInput(body: Partial<CreateAccountInput>): CreateAccountIn
     smtpUsername: body.smtpUsername!,
     smtpPassword: body.smtpPassword!,
     readOnly: body.readOnly ?? false,
+    skipSoftDelete: body.skipSoftDelete ?? false,
   };
 }
 
@@ -87,6 +91,23 @@ export function accountsRoutes(db: Database) {
 
         deleteAccount(db, row.id);
         return new Response(null, { status: 204 });
+      }),
+    },
+    "/api/accounts/:email/imap-capabilities": {
+      POST: withErrorHandling(async req => {
+        const { session, encryptionKey } = requireAuth(req, db);
+        const row = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+
+        const { imapPassword } = decryptAccountCredentials(row, encryptionKey);
+        const { uidPlus } = await checkImapCapabilities({
+          host: row.imap_host,
+          port: row.imap_port,
+          secure: !!row.imap_secure,
+          username: row.imap_username,
+          password: imapPassword,
+        });
+
+        return json(setImapUidPlus(db, row.id, uidPlus));
       }),
     },
   };

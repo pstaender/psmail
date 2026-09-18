@@ -18,6 +18,9 @@ interface AccountRow {
   smtp_username: string;
   smtp_password_encrypted: string;
   read_only: number;
+  skip_soft_delete: number;
+  /** NULL = never checked; 0/1 = the server's UIDPLUS support as of the last check (see checkImapCapabilities in services/imap.ts). */
+  imap_uidplus: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -35,13 +38,14 @@ export interface CreateAccountInput {
   smtpSecure: boolean;
   smtpUsername: string;
   smtpPassword: string;
-  /**
-   * When true, this account should never have local changes (flags, moves, deletes) written
-   * back to the IMAP server. Currently a no-op in practice: sync only reads, and move/delete/
-   * flag already only update the local database (see README's "known limitations") — there's
-   * no two-way sync yet for this to gate. Stored now so a future two-way sync has it ready.
-   */
+  /** When true, this account never has local changes (flags, moves, deletes, sent-mail copies) written back to the IMAP server. */
   readOnly?: boolean;
+  /**
+   * When true, Delete always permanently expunges instead of moving the message to Trash first —
+   * even if the server supports the UIDPLUS extension (see the account's `supportsUidPlus` field,
+   * refreshed via checkImapCapabilities) needed for that move to be done safely.
+   */
+  skipSoftDelete?: boolean;
 }
 
 export type UpdateAccountInput = Partial<CreateAccountInput>;
@@ -61,6 +65,8 @@ function toAccount(row: AccountRow): Account {
     smtpSecure: !!row.smtp_secure,
     smtpUsername: row.smtp_username,
     readOnly: !!row.read_only,
+    skipSoftDelete: !!row.skip_soft_delete,
+    supportsUidPlus: row.imap_uidplus === null ? null : !!row.imap_uidplus,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -70,13 +76,13 @@ export function createAccount(db: Database, userId: number, input: CreateAccount
   const row = db
     .query<
       AccountRow,
-      [number, string, string | null, string, number, number, string, string, string, number, number, string, string, number]
+      [number, string, string | null, string, number, number, string, string, string, number, number, string, string, number, number]
     >(
       `INSERT INTO accounts (
         user_id, email, display_name,
         imap_host, imap_port, imap_secure, imap_username, imap_password_encrypted,
-        smtp_host, smtp_port, smtp_secure, smtp_username, smtp_password_encrypted, read_only
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        smtp_host, smtp_port, smtp_secure, smtp_username, smtp_password_encrypted, read_only, skip_soft_delete
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       RETURNING *`
     )
     .get(
@@ -93,7 +99,8 @@ export function createAccount(db: Database, userId: number, input: CreateAccount
       input.smtpSecure ? 1 : 0,
       input.smtpUsername,
       encryptSecret(input.smtpPassword, encryptionKey),
-      input.readOnly ? 1 : 0
+      input.readOnly ? 1 : 0,
+      input.skipSoftDelete ? 1 : 0
     );
 
   return toAccount(row!);
@@ -125,6 +132,13 @@ export function getAccountByEmail(db: Database, userId: number, email: string): 
 export function updateAccount(db: Database, id: number, input: UpdateAccountInput, encryptionKey: Buffer): Account {
   const existing = getAccountRow(db, id);
 
+  const imapConnectionChanged =
+    (input.imapHost !== undefined && input.imapHost !== existing.imap_host) ||
+    (input.imapPort !== undefined && input.imapPort !== existing.imap_port) ||
+    (input.imapSecure !== undefined && (input.imapSecure ? 1 : 0) !== existing.imap_secure) ||
+    (input.imapUsername !== undefined && input.imapUsername !== existing.imap_username) ||
+    input.imapPassword !== undefined;
+
   const merged: AccountRow = {
     ...existing,
     email: input.email ?? existing.email,
@@ -142,17 +156,23 @@ export function updateAccount(db: Database, id: number, input: UpdateAccountInpu
     smtp_password_encrypted:
       input.smtpPassword !== undefined ? encryptSecret(input.smtpPassword, encryptionKey) : existing.smtp_password_encrypted,
     read_only: input.readOnly !== undefined ? (input.readOnly ? 1 : 0) : existing.read_only,
+    skip_soft_delete: input.skipSoftDelete !== undefined ? (input.skipSoftDelete ? 1 : 0) : existing.skip_soft_delete,
+    // A cached "does this server support UIDPLUS" answer is only valid for the server it was
+    // checked against — if the connection details changed, forget it until checkImapCapabilities
+    // (services/imap.ts) re-checks the (possibly different) server on the next opportunity.
+    imap_uidplus: imapConnectionChanged ? null : existing.imap_uidplus,
   };
 
   const row = db
     .query<
       AccountRow,
-      [string, string | null, string, number, number, string, string, string, number, number, string, string, number, number]
+      [string, string | null, string, number, number, string, string, string, number, number, string, string, number, number, number | null, number]
     >(
       `UPDATE accounts SET
         email = ?, display_name = ?,
         imap_host = ?, imap_port = ?, imap_secure = ?, imap_username = ?, imap_password_encrypted = ?,
         smtp_host = ?, smtp_port = ?, smtp_secure = ?, smtp_username = ?, smtp_password_encrypted = ?, read_only = ?,
+        skip_soft_delete = ?, imap_uidplus = ?,
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       WHERE id = ?
       RETURNING *`
@@ -171,10 +191,23 @@ export function updateAccount(db: Database, id: number, input: UpdateAccountInpu
       merged.smtp_username,
       merged.smtp_password_encrypted,
       merged.read_only,
+      merged.skip_soft_delete,
+      merged.imap_uidplus,
       id
     );
 
   return toAccount(row!);
+}
+
+/** Persists the result of the last UIDPLUS capability check (see checkImapCapabilities in services/imap.ts). */
+export function setImapUidPlus(db: Database, id: number, supported: boolean): Account {
+  const row = db
+    .query<AccountRow, [number, number]>(
+      `UPDATE accounts SET imap_uidplus = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *`
+    )
+    .get(supported ? 1 : 0, id);
+  if (!row) throw new NotFoundError(`Account ${id} not found`);
+  return toAccount(row);
 }
 
 export function deleteAccount(db: Database, id: number): void {

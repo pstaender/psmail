@@ -31,6 +31,7 @@ const EMPTY: CreateAccountInput = {
   smtpUsername: "",
   smtpPassword: "",
   readOnly: false,
+  skipSoftDelete: false,
 };
 
 export function AddAccountDialog({ onCreated }: { onCreated: () => void }) {
@@ -191,6 +192,23 @@ export function AddAccountDialog({ onCreated }: { onCreated: () => void }) {
               <Label htmlFor="acc-read-only">Read-only</Label>
               <p className="text-xs text-muted-foreground">
                 Local changes (flags, moves, deletes) are never uploaded to this account's IMAP server.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-2 rounded-md border p-3">
+            <Switch
+              id="acc-skip-soft-delete"
+              className="mt-0.5"
+              checked={form.skipSoftDelete}
+              onCheckedChange={v => set("skipSoftDelete", v)}
+            />
+            <div className="space-y-0.5">
+              <Label htmlFor="acc-skip-soft-delete">Always delete permanently</Label>
+              <p className="text-xs text-muted-foreground">
+                By default, Delete moves a message to Trash instead of erasing it — but only once this account's server is
+                confirmed to support that safely (check under "Account settings" after adding it). Turn this on to skip
+                Trash and always expunge immediately.
               </p>
             </div>
           </div>

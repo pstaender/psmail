@@ -9,6 +9,7 @@ import {
   getAccountByEmail,
   getAccountRow,
   listAccounts,
+  setImapUidPlus,
   updateAccount,
 } from "../../src/server/models/accounts";
 import { ApiError } from "../../src/server/types";
@@ -134,6 +135,86 @@ describe("accounts model", () => {
       const updated = updateAccount(db, account.id, { displayName: "New name" }, key);
       expect(updated.readOnly).toBe(true);
       expect(updated.displayName).toBe("New name");
+    });
+  });
+
+  describe("skipSoftDelete flag", () => {
+    test("defaults to false when not given", async () => {
+      const db = createTestDb();
+      const user = await createUser(db, "alice", "pw");
+      const key = deriveEncryptionKey("pw", generateSalt());
+
+      const account = createAccount(db, user.id, sampleAccountInput, key);
+      expect(account.skipSoftDelete).toBe(false);
+    });
+
+    test("is stored when given true at creation, and toggles via updateAccount", async () => {
+      const db = createTestDb();
+      const user = await createUser(db, "alice", "pw");
+      const key = deriveEncryptionKey("pw", generateSalt());
+
+      const account = createAccount(db, user.id, { ...sampleAccountInput, skipSoftDelete: true }, key);
+      expect(account.skipSoftDelete).toBe(true);
+
+      const reverted = updateAccount(db, account.id, { skipSoftDelete: false }, key);
+      expect(reverted.skipSoftDelete).toBe(false);
+    });
+  });
+
+  describe("UIDPLUS capability caching", () => {
+    test("supportsUidPlus is null (never checked) for a freshly created account", async () => {
+      const db = createTestDb();
+      const user = await createUser(db, "alice", "pw");
+      const key = deriveEncryptionKey("pw", generateSalt());
+
+      const account = createAccount(db, user.id, sampleAccountInput, key);
+      expect(account.supportsUidPlus).toBeNull();
+    });
+
+    test("setImapUidPlus persists the checked result", async () => {
+      const db = createTestDb();
+      const user = await createUser(db, "alice", "pw");
+      const key = deriveEncryptionKey("pw", generateSalt());
+      const account = createAccount(db, user.id, sampleAccountInput, key);
+
+      const checked = setImapUidPlus(db, account.id, true);
+      expect(checked.supportsUidPlus).toBe(true);
+
+      const uncheckedAgain = setImapUidPlus(db, account.id, false);
+      expect(uncheckedAgain.supportsUidPlus).toBe(false);
+    });
+
+    test("a cached result survives an unrelated update", async () => {
+      const db = createTestDb();
+      const user = await createUser(db, "alice", "pw");
+      const key = deriveEncryptionKey("pw", generateSalt());
+      const account = createAccount(db, user.id, sampleAccountInput, key);
+      setImapUidPlus(db, account.id, true);
+
+      const updated = updateAccount(db, account.id, { displayName: "New name" }, key);
+      expect(updated.supportsUidPlus).toBe(true);
+    });
+
+    test("changing the IMAP connection details invalidates a cached result", async () => {
+      const db = createTestDb();
+      const user = await createUser(db, "alice", "pw");
+      const key = deriveEncryptionKey("pw", generateSalt());
+      const account = createAccount(db, user.id, sampleAccountInput, key);
+      setImapUidPlus(db, account.id, true);
+
+      const updated = updateAccount(db, account.id, { imapHost: "imap.other.example.com" }, key);
+      expect(updated.supportsUidPlus).toBeNull();
+    });
+
+    test("changing only the SMTP details leaves a cached result alone", async () => {
+      const db = createTestDb();
+      const user = await createUser(db, "alice", "pw");
+      const key = deriveEncryptionKey("pw", generateSalt());
+      const account = createAccount(db, user.id, sampleAccountInput, key);
+      setImapUidPlus(db, account.id, true);
+
+      const updated = updateAccount(db, account.id, { smtpHost: "smtp.other.example.com" }, key);
+      expect(updated.supportsUidPlus).toBe(true);
     });
   });
 });

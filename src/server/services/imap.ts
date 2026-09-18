@@ -130,3 +130,48 @@ export async function moveMessage(client: ImapFlow, folder: string, uid: number,
   const newUid = result.uidMap?.get(uid);
   return { newUid: newUid !== undefined ? Number(newUid) : null };
 }
+
+/** Whether the connected server advertises the UIDPLUS extension (RFC 4315). */
+export function hasUidPlusCapability(client: ImapFlow): boolean {
+  return client.capabilities.has("UIDPLUS");
+}
+
+/** Connects just long enough to read the server's advertised capabilities. */
+export async function checkImapCapabilities(creds: ImapCredentials): Promise<{ uidPlus: boolean }> {
+  return withImapClient(creds, async client => ({ uidPlus: hasUidPlusCapability(client) }));
+}
+
+export interface RemoteFlagState {
+  seen: boolean;
+  flagged: boolean;
+}
+
+/**
+ * Fetches the current \Seen/\Flagged state of exactly the given UIDs, for reconciling local
+ * flags with changes made by other IMAP clients (two-way sync). A UID missing from the
+ * returned map is no longer in `folder` on the server — deleted, expunged, or moved elsewhere
+ * by another client — which the caller treats as "gone".
+ */
+export async function fetchRemoteFlags(client: ImapFlow, folder: string, uids: number[]): Promise<Map<number, RemoteFlagState>> {
+  const result = new Map<number, RemoteFlagState>();
+  if (uids.length === 0) return result;
+
+  await client.mailboxOpen(folder);
+  for await (const message of client.fetch({ uid: uids.join(",") }, { uid: true, flags: true })) {
+    const flags = message.flags ?? new Set<string>();
+    result.set(message.uid, { seen: flags.has("\\Seen"), flagged: flags.has("\\Flagged") });
+  }
+  return result;
+}
+
+export interface AppendResult {
+  /** The appended message's UID, when the server reported one (needs UIDPLUS); null otherwise. */
+  uid: number | null;
+}
+
+/** Appends a raw RFC822 message to `folder` — used to leave a copy of a sent message on the server, since SMTP delivery alone never does. */
+export async function appendMessage(client: ImapFlow, folder: string, source: Buffer, flags: string[] = []): Promise<AppendResult> {
+  const result = await client.append(folder, source, flags);
+  if (!result) throw new Error(`Failed to append message to "${folder}"`);
+  return { uid: result.uid !== undefined ? Number(result.uid) : null };
+}

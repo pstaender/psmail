@@ -127,7 +127,9 @@ describe("pushing email actions to IMAP", () => {
     const del = await api("DELETE", `/api/accounts/${encodeURIComponent(readOnlyAccountEmail)}/emails/${email.id}`, {
       token,
     });
-    expect(del.status).toBe(204);
+    expect(del.status).toBe(200);
+    // Never pushed at all (read-only), so it's a plain permanent local delete, not a soft one.
+    expect(del.json).toEqual({ softDeleted: false });
     expect(() => getEmail(db, email.id)).toThrow();
   });
 
@@ -157,5 +159,67 @@ describe("pushing email actions to IMAP", () => {
     expect(move.status).toBe(200);
     expect(move.json.folder).toBe("Archive");
     expect(move.json.uid).toBe(106); // never pushed, so never re-assigned
+  });
+
+  test("checking IMAP capabilities fails closed and never caches a result for an unreachable server", async () => {
+    const check = await api("POST", `/api/accounts/${encodeURIComponent(liveAccountEmail)}/imap-capabilities`, { token });
+    expect(check.status).toBeGreaterThanOrEqual(500);
+
+    const account = await api("GET", `/api/accounts/${encodeURIComponent(liveAccountEmail)}`, { token });
+    expect(account.json.supportsUidPlus).toBeNull();
+  });
+
+  test("bulk PATCH fails closed for every id on a non-read-only account, none of them mutated locally", async () => {
+    const account = await api("GET", `/api/accounts/${encodeURIComponent(liveAccountEmail)}`, { token });
+    const a = createEmail(db, account.json.id, { folder: "INBOX", uid: 201, isDraft: false, isRead: false });
+    const b = createEmail(db, account.json.id, { folder: "INBOX", uid: 202, isDraft: false, isRead: false });
+
+    const bulk = await api("PATCH", `/api/accounts/${encodeURIComponent(liveAccountEmail)}/emails/bulk`, {
+      token,
+      body: { ids: [a.id, b.id], isRead: true },
+    });
+    expect(bulk.status).toBe(200);
+    expect(bulk.json.every((r: { ok: boolean }) => r.ok === false)).toBe(true);
+
+    expect(getEmail(db, a.id).isRead).toBe(false);
+    expect(getEmail(db, b.id).isRead).toBe(false);
+  });
+
+  test("bulk PATCH succeeds locally for a read-only account without attempting IMAP", async () => {
+    const account = await api("GET", `/api/accounts/${encodeURIComponent(readOnlyAccountEmail)}`, { token });
+    const a = createEmail(db, account.json.id, { folder: "INBOX", uid: 203, isDraft: false, isRead: false });
+    const b = createEmail(db, account.json.id, { folder: "INBOX", uid: 204, isDraft: false, isRead: false });
+
+    const bulk = await api("PATCH", `/api/accounts/${encodeURIComponent(readOnlyAccountEmail)}/emails/bulk`, {
+      token,
+      body: { ids: [a.id, b.id], isRead: true },
+    });
+    expect(bulk.status).toBe(200);
+    expect(bulk.json).toEqual([
+      { id: a.id, ok: true },
+      { id: b.id, ok: true },
+    ]);
+    expect(getEmail(db, a.id).isRead).toBe(true);
+    expect(getEmail(db, b.id).isRead).toBe(true);
+  });
+
+  test("a mixed bulk delete (draft + real message) on a non-read-only account: the draft succeeds, the real one fails closed", async () => {
+    const account = await api("GET", `/api/accounts/${encodeURIComponent(liveAccountEmail)}`, { token });
+    const draft = createEmail(db, account.json.id, { folder: "Drafts", uid: null, isDraft: true });
+    const real = createEmail(db, account.json.id, { folder: "INBOX", uid: 205, isDraft: false });
+
+    const bulk = await api("DELETE", `/api/accounts/${encodeURIComponent(liveAccountEmail)}/emails/bulk`, {
+      token,
+      body: { ids: [draft.id, real.id] },
+    });
+    expect(bulk.status).toBe(200);
+
+    const draftResult = bulk.json.find((r: { id: number }) => r.id === draft.id);
+    const realResult = bulk.json.find((r: { id: number }) => r.id === real.id);
+    expect(draftResult).toEqual({ id: draft.id, ok: true, softDeleted: false });
+    expect(realResult.ok).toBe(false);
+
+    expect(() => getEmail(db, draft.id)).toThrow(); // deleted
+    expect(() => getEmail(db, real.id)).not.toThrow(); // still there, push failed closed
   });
 });

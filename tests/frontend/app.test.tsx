@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "../../src/App";
+import type { Account } from "../../src/server/types";
 
 /**
  * Headless render smoke test: mounts the real <App/> tree against a mocked
@@ -15,7 +16,7 @@ import { App } from "../../src/App";
 const NOW = "2024-01-01T10:00:00.000Z";
 
 const USER = { id: 1, username: "default", authMethod: "password", createdAt: NOW, updatedAt: NOW };
-const ACCOUNT = {
+const ACCOUNT: Account = {
   id: 1,
   userId: 1,
   email: "me@example.com",
@@ -29,6 +30,8 @@ const ACCOUNT = {
   smtpSecure: true,
   smtpUsername: "me@example.com",
   readOnly: false,
+  skipSoftDelete: false,
+  supportsUidPlus: null,
   createdAt: NOW,
   updatedAt: NOW,
 };
@@ -92,7 +95,7 @@ function jsonResponse(body: unknown, status = 200) {
 
 const originalFetch = global.fetch;
 
-function installMockFetch(opts: { failEmailPatch?: number } = {}) {
+function installMockFetch(opts: { failEmailPatch?: number; uidPlusSupported?: boolean } = {}) {
   // A fresh mutable copy per test (installMockFetch runs in beforeEach), so a PATCH in one
   // test can't leak into another, and so GET /api/accounts reflects a prior PATCH within a test.
   let currentAccount = { ...ACCOUNT };
@@ -122,6 +125,10 @@ function installMockFetch(opts: { failEmailPatch?: number } = {}) {
       currentAccount = { ...currentAccount, ...body };
       return jsonResponse(currentAccount);
     }
+    if (method === "POST" && path === "/api/accounts/me%40example.com/imap-capabilities") {
+      currentAccount = { ...currentAccount, supportsUidPlus: opts.uidPlusSupported ?? true };
+      return jsonResponse(currentAccount);
+    }
     if (method === "GET" && path === "/api/accounts/me%40example.com/folders") return jsonResponse(FOLDERS);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails") {
       return jsonResponse([EMAIL, SECOND_EMAIL, THIRD_EMAIL]);
@@ -132,9 +139,24 @@ function installMockFetch(opts: { failEmailPatch?: number } = {}) {
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse({ ...EMAIL, isRead: true });
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse({ ...SECOND_EMAIL, isRead: true });
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/12") return jsonResponse({ ...THIRD_EMAIL, isRead: true });
-    if (method === "DELETE" && path === "/api/accounts/me%40example.com/emails/10") return new Response(null, { status: 204 });
-    if (method === "DELETE" && path === "/api/accounts/me%40example.com/emails/11") return new Response(null, { status: 204 });
-    if (method === "DELETE" && path === "/api/accounts/me%40example.com/emails/12") return new Response(null, { status: 204 });
+    if (method === "DELETE" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse({ softDeleted: false });
+    if (method === "DELETE" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse({ softDeleted: false });
+    if (method === "DELETE" && path === "/api/accounts/me%40example.com/emails/12") return jsonResponse({ softDeleted: false });
+
+    // Bulk actions (mark-as-read/unread, delete, move) share one request for the whole
+    // selection — see runBulkAction in both AppShell.tsx and server/routes/emails.ts.
+    if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/bulk") {
+      const body = init?.body ? JSON.parse(init.body as string) : { ids: [] };
+      return jsonResponse((body.ids as number[]).map(id => ({ id, ok: true })));
+    }
+    if (method === "DELETE" && path === "/api/accounts/me%40example.com/emails/bulk") {
+      const body = init?.body ? JSON.parse(init.body as string) : { ids: [] };
+      return jsonResponse((body.ids as number[]).map(id => ({ id, ok: true, softDeleted: false })));
+    }
+    if (method === "PATCH" && path.startsWith("/api/accounts/me%40example.com/emails/bulk/move/")) {
+      const body = init?.body ? JSON.parse(init.body as string) : { ids: [] };
+      return jsonResponse((body.ids as number[]).map(id => ({ id, ok: true })));
+    }
     if (method === "GET" && path === "/api/search") {
       // The mock doesn't replicate real matching (that's covered by backend tests) —
       // it just returns a canned hit so the UI wiring (fetch -> render -> select) is exercised.
@@ -471,5 +493,24 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
     await waitFor(() => expect(screen.queryByText("Account settings", { selector: "[data-slot=dialog-title]" })).toBeNull());
     await waitFor(() => expect(screen.getByTitle("Read-only")).toBeTruthy());
+  });
+
+  test("checking IMAP capabilities updates the soft-delete availability hint", async () => {
+    installMockFetch({ uidPlusSupported: true });
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(screen.getByTitle("More actions"));
+    await userEvent.click(screen.getByText("Account settings"));
+    expect(await screen.findByText("Account settings", { selector: "[data-slot=dialog-title]" })).toBeTruthy();
+
+    // Never checked yet (the fixture starts with supportsUidPlus: null).
+    expect(screen.getByText(/Server capability not checked yet/)).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: /check server capabilities/i }));
+    await waitFor(() => expect(screen.getByText(/This server supports UIDPLUS/)).toBeTruthy());
   });
 });

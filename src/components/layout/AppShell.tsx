@@ -32,7 +32,7 @@ import { useSearchResults } from "@/hooks/useSearchResults";
 import { useResizableWidth } from "@/hooks/useResizableWidth";
 import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import { useAuth } from "@/contexts/AuthContext";
-import { api } from "@/lib/api";
+import { api, type BulkResult } from "@/lib/api";
 import { forwardDraft, replyDraft } from "@/lib/compose";
 import type { EmailRecord } from "../../server/types";
 import type { SearchResult } from "../../server/models/search";
@@ -201,8 +201,9 @@ export function AppShell() {
 
   async function handleDelete() {
     if (!token || !selectedAccountEmail || !selectedEmail) return;
+    let result: { softDeleted: boolean };
     try {
-      await api.deleteEmail(token, selectedAccountEmail, selectedEmail.id);
+      result = await api.deleteEmail(token, selectedAccountEmail, selectedEmail.id);
     } catch (err) {
       toast.error(errorMessage(err, "Failed to delete message"));
       return;
@@ -210,7 +211,7 @@ export function AppShell() {
     removeLocal(selectedEmail.id);
     removeSearchResult(selectedEmail.id);
     setSelectedEmailId(null);
-    toast.success("Message deleted");
+    toast.success(result.softDeleted ? "Moved to Trash" : "Message deleted");
   }
 
   async function handleMove(folder: string) {
@@ -229,45 +230,60 @@ export function AppShell() {
     toast.success(`Moved to ${folder}`);
   }
 
-  /** Runs one API call per selected message and reports how many of them actually succeeded. */
-  async function runBulkAction(action: (id: number) => Promise<unknown>, verb: string): Promise<number[]> {
+  /**
+   * Runs one bulk request for every selected message — a single shared IMAP connection
+   * server-side (see runBulkAction in server/routes/emails.ts), instead of firing one request
+   * per message — and reports how many of them actually succeeded.
+   */
+  async function runBulkAction(action: (ids: number[]) => Promise<BulkResult[]>, verb: string): Promise<BulkResult[]> {
     if (!token || !selectedAccountEmail) return [];
     const ids = [...selectedIds];
-    const outcomes = await Promise.allSettled(ids.map(action));
-    const succeeded = ids.filter((_, i) => outcomes[i]!.status === "fulfilled");
-    const failed = ids.length - succeeded.length;
-
-    if (failed > 0) toast.error(`${verb} ${succeeded.length}/${ids.length} message(s) — ${failed} failed`);
-    else toast.success(`${verb} ${ids.length} message(s)`);
-
     setSelectedIds(new Set());
+
+    let results: BulkResult[];
+    try {
+      results = await action(ids);
+    } catch (err) {
+      toast.error(errorMessage(err, `Failed to ${verb.toLowerCase()} message(s)`));
+      return [];
+    }
+
+    const succeeded = results.filter(r => r.ok);
+    const failed = results.length - succeeded.length;
+
+    if (failed > 0) toast.error(`${verb} ${succeeded.length}/${results.length} message(s) — ${failed} failed`);
+    else toast.success(`${verb} ${results.length} message(s)`);
+
     return succeeded;
   }
 
   async function bulkMarkRead(isRead: boolean) {
     if (!token || !selectedAccountEmail) return;
     const succeeded = await runBulkAction(
-      id => api.updateEmail(token, selectedAccountEmail, id, { isRead }),
+      ids => api.bulkUpdateEmails(token, selectedAccountEmail, ids, { isRead }),
       isRead ? "Marked as read" : "Marked as unread"
     );
-    succeeded.forEach(id => patchLocal(id, { isRead }));
+    succeeded.forEach(r => patchLocal(r.id, { isRead }));
   }
 
   async function bulkDelete() {
     if (!token || !selectedAccountEmail) return;
-    const succeeded = await runBulkAction(id => api.deleteEmail(token, selectedAccountEmail, id), "Deleted");
-    succeeded.forEach(id => {
-      removeLocal(id);
-      if (selectedEmailId === id) setSelectedEmailId(null);
+    const succeeded = await runBulkAction(ids => api.bulkDeleteEmails(token, selectedAccountEmail, ids), "Deleted");
+    succeeded.forEach(r => {
+      removeLocal(r.id);
+      if (selectedEmailId === r.id) setSelectedEmailId(null);
     });
   }
 
   async function bulkMove(folder: string) {
     if (!token || !selectedAccountEmail) return;
-    const succeeded = await runBulkAction(id => api.moveEmail(token, selectedAccountEmail, id, folder), `Moved to ${folder} —`);
-    succeeded.forEach(id => {
-      removeLocal(id);
-      if (selectedEmailId === id) setSelectedEmailId(null);
+    const succeeded = await runBulkAction(
+      ids => api.bulkMoveEmails(token, selectedAccountEmail, ids, folder),
+      `Moved to ${folder} —`
+    );
+    succeeded.forEach(r => {
+      removeLocal(r.id);
+      if (selectedEmailId === r.id) setSelectedEmailId(null);
     });
   }
 

@@ -16,6 +16,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import nodemailer from "nodemailer";
+import { ImapFlow } from "imapflow";
 import { createTestDb } from "../helpers/db";
 import { startTestServer } from "../helpers/server";
 
@@ -159,5 +160,101 @@ describe.skipIf(!RUN)("IMAP sync against a real server (Greenmail)", () => {
     });
     const match = emails.json.find((e: { subject: string }) => e.subject === "Sent via API");
     expect(match).toBeDefined();
+  });
+
+  test("sending a draft also appends a copy into the account's Sent folder", async () => {
+    const draft = await api("POST", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/emails`, {
+      token,
+      body: {
+        from: [{ address: MAILBOX_EMAIL }],
+        to: [{ address: MAILBOX_EMAIL }],
+        subject: "Sent-folder copy check",
+        plainText: "Does a copy land in Sent?",
+      },
+    });
+    expect(draft.status).toBe(201);
+
+    const sent = await api("POST", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/emails/${draft.json.id}/send`, {
+      token,
+    });
+    expect(sent.status).toBe(200);
+    expect(sent.json.folder).toBe("Sent");
+    expect(sent.json.uid).not.toBeNull(); // successfully APPENDed, so it now has a real server UID
+
+    const job = await api("POST", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/downloads`, {
+      token,
+      body: { folder: "Sent" },
+    });
+    const finished = await waitForJob(MAILBOX_EMAIL, job.json.id);
+    expect(finished.status).toBe("completed");
+
+    const sentEmails = await api("GET", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/emails?folder=Sent`, {
+      token,
+    });
+    const match = sentEmails.json.find((e: { subject: string }) => e.subject === "Sent-folder copy check");
+    expect(match).toBeDefined();
+  });
+
+  test("deleting a synced message soft-deletes (moves to Trash) once UIDPLUS support is confirmed", async () => {
+    const check = await api("POST", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/imap-capabilities`, { token });
+    expect(check.status).toBe(200);
+    expect(check.json.supportsUidPlus).toBe(true); // Greenmail supports UIDPLUS
+
+    await sendViaGreenmail("To be soft-deleted", "Trash me");
+    const job = await api("POST", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/downloads`, {
+      token,
+      body: { folder: "INBOX" },
+    });
+    await waitForJob(MAILBOX_EMAIL, job.json.id);
+
+    const emails = await api("GET", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/emails?folder=INBOX`, {
+      token,
+    });
+    const target = emails.json.find((e: { subject: string }) => e.subject === "To be soft-deleted");
+    expect(target).toBeDefined();
+
+    const del = await api("DELETE", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/emails/${target.id}`, { token });
+    expect(del.status).toBe(200);
+    expect(del.json).toEqual({ softDeleted: true });
+
+    const moved = await api("GET", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/emails/${target.id}`, { token });
+    expect(moved.json.folder).toBe("Trash");
+  });
+
+  test("two-way sync pulls down a flag change made by another IMAP client", async () => {
+    await sendViaGreenmail("Flag me externally", "Watch this get marked read");
+    const job1 = await api("POST", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/downloads`, {
+      token,
+      body: { folder: "INBOX" },
+    });
+    await waitForJob(MAILBOX_EMAIL, job1.json.id);
+
+    const before = await api("GET", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/emails?folder=INBOX`, {
+      token,
+    });
+    const target = before.json.find((e: { subject: string }) => e.subject === "Flag me externally");
+    expect(target.isRead).toBe(false);
+
+    // A different IMAP client (not this app) marks it \Seen directly on the server.
+    const client = new ImapFlow({
+      host: GREENMAIL_HOST,
+      port: GREENMAIL_IMAP_PORT,
+      secure: false,
+      auth: { user: GREENMAIL_USER, pass: GREENMAIL_PASSWORD },
+      logger: false,
+    });
+    await client.connect();
+    await client.mailboxOpen("INBOX");
+    await client.messageFlagsAdd({ uid: target.uid }, ["\\Seen"], { uid: true });
+    await client.logout();
+
+    const job2 = await api("POST", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/downloads`, {
+      token,
+      body: { folder: "INBOX" },
+    });
+    await waitForJob(MAILBOX_EMAIL, job2.json.id);
+
+    const after = await api("GET", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/emails/${target.id}`, { token });
+    expect(after.json.isRead).toBe(true);
   });
 });

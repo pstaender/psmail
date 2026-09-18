@@ -23,6 +23,7 @@ interface EditForm {
   smtpUsername: string;
   smtpPassword: string; // blank = keep the existing password unchanged
   readOnly: boolean;
+  skipSoftDelete: boolean;
 }
 
 const EMPTY: EditForm = {
@@ -38,6 +39,7 @@ const EMPTY: EditForm = {
   smtpUsername: "",
   smtpPassword: "",
   readOnly: false,
+  skipSoftDelete: false,
 };
 
 function formFromAccount(account: Account): EditForm {
@@ -54,6 +56,7 @@ function formFromAccount(account: Account): EditForm {
     smtpUsername: account.smtpUsername,
     smtpPassword: "",
     readOnly: account.readOnly,
+    skipSoftDelete: account.skipSoftDelete,
   };
 }
 
@@ -80,16 +83,33 @@ export function EditAccountDialog({
   const [form, setForm] = useState<EditForm>(EMPTY);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checkingCapabilities, setCheckingCapabilities] = useState(false);
+  const [capabilitiesError, setCapabilitiesError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open && account) {
       setForm(formFromAccount(account));
       setError(null);
+      setCapabilitiesError(null);
     }
   }, [open, account]);
 
   function set<K extends keyof EditForm>(key: K, value: EditForm[K]) {
     setForm(prev => ({ ...prev, [key]: value }));
+  }
+
+  async function checkCapabilities() {
+    if (!token || !account) return;
+    setCheckingCapabilities(true);
+    setCapabilitiesError(null);
+    try {
+      await api.checkImapCapabilities(token, account.email);
+      onSaved(); // refetches the account list, so `account.supportsUidPlus` reflects the fresh result
+    } catch (err) {
+      setCapabilitiesError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCheckingCapabilities(false);
+    }
   }
 
   async function submit(e: React.FormEvent) {
@@ -109,6 +129,7 @@ export function EditAccountDialog({
         smtpSecure: form.smtpSecure,
         smtpUsername: form.smtpUsername,
         readOnly: form.readOnly,
+        skipSoftDelete: form.skipSoftDelete,
       };
       if (form.imapPassword) patch.imapPassword = form.imapPassword;
       if (form.smtpPassword) patch.smtpPassword = form.smtpPassword;
@@ -237,6 +258,53 @@ export function EditAccountDialog({
               <p className="text-xs text-muted-foreground">
                 Local changes (flags, moves, deletes) are never uploaded to this account's IMAP server.
               </p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-2 rounded-md border p-3">
+            <Switch
+              id="edit-skip-soft-delete"
+              className="mt-0.5"
+              checked={form.skipSoftDelete}
+              onCheckedChange={v => set("skipSoftDelete", v)}
+            />
+            <div className="flex-1 space-y-1">
+              <Label htmlFor="edit-skip-soft-delete">Always delete permanently</Label>
+              <p className="text-xs text-muted-foreground">
+                By default, Delete moves a message to Trash first instead of erasing it right away. Turn this on to
+                skip Trash and always expunge immediately.
+              </p>
+
+              {account?.supportsUidPlus === true && (
+                <p className="text-xs text-muted-foreground">
+                  This server supports UIDPLUS, so moving to Trash first is available.
+                </p>
+              )}
+              {account?.supportsUidPlus === false && (
+                <p className="text-xs text-amber-600">
+                  Soft-delete isn't available on this server: it doesn't support the UIDPLUS extension, so moving a
+                  message to Trash can't be done without risking other deleted messages too. Delete always expunges
+                  permanently until it does.
+                </p>
+              )}
+              {account?.supportsUidPlus === null && (
+                <p className="text-xs text-muted-foreground">
+                  Server capability not checked yet — Delete expunges permanently until it is.
+                </p>
+              )}
+
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="h-auto p-0"
+                onClick={checkCapabilities}
+                disabled={checkingCapabilities}
+              >
+                {checkingCapabilities && <Loader2 className="size-3 animate-spin" />}
+                Check server capabilities
+              </Button>
+              {capabilitiesError && <p className="text-xs text-destructive">{capabilitiesError}</p>}
             </div>
           </div>
 

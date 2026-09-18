@@ -7,7 +7,11 @@ import type { Database } from "bun:sqlite";
  * statement is idempotent: run again (e.g. a table created fresh already has the column),
  * SQLite's "duplicate column" error is swallowed rather than treated as a startup failure.
  */
-const MIGRATIONS = ["ALTER TABLE accounts ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0"];
+const MIGRATIONS = [
+  "ALTER TABLE accounts ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE accounts ADD COLUMN skip_soft_delete INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE accounts ADD COLUMN imap_uidplus INTEGER",
+];
 
 export function runMigrations(db: Database): void {
   for (const statement of MIGRATIONS) {

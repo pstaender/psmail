@@ -23,6 +23,13 @@ export interface LoginResult {
   user: { id: number; username: string };
 }
 
+export interface BulkResult {
+  id: number;
+  ok: boolean;
+  error?: string;
+  softDeleted?: boolean;
+}
+
 function enc(value: string): string {
   return encodeURIComponent(value);
 }
@@ -71,6 +78,8 @@ export const api = {
     request<Account>("PATCH", `/api/accounts/${enc(email)}`, { token, body: input }),
   deleteAccount: (token: string, email: string) =>
     request<void>("DELETE", `/api/accounts/${enc(email)}`, { token }),
+  checkImapCapabilities: (token: string, email: string) =>
+    request<Account>("POST", `/api/accounts/${enc(email)}/imap-capabilities`, { token }),
 
   listFolders: (token: string, accountEmail: string) =>
     request<FolderInfo[]>("GET", `/api/accounts/${enc(accountEmail)}/folders`, { token }),
@@ -88,11 +97,23 @@ export const api = {
   updateEmail: (token: string, accountEmail: string, emailId: number, input: EmailInput) =>
     request<EmailRecord>("PATCH", `/api/accounts/${enc(accountEmail)}/emails/${emailId}`, { token, body: input }),
   deleteEmail: (token: string, accountEmail: string, emailId: number) =>
-    request<void>("DELETE", `/api/accounts/${enc(accountEmail)}/emails/${emailId}`, { token }),
+    request<{ softDeleted: boolean }>("DELETE", `/api/accounts/${enc(accountEmail)}/emails/${emailId}`, { token }),
   moveEmail: (token: string, accountEmail: string, emailId: number, folder: string) =>
     request<EmailRecord>("PATCH", `/api/accounts/${enc(accountEmail)}/emails/${emailId}/move/${enc(folder)}`, { token }),
   sendEmail: (token: string, accountEmail: string, emailId: number) =>
     request<EmailRecord>("POST", `/api/accounts/${enc(accountEmail)}/emails/${emailId}/send`, { token }),
+
+  // Bulk actions share a single IMAP connection across the whole batch server-side, unlike
+  // firing one request per message — see runBulkAction in server/routes/emails.ts.
+  bulkUpdateEmails: (token: string, accountEmail: string, ids: number[], input: EmailInput) =>
+    request<BulkResult[]>("PATCH", `/api/accounts/${enc(accountEmail)}/emails/bulk`, { token, body: { ids, ...input } }),
+  bulkDeleteEmails: (token: string, accountEmail: string, ids: number[]) =>
+    request<BulkResult[]>("DELETE", `/api/accounts/${enc(accountEmail)}/emails/bulk`, { token, body: { ids } }),
+  bulkMoveEmails: (token: string, accountEmail: string, ids: number[], folder: string) =>
+    request<BulkResult[]>("PATCH", `/api/accounts/${enc(accountEmail)}/emails/bulk/move/${enc(folder)}`, {
+      token,
+      body: { ids },
+    }),
 
   uploadAttachment: (token: string, accountEmail: string, emailId: number, file: File) => {
     const formData = new FormData();

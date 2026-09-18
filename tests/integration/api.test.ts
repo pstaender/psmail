@@ -219,10 +219,12 @@ describe("P.S.Mail API", () => {
   });
 
   test("DELETE .../emails/:id removes the draft", async () => {
-    const { status } = await api("DELETE", `/api/accounts/${encodeURIComponent(accountEmail)}/emails/${draftId}`, {
+    const { status, json } = await api("DELETE", `/api/accounts/${encodeURIComponent(accountEmail)}/emails/${draftId}`, {
       token,
     });
-    expect(status).toBe(204);
+    expect(status).toBe(200);
+    // A draft has no IMAP UID, so there's nothing to soft-delete on the server — it's just gone.
+    expect(json).toEqual({ softDeleted: false });
 
     const { status: getStatus } = await api(
       "GET",

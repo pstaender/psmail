@@ -9,6 +9,7 @@ import { createAccount, getAccountRow } from "../../src/server/models/accounts";
 import { createDownloadJob, getDownloadJob } from "../../src/server/models/downloads";
 import { findEmailByUid, listEmails } from "../../src/server/models/emails";
 import { runSync } from "../../src/server/services/sync";
+import type { RemoteFlagState } from "../../src/server/services/imap";
 
 function rawMessage(opts: { uid: number; subject: string; withAttachment?: boolean }): string {
   const lines = [
@@ -42,6 +43,15 @@ const FAKE_MESSAGES = [
 const fakeFetchMessages = async (_creds: unknown, _folder: string, sinceUid: number) => ({
   messages: FAKE_MESSAGES.filter(m => m.uid > sinceUid),
 });
+
+// Matches what fakeFetchMessages' persisted rows actually have (createEmail always starts a
+// synced message as unread/unflagged) — a safe no-op default for tests that aren't specifically
+// exercising reconciliation, so it doesn't delete everything fakeFetchMessages just created.
+const fakeFetchRemoteFlagsNoop = async (_creds: unknown, _folder: string, uids: number[]) => {
+  const map = new Map<number, RemoteFlagState>();
+  for (const uid of uids) map.set(uid, { seen: false, flagged: false });
+  return map;
+};
 
 describe("runSync", () => {
   let configDir: string;
@@ -95,6 +105,7 @@ describe("runSync", () => {
       downloadJobId: job.id,
       imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
       fetchMessages: fakeFetchMessages,
+      fetchRemoteFlags: fakeFetchRemoteFlagsNoop,
       onProgress: p => progressUpdates.push(p),
     });
 
@@ -128,6 +139,7 @@ describe("runSync", () => {
       downloadJobId: job1.id,
       imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
       fetchMessages: fakeFetchMessages,
+      fetchRemoteFlags: fakeFetchRemoteFlagsNoop,
     });
 
     const job2 = createDownloadJob(db, account.id, "INBOX");
@@ -139,10 +151,100 @@ describe("runSync", () => {
       downloadJobId: job2.id,
       imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
       fetchMessages: fakeFetchMessages,
+      fetchRemoteFlags: fakeFetchRemoteFlagsNoop,
     });
 
     // All 3 fake messages already exist locally now, so nothing new to persist.
     expect(result.downloaded).toBe(0);
     expect(listEmails(db, account.id, { folder: "INBOX" })).toHaveLength(3);
+  });
+
+  test("two-way sync: pulls down a flag change made by another IMAP client", async () => {
+    const { db, user, account } = await setup();
+
+    const job1 = createDownloadJob(db, account.id, "INBOX");
+    await runSync({
+      db,
+      account,
+      username: user.username,
+      folder: "INBOX",
+      downloadJobId: job1.id,
+      imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      fetchMessages: fakeFetchMessages,
+      fetchRemoteFlags: fakeFetchRemoteFlagsNoop,
+    });
+
+    const stored = listEmails(db, account.id, { folder: "INBOX" });
+    const second = stored.find(e => e.subject === "Second")!;
+    expect(second.isRead).toBe(false);
+    expect(second.isFlagged).toBe(false);
+
+    // Simulates another IMAP client marking uid 2 as read and flagged, and leaving 1 and 3 alone.
+    const fetchRemoteFlagsWithChange = async (_creds: unknown, _folder: string, uids: number[]) => {
+      const map = new Map<number, RemoteFlagState>();
+      for (const uid of uids) map.set(uid, uid === 2 ? { seen: true, flagged: true } : { seen: false, flagged: false });
+      return map;
+    };
+
+    const job2 = createDownloadJob(db, account.id, "INBOX");
+    await runSync({
+      db,
+      account,
+      username: user.username,
+      folder: "INBOX",
+      downloadJobId: job2.id,
+      imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      fetchMessages: fakeFetchMessages,
+      fetchRemoteFlags: fetchRemoteFlagsWithChange,
+    });
+
+    const afterSync = listEmails(db, account.id, { folder: "INBOX" });
+    const updatedSecond = afterSync.find(e => e.subject === "Second")!;
+    expect(updatedSecond.isRead).toBe(true);
+    expect(updatedSecond.isFlagged).toBe(true);
+    // The other two were left alone, both locally and on the (simulated) server.
+    const first = afterSync.find(e => e.subject === "First")!;
+    expect(first.isRead).toBe(false);
+    expect(first.isFlagged).toBe(false);
+  });
+
+  test("two-way sync: removes a message no longer present in the folder on the server", async () => {
+    const { db, user, account } = await setup();
+
+    const job1 = createDownloadJob(db, account.id, "INBOX");
+    await runSync({
+      db,
+      account,
+      username: user.username,
+      folder: "INBOX",
+      downloadJobId: job1.id,
+      imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      fetchMessages: fakeFetchMessages,
+      fetchRemoteFlags: fakeFetchRemoteFlagsNoop,
+    });
+    expect(listEmails(db, account.id, { folder: "INBOX" })).toHaveLength(3);
+
+    // Simulates uid 2 having been deleted (or moved elsewhere) by another IMAP client — it's
+    // simply missing from the server's response now.
+    const fetchRemoteFlagsWithDeletion = async (_creds: unknown, _folder: string, uids: number[]) => {
+      const map = new Map<number, RemoteFlagState>();
+      for (const uid of uids) if (uid !== 2) map.set(uid, { seen: false, flagged: false });
+      return map;
+    };
+
+    const job2 = createDownloadJob(db, account.id, "INBOX");
+    await runSync({
+      db,
+      account,
+      username: user.username,
+      folder: "INBOX",
+      downloadJobId: job2.id,
+      imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      fetchMessages: fakeFetchMessages,
+      fetchRemoteFlags: fetchRemoteFlagsWithDeletion,
+    });
+
+    const remaining = listEmails(db, account.id, { folder: "INBOX" });
+    expect(remaining.map(e => e.subject).sort()).toEqual(["First", "Third"]);
   });
 });

@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { join } from "node:path";
+import type { ImapFlow } from "imapflow";
 import { decryptAccountCredentials, type AccountRow } from "../models/accounts";
 import {
   addAttachment,
@@ -13,14 +14,17 @@ import {
   moveEmail,
   updateEmail,
   type EmailInput,
+  type EmailRow,
 } from "../models/emails";
 import { json, noContent, parseIntParam, readJsonBody, requireAuth, requiredParam, withErrorHandling } from "../http";
 import { getEmailAttachmentsDir, sanitizeSegment } from "../config/paths";
 import { sendDraftEmail, type AttachmentWithData } from "../services/smtp";
-import { deleteMessage, moveMessage, setMessageFlags, withImapClient, type FlagChanges } from "../services/imap";
+import { appendMessage, deleteMessage, moveMessage, setMessageFlags, withImapClient, type FlagChanges } from "../services/imap";
 import { getUserRowById } from "../models/users";
-import { ApiError, NotFoundError } from "../types";
+import { ApiError, NotFoundError, type EmailRecord } from "../types";
 import { getOwnedAccountByEmailParam } from "./accounts";
+
+const TRASH_FOLDER = "Trash";
 
 /** Throws NotFoundError unless the email row belongs to the given account. */
 function getOwnedEmail(db: Database, emailId: number, accountId: number) {
@@ -32,11 +36,23 @@ function getOwnedEmail(db: Database, emailId: number, accountId: number) {
 /**
  * A local change (flag/move/delete) is only pushed to the IMAP server when the account isn't
  * read-only AND the message actually came from that server in the first place — a draft, or a
- * message "sent" locally (we don't yet APPEND sent mail to the server's Sent folder), has no
- * UID and thus nothing on the server to push to.
+ * message sent but never successfully APPENDed to the Sent folder, has no UID and thus nothing
+ * on the server to push to.
  */
 export function canPushToImap(account: AccountRow, uid: number | null): boolean {
   return !account.read_only && uid !== null;
+}
+
+/**
+ * Soft-delete (move to Trash instead of expunging) is only offered when the server supports
+ * UIDPLUS: the underlying move falls back to COPY + a bare EXPUNGE on servers without the MOVE
+ * extension, and without UIDPLUS that EXPUNGE can also purge other unrelated \Deleted-flagged
+ * messages sitting in the same folder. `skipSoftDelete` opts back into a permanent delete even
+ * when soft-delete would otherwise be available. Deleting something already in Trash is always
+ * permanent — there's no Trash-in-Trash.
+ */
+export function wantsSoftDelete(account: AccountRow, folder: string): boolean {
+  return account.imap_uidplus === 1 && !account.skip_soft_delete && folder !== TRASH_FOLDER;
 }
 
 function imapCredentialsFor(account: AccountRow, imapPassword: string) {
@@ -47,6 +63,124 @@ function imapCredentialsFor(account: AccountRow, imapPassword: string) {
     username: account.imap_username,
     password: imapPassword,
   };
+}
+
+/** Pushes a flag change to IMAP (when applicable) and then applies it locally — in that order, so a failed push never touches local state. */
+async function performFlagUpdate(
+  db: Database,
+  account: AccountRow,
+  existing: EmailRow,
+  patch: EmailInput,
+  client?: ImapFlow
+): Promise<EmailRecord> {
+  const flagChanges: FlagChanges = {};
+  if (patch.isRead !== undefined) flagChanges.seen = patch.isRead;
+  if (patch.isFlagged !== undefined) flagChanges.flagged = patch.isFlagged;
+
+  if (Object.keys(flagChanges).length > 0 && canPushToImap(account, existing.uid)) {
+    await setMessageFlags(client!, existing.folder, existing.uid!, flagChanges);
+  }
+  return updateEmail(db, existing.id, patch);
+}
+
+/** Deletes (or soft-deletes) a message: pushes to IMAP first when applicable, then mirrors the same outcome locally. */
+export async function performDelete(
+  db: Database,
+  account: AccountRow,
+  existing: EmailRow,
+  client?: ImapFlow
+): Promise<{ softDeleted: boolean }> {
+  if (canPushToImap(account, existing.uid)) {
+    if (wantsSoftDelete(account, existing.folder)) {
+      const result = await moveMessage(client!, existing.folder, existing.uid!, TRASH_FOLDER);
+      moveEmail(db, existing.id, TRASH_FOLDER, result.newUid);
+      return { softDeleted: true };
+    }
+    await deleteMessage(client!, existing.folder, existing.uid!);
+  }
+  deleteEmail(db, existing.id);
+  return { softDeleted: false };
+}
+
+/** Moves a message: pushes to IMAP first when applicable (following the server's re-assigned UID), then mirrors it locally. */
+async function performMove(
+  db: Database,
+  account: AccountRow,
+  existing: EmailRow,
+  folderName: string,
+  client?: ImapFlow
+): Promise<EmailRecord> {
+  let newUid: number | null | undefined;
+  if (canPushToImap(account, existing.uid)) {
+    const result = await moveMessage(client!, existing.folder, existing.uid!, folderName);
+    newUid = result.newUid;
+  }
+  return moveEmail(db, existing.id, folderName, newUid);
+}
+
+interface BulkRequestBody {
+  ids: number[];
+}
+
+interface BulkResult {
+  id: number;
+  ok: boolean;
+  error?: string;
+}
+
+function requireIds(body: Partial<BulkRequestBody>): number[] {
+  if (!Array.isArray(body.ids) || body.ids.length === 0) throw new ApiError(400, "ids must be a non-empty array");
+  return body.ids;
+}
+
+/**
+ * Runs `fn` once per id, sharing a single IMAP connection across the whole batch when any of
+ * them will actually push to the server — bulk actions used to open one connection per
+ * message, which doesn't scale to larger selections. Each id's outcome is independent: one
+ * failing doesn't stop or roll back the rest.
+ */
+async function runBulkAction<T>(
+  db: Database,
+  account: AccountRow,
+  encryptionKey: Buffer,
+  ids: number[],
+  fn: (existing: EmailRow, client?: ImapFlow) => Promise<T>
+): Promise<(BulkResult & { value?: T })[]> {
+  const rows = ids.map(id => ({ id, existing: getOwnedEmail(db, id, account.id) }));
+  const results: (BulkResult & { value?: T })[] = [];
+
+  const runOne = async (id: number, existing: EmailRow, client?: ImapFlow) => {
+    try {
+      const value = await fn(existing, client);
+      results.push({ id, ok: true, value });
+    } catch (error) {
+      results.push({ id, ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
+  // Local-only ids (read-only account, or a draft with no UID) never touch the network, so
+  // they're handled up front — a connection failure for the ids that DO need pushing must not
+  // block ones that never needed it in the first place.
+  const localRows = rows.filter(r => !canPushToImap(account, r.existing.uid));
+  const pushRows = rows.filter(r => canPushToImap(account, r.existing.uid));
+
+  for (const { id, existing } of localRows) await runOne(id, existing);
+
+  if (pushRows.length > 0) {
+    const { imapPassword } = decryptAccountCredentials(account, encryptionKey);
+    try {
+      await withImapClient(imapCredentialsFor(account, imapPassword), async client => {
+        for (const { id, existing } of pushRows) await runOne(id, existing, client);
+      });
+    } catch (error) {
+      // The connection itself failed (bad host, auth, ...) before any of these ids could be
+      // tried — every one of them fails closed with the same underlying error.
+      const message = error instanceof Error ? error.message : String(error);
+      for (const { id } of pushRows) results.push({ id, ok: false, error: message });
+    }
+  }
+
+  return results;
 }
 
 export function emailsRoutes(db: Database) {
@@ -78,6 +212,44 @@ export function emailsRoutes(db: Database) {
         return json(email, { status: 201 });
       }),
     },
+    "/api/accounts/:email/emails/bulk": {
+      PATCH: withErrorHandling(async req => {
+        const { session, encryptionKey } = requireAuth(req, db);
+        const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        const body = await readJsonBody<Partial<BulkRequestBody> & EmailInput>(req);
+        const ids = requireIds(body);
+
+        const results = await runBulkAction(db, account, encryptionKey, ids, (existing, client) =>
+          performFlagUpdate(db, account, existing, body, client)
+        );
+        return json(results.map(({ value, ...rest }) => rest));
+      }),
+      DELETE: withErrorHandling(async req => {
+        const { session, encryptionKey } = requireAuth(req, db);
+        const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        const body = await readJsonBody<Partial<BulkRequestBody>>(req);
+        const ids = requireIds(body);
+
+        const results = await runBulkAction(db, account, encryptionKey, ids, (existing, client) =>
+          performDelete(db, account, existing, client)
+        );
+        return json(results.map(r => ({ id: r.id, ok: r.ok, error: r.error, softDeleted: r.value?.softDeleted ?? false })));
+      }),
+    },
+    "/api/accounts/:email/emails/bulk/move/:folderName": {
+      PATCH: withErrorHandling(async req => {
+        const { session, encryptionKey } = requireAuth(req, db);
+        const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        const folderName = decodeURIComponent(requiredParam(req.params.folderName, "folderName"));
+        const body = await readJsonBody<Partial<BulkRequestBody>>(req);
+        const ids = requireIds(body);
+
+        const results = await runBulkAction(db, account, encryptionKey, ids, (existing, client) =>
+          performMove(db, account, existing, folderName, client)
+        );
+        return json(results.map(({ value, ...rest }) => rest));
+      }),
+    },
     "/api/accounts/:email/emails/:emailId": {
       GET: withErrorHandling(async req => {
         const { session } = requireAuth(req, db);
@@ -92,21 +264,22 @@ export function emailsRoutes(db: Database) {
         const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
         const emailId = parseIntParam(req.params.emailId, "emailId");
         const existing = getOwnedEmail(db, emailId, account.id);
-
         const body = await readJsonBody<EmailInput>(req);
 
-        const flagChanges: FlagChanges = {};
-        if (body.isRead !== undefined) flagChanges.seen = body.isRead;
-        if (body.isFlagged !== undefined) flagChanges.flagged = body.isFlagged;
+        const needsPush =
+          (body.isRead !== undefined || body.isFlagged !== undefined) && canPushToImap(account, existing.uid);
 
-        if (Object.keys(flagChanges).length > 0 && canPushToImap(account, existing.uid)) {
+        let updated: EmailRecord;
+        if (needsPush) {
           const { imapPassword } = decryptAccountCredentials(account, encryptionKey);
-          await withImapClient(imapCredentialsFor(account, imapPassword), client =>
-            setMessageFlags(client, existing.folder, existing.uid!, flagChanges)
+          updated = await withImapClient(imapCredentialsFor(account, imapPassword), client =>
+            performFlagUpdate(db, account, existing, body, client)
           );
+        } else {
+          updated = await performFlagUpdate(db, account, existing, body);
         }
 
-        return json(updateEmail(db, emailId, body));
+        return json(updated);
       }),
       DELETE: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
@@ -114,15 +287,17 @@ export function emailsRoutes(db: Database) {
         const emailId = parseIntParam(req.params.emailId, "emailId");
         const existing = getOwnedEmail(db, emailId, account.id);
 
+        let result: { softDeleted: boolean };
         if (canPushToImap(account, existing.uid)) {
           const { imapPassword } = decryptAccountCredentials(account, encryptionKey);
-          await withImapClient(imapCredentialsFor(account, imapPassword), client =>
-            deleteMessage(client, existing.folder, existing.uid!)
+          result = await withImapClient(imapCredentialsFor(account, imapPassword), client =>
+            performDelete(db, account, existing, client)
           );
+        } else {
+          result = await performDelete(db, account, existing);
         }
 
-        deleteEmail(db, emailId);
-        return noContent();
+        return json(result);
       }),
     },
     "/api/accounts/:email/emails/:emailId/send": {
@@ -139,7 +314,7 @@ export function emailsRoutes(db: Database) {
           throw new ApiError(400, "Draft has no recipients");
         }
 
-        const { smtpPassword } = decryptAccountCredentials(account, encryptionKey);
+        const { imapPassword, smtpPassword } = decryptAccountCredentials(account, encryptionKey);
 
         const attachmentsWithData: AttachmentWithData[] = await Promise.all(
           (draft.attachments ?? []).map(async attachment => {
@@ -149,7 +324,7 @@ export function emailsRoutes(db: Database) {
           })
         );
 
-        const result = await sendDraftEmail(
+        const composed = await sendDraftEmail(
           {
             host: account.smtp_host,
             port: account.smtp_port,
@@ -161,10 +336,27 @@ export function emailsRoutes(db: Database) {
           attachmentsWithData
         );
 
+        // Best-effort: SMTP has already irrevocably delivered the message by this point, so a
+        // failure here (bad connection, server rejects the write, ...) must not fail the request
+        // — that would look like sending itself failed and risk a confusing resend. It just means
+        // this message won't show up in the Sent folder from other IMAP clients/webmail.
+        let sentUid: number | null = null;
+        if (!account.read_only) {
+          try {
+            const result = await withImapClient(imapCredentialsFor(account, imapPassword), client =>
+              appendMessage(client, "Sent", composed.raw, ["\\Seen"])
+            );
+            sentUid = result.uid;
+          } catch (error) {
+            console.error(`Failed to append sent message to IMAP Sent folder for ${account.email}:`, error);
+          }
+        }
+
         const sent = updateEmail(db, emailId, {
           isDraft: false,
           folder: "Sent",
-          messageId: result.messageId,
+          uid: sentUid,
+          messageId: composed.messageId,
           date: new Date().toISOString(),
         });
 
@@ -177,22 +369,19 @@ export function emailsRoutes(db: Database) {
         const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
         const emailId = parseIntParam(req.params.emailId, "emailId");
         const existing = getOwnedEmail(db, emailId, account.id);
-
         const folderName = decodeURIComponent(requiredParam(req.params.folderName, "folderName"));
 
-        // Undefined (not pushed to IMAP) tells moveEmail to leave the uid as-is; a MOVE that
-        // *was* pushed re-assigns the message a new, destination-folder-scoped UID, which the
-        // local row must follow (null if the server didn't report one — see moveMessage).
-        let newUid: number | null | undefined;
+        let updated: EmailRecord;
         if (canPushToImap(account, existing.uid)) {
           const { imapPassword } = decryptAccountCredentials(account, encryptionKey);
-          const result = await withImapClient(imapCredentialsFor(account, imapPassword), client =>
-            moveMessage(client, existing.folder, existing.uid!, folderName)
+          updated = await withImapClient(imapCredentialsFor(account, imapPassword), client =>
+            performMove(db, account, existing, folderName, client)
           );
-          newUid = result.newUid;
+        } else {
+          updated = await performMove(db, account, existing, folderName);
         }
 
-        return json(moveEmail(db, emailId, folderName, newUid));
+        return json(updated);
       }),
     },
     "/api/accounts/:email/emails/:emailId/attachments": {

@@ -246,6 +246,27 @@ export function findEmailByUid(db: Database, accountId: number, folder: string, 
     .get(accountId, folder, uid);
 }
 
+export interface SyncedEmailRef {
+  id: number;
+  uid: number;
+  isRead: boolean;
+  isFlagged: boolean;
+}
+
+/**
+ * Every already-synced (non-null UID) local row in `folder` — for reconciling with the
+ * server's current flags/existence during a two-way sync (see reconcileExisting in
+ * services/sync.ts). Deliberately lean (no body/headers) since it may cover a whole folder.
+ */
+export function listSyncedRefs(db: Database, accountId: number, folder: string): SyncedEmailRef[] {
+  const rows = db
+    .query<{ id: number; uid: number; is_read: number; is_flagged: number }, [number, string]>(
+      "SELECT id, uid, is_read, is_flagged FROM emails WHERE account_id = ? AND folder = ? AND uid IS NOT NULL"
+    )
+    .all(accountId, folder);
+  return rows.map(row => ({ id: row.id, uid: row.uid, isRead: !!row.is_read, isFlagged: !!row.is_flagged }));
+}
+
 export function updateEmail(db: Database, id: number, input: EmailInput): EmailRecord {
   const existing = getEmailRow(db, id);
 
