@@ -21,6 +21,7 @@ export function MessageList({
   folder,
   onSelect,
   onToggleFlag,
+  onEditDraft,
 }: {
   emails: EmailRecord[];
   loading: boolean;
@@ -32,6 +33,8 @@ export function MessageList({
   /** `event` carries the click's modifier keys so the caller can decide plain-click-to-read vs Cmd/Ctrl-click-to-toggle-selection. */
   onSelect: (email: EmailRecord, event: React.MouseEvent) => void;
   onToggleFlag: (email: EmailRecord) => void;
+  /** Double-clicking a draft opens it for editing directly, instead of just reading it. */
+  onEditDraft: (email: EmailRecord) => void;
 }) {
   if (loading && emails.length === 0) {
     return (
@@ -52,6 +55,7 @@ export function MessageList({
           <li key={email.id}>
             <button
               onClick={e => onSelect(email, e)}
+              onDoubleClick={() => email.isDraft && onEditDraft(email)}
               className={cn(
                 "group flex w-full flex-col gap-0.5 px-3 py-2.5 text-left hover:bg-accent/60 transition-colors",
                 selectedId === email.id && "bg-accent",

@@ -33,7 +33,7 @@ import { useResizableWidth } from "@/hooks/useResizableWidth";
 import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import { useAuth } from "@/contexts/AuthContext";
 import { api, type BulkResult, type FolderInfo } from "@/lib/api";
-import { forwardDraft, replyDraft } from "@/lib/compose";
+import { editDraft, forwardDraft, replyDraft } from "@/lib/compose";
 import { resolveSpecialFolder } from "@/lib/folders";
 import type { Account, EmailRecord } from "../../server/types";
 import type { SearchResult } from "../../server/models/search";
@@ -538,6 +538,7 @@ export function AppShell() {
                 folder={selectedFolder}
                 onSelect={selectEmail}
                 onToggleFlag={toggleFlag}
+                onEditDraft={email => openCompose(editDraft(email))}
               />
             ) : (
               <EmptyState title="No account selected" description="Add or select an account to see messages." />
@@ -560,6 +561,7 @@ export function AppShell() {
               onDelete={requestDelete}
               onMove={handleMove}
               onToggleRead={toggleRead}
+              onEditDraft={() => openCompose(editDraft(selectedEmail))}
             />
           ) : (
             <EmptyState title="Select a message" description="Choose a message from the list to read it here." />

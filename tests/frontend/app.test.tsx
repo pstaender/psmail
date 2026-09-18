@@ -94,6 +94,19 @@ const THIRD_EMAIL = {
   htmlText: "<p>Hi <b>from</b> Carol</p>",
 };
 
+const DRAFT_EMAIL = {
+  ...EMAIL,
+  id: 13,
+  uid: null,
+  isDraft: true,
+  isRead: true, // avoid tripping the mark-as-read-on-open effect in tests unrelated to that
+  folder: "Drafts",
+  subject: "Unfinished draft",
+  to: [{ address: "someone@example.com" }],
+  plainText: "Getting there...",
+  htmlText: null,
+};
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
@@ -104,6 +117,9 @@ const originalFetch = global.fetch;
 // need to inspect what folder a saved draft was actually sent under — reset per installMockFetch
 // call (mirrors currentAccount's per-test freshness, just below).
 let capturedCreateDraftBody: Record<string, unknown> | null = null;
+// Same, for PATCH .../emails/13 (DRAFT_EMAIL) — asserts that editing an existing draft updates
+// it in place instead of creating a new one.
+let capturedUpdateDraftBody: Record<string, unknown> | null = null;
 
 function installMockFetch(
   opts: { failEmailPatch?: number; uidPlusSupported?: boolean; accountOverrides?: Partial<Account> } = {}
@@ -112,6 +128,7 @@ function installMockFetch(
   // test can't leak into another, and so GET /api/accounts reflects a prior PATCH within a test.
   let currentAccount = { ...ACCOUNT, ...opts.accountOverrides };
   capturedCreateDraftBody = null;
+  capturedUpdateDraftBody = null;
 
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
@@ -144,7 +161,7 @@ function installMockFetch(
     }
     if (method === "GET" && path === "/api/accounts/me%40example.com/folders") return jsonResponse(FOLDERS);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails") {
-      return jsonResponse([EMAIL, SECOND_EMAIL, THIRD_EMAIL]);
+      return jsonResponse([EMAIL, SECOND_EMAIL, THIRD_EMAIL, DRAFT_EMAIL]);
     }
     if (method === "POST" && path === "/api/accounts/me%40example.com/emails") {
       const body = init?.body ? JSON.parse(init.body as string) : {};
@@ -154,9 +171,15 @@ function installMockFetch(
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse(EMAIL);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse(SECOND_EMAIL);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/12") return jsonResponse(THIRD_EMAIL);
+    if (method === "GET" && path === "/api/accounts/me%40example.com/emails/13") return jsonResponse(DRAFT_EMAIL);
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse({ ...EMAIL, isRead: true });
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse({ ...SECOND_EMAIL, isRead: true });
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/12") return jsonResponse({ ...THIRD_EMAIL, isRead: true });
+    if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/13") {
+      const body = init?.body ? JSON.parse(init.body as string) : {};
+      capturedUpdateDraftBody = body;
+      return jsonResponse({ ...DRAFT_EMAIL, ...body });
+    }
     if (method === "DELETE" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse({ softDeleted: false });
     if (method === "DELETE" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse({ softDeleted: false });
     if (method === "DELETE" && path === "/api/accounts/me%40example.com/emails/12") return jsonResponse({ softDeleted: false });
@@ -278,6 +301,63 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
     await waitFor(() => expect(screen.queryByText("New message")).toBeNull());
     expect(capturedCreateDraftBody?.folder).toBe("Entwürfe");
+  });
+
+  test("opening a draft shows an Edit draft button after Delete, and editing it updates the same draft", async () => {
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(await screen.findByText("Unfinished draft"));
+    await waitFor(() => expect(screen.getAllByText("Unfinished draft").length).toBeGreaterThan(0));
+
+    const editButton = await screen.findByRole("button", { name: /edit draft/i });
+    expect(editButton.className).toContain("ml-auto");
+
+    // Comes after Delete in the toolbar, consistent with "right-aligned, after Delete".
+    const deleteButton = screen.getByRole("button", { name: /delete/i });
+    expect(deleteButton.compareDocumentPosition(editButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await userEvent.click(editButton);
+    expect(await screen.findByText("Edit draft", { selector: "[data-slot=dialog-title]" })).toBeTruthy();
+    expect((screen.getByLabelText("Subject") as HTMLInputElement).value).toBe("Unfinished draft");
+
+    await userEvent.click(screen.getByRole("button", { name: /save draft/i }));
+    await waitFor(() => expect(screen.queryByText("Edit draft", { selector: "[data-slot=dialog-title]" })).toBeNull());
+
+    // Updated the SAME draft (PATCH /emails/13) — not a new one (no create call happened).
+    expect(capturedUpdateDraftBody?.subject).toBe("Unfinished draft");
+    expect(capturedCreateDraftBody).toBeNull();
+  });
+
+  test("double-clicking a draft in the list opens it for editing directly", async () => {
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    const draftRow = await screen.findByText("Unfinished draft");
+    await userEvent.dblClick(draftRow);
+
+    expect(await screen.findByText("Edit draft", { selector: "[data-slot=dialog-title]" })).toBeTruthy();
+    expect((screen.getByLabelText("Subject") as HTMLInputElement).value).toBe("Unfinished draft");
+  });
+
+  test("double-clicking a non-draft message doesn't open the compose dialog", async () => {
+    render(<App />);
+
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.click(await screen.findByRole("button", { name: /sign in/i }));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    const row = await screen.findByText("Hello there");
+    await userEvent.dblClick(row);
+
+    expect(screen.queryByText("New message")).toBeNull();
+    expect(screen.queryByText("Edit draft", { selector: "[data-slot=dialog-title]" })).toBeNull();
   });
 
   test("remembers the last body view across messages, downgrading Full HTML to Safe HTML", async () => {

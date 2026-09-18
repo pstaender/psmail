@@ -1,4 +1,4 @@
-import { FolderInput, Forward, Mail, Reply, Trash2 } from "lucide-react";
+import { FolderInput, Forward, Mail, PenSquare, Reply, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
@@ -19,6 +19,7 @@ export function MessageToolbar({
   onDelete,
   onMove,
   onToggleRead,
+  onEditDraft,
 }: {
   email: EmailRecord;
   folders: FolderInfo[];
@@ -27,6 +28,7 @@ export function MessageToolbar({
   onDelete: () => void;
   onMove: (folder: string) => void;
   onToggleRead: () => void;
+  onEditDraft: () => void;
 }) {
   return (
     <div className="flex items-center gap-1 border-b px-3 py-1.5">
@@ -63,6 +65,12 @@ export function MessageToolbar({
       <Button variant="ghost" size="sm" onClick={onDelete}>
         <Trash2 className="size-4" /> Delete
       </Button>
+
+      {email.isDraft && (
+        <Button variant="ghost" size="sm" className="ml-auto" onClick={onEditDraft}>
+          <PenSquare className="size-4" /> Edit draft
+        </Button>
+      )}
     </div>
   );
 }

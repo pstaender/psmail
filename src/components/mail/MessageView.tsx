@@ -16,6 +16,7 @@ export function MessageView({
   onDelete,
   onMove,
   onToggleRead,
+  onEditDraft,
 }: {
   accountEmail: string;
   email: EmailRecord;
@@ -27,6 +28,7 @@ export function MessageView({
   onDelete: () => void;
   onMove: (folder: string) => void;
   onToggleRead: () => void;
+  onEditDraft: () => void;
 }) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -38,6 +40,7 @@ export function MessageView({
         onDelete={onDelete}
         onMove={onMove}
         onToggleRead={onToggleRead}
+        onEditDraft={onEditDraft}
       />
       <MessageHeader email={email} />
       <AttachmentList accountEmail={accountEmail} emailId={email.id} attachments={email.attachments ?? []} />

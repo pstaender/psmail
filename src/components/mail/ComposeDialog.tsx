@@ -9,14 +9,18 @@ import { api, type FolderInfo } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { parseAddressList } from "@/lib/addresses";
 import { resolveSpecialFolder } from "@/lib/folders";
-import type { EmailRecord } from "../../server/types";
+import type { AttachmentRecord, EmailRecord } from "../../server/types";
 
 export interface ComposeDraft {
+  /** Present when editing an existing draft in place (see editDraft in lib/compose.ts) — saving updates that same row instead of creating a new one. */
+  id?: number;
   to?: string;
   cc?: string;
   subject?: string;
   body?: string;
   inReplyTo?: string | null;
+  /** The draft's attachments already on the server, when editing — shown alongside newly-added files, removable individually. */
+  attachments?: AttachmentRecord[];
 }
 
 export function ComposeDialog({
@@ -43,8 +47,11 @@ export function ComposeDialog({
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  const [existingAttachments, setExistingAttachments] = useState<AttachmentRecord[]>([]);
   const [busy, setBusy] = useState<"draft" | "send" | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const isEditing = initial?.id !== undefined;
 
   useEffect(() => {
     if (open) {
@@ -54,16 +61,27 @@ export function ComposeDialog({
       setSubject(initial?.subject ?? "");
       setBody(initial?.body ?? "");
       setFiles([]);
+      setExistingAttachments(initial?.attachments ?? []);
       setError(null);
     }
   }, [open, initial]);
+
+  async function removeExistingAttachment(attachmentId: number) {
+    if (!token || initial?.id === undefined) return;
+    try {
+      await api.deleteAttachment(token, accountEmail, initial.id, attachmentId);
+      setExistingAttachments(prev => prev.filter(a => a.id !== attachmentId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   async function saveAndMaybeSend(send: boolean) {
     if (!token) return;
     setBusy(send ? "send" : "draft");
     setError(null);
     try {
-      const draft: EmailRecord = await api.createDraft(token, accountEmail, {
+      const payload = {
         // Not every server literally names it "Drafts" (some use a localized name, e.g.
         // "Entwürfe") — without this, the draft could be saved under a folder path that never
         // matches anything in the live IMAP folder list, making it look like it vanished.
@@ -74,7 +92,11 @@ export function ComposeDialog({
         subject,
         plainText: body,
         inReplyTo: initial?.inReplyTo ?? null,
-      });
+      };
+
+      const draft: EmailRecord = isEditing
+        ? await api.updateEmail(token, accountEmail, initial!.id!, payload)
+        : await api.createDraft(token, accountEmail, payload);
 
       for (const file of files) {
         await api.uploadAttachment(token, accountEmail, draft.id, file);
@@ -97,7 +119,7 @@ export function ComposeDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-xl lg:max-w-[50rem]">
         <DialogHeader>
-          <DialogTitle>New message</DialogTitle>
+          <DialogTitle>{isEditing ? "Edit draft" : "New message"}</DialogTitle>
         </DialogHeader>
 
         <div className="-mx-1 min-h-0 flex-1 space-y-3 overflow-y-auto px-1">
@@ -150,6 +172,15 @@ export function ComposeDialog({
 
           <div className="space-y-1.5">
             <div className="flex flex-wrap gap-2">
+              {existingAttachments.map(attachment => (
+                <span key={attachment.id} className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs">
+                  <Paperclip className="size-3" />
+                  {attachment.filename}
+                  <button type="button" onClick={() => removeExistingAttachment(attachment.id)}>
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))}
               {files.map((file, i) => (
                 <span key={i} className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs">
                   <Paperclip className="size-3" />

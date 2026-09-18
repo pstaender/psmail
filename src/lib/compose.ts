@@ -33,3 +33,16 @@ export function forwardDraft(email: EmailRecord): ComposeDraft {
 
   return { to: "", subject, body: header };
 }
+
+/** Continues editing an existing draft in place (unlike reply/forward, which always start a new one) — saving updates this same row rather than creating another. */
+export function editDraft(email: EmailRecord): ComposeDraft {
+  return {
+    id: email.id,
+    to: formatAddressList(email.to),
+    cc: formatAddressList(email.cc),
+    subject: email.subject ?? "",
+    body: email.plainText ?? "",
+    inReplyTo: email.inReplyTo,
+    attachments: email.attachments ?? [],
+  };
+}
