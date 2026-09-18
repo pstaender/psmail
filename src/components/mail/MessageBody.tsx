@@ -5,7 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { sanitizeEmailHtml } from "@/lib/sanitizeHtml";
 import { buildClearestText, markdownFromHtml } from "@/lib/textView";
 import { HtmlFrame } from "./HtmlFrame";
-import { MarkdownEditor } from "./MarkdownEditor";
+import { RenderPureMarkdown } from "./RenderPureMarkdown";
 import type { EmailRecord } from "../../server/types";
 
 const HAS_REMOTE_IMG = /<img[^>]+src=["']https?:\/\//i;
@@ -38,11 +38,11 @@ function PlainTextView({ text }: { text: string }) {
   return <pre className="whitespace-pre-wrap break-words p-4 font-mono text-sm">{text}</pre>;
 }
 
-/** Renders markdown the same way the compose editor does (inline formatting, de-emphasized markup) instead of a raw/plain text dump — used for the "Text" and "MD" tabs, both of which are markdown, unlike "Plain text" (the literal MIME plain-text part). */
+/** Renders markdown looking like the compose editor (inline formatting, de-emphasized markup) instead of a raw/plain text dump — used for the "Text" and "MD" tabs, both of which are markdown, unlike "Plain text" (the literal MIME plain-text part). Non-editable, real HTML — see RenderPureMarkdown. */
 function MarkdownPreview({ text }: { text: string }) {
   return (
     <div className="p-4">
-      <MarkdownEditor initialValue={text} readOnly aria-label="Message body" />
+      <RenderPureMarkdown markdown={text} aria-label="Message body" />
     </div>
   );
 }

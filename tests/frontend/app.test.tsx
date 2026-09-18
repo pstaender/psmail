@@ -355,7 +355,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(screen.getByText("secure")).toBeTruthy();
   });
 
-  test("the Text/MD reading-pane tabs render via a read-only MarkdownEditor (no typing possible)", async () => {
+  test("the Text/MD reading-pane tabs render via the non-editable RenderPureMarkdown component", async () => {
     render(<App />);
 
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
@@ -368,9 +368,12 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.click(screen.getByRole("tab", { name: "Text" }));
 
     await waitFor(() => {
-      const editor = screen.getByRole("tabpanel").querySelector(".psmail-markdown-editor .TinyMDE");
-      expect(editor).toBeTruthy();
-      expect(editor!.getAttribute("contenteditable")).toBe("false");
+      const panel = screen.getByRole("tabpanel");
+      const rendered = panel.querySelector(".psmail-markdown-render");
+      expect(rendered).toBeTruthy();
+      // Real static HTML from markdown-it, not TinyMDE's (disabled) editing surface.
+      expect(panel.querySelector(".TinyMDE")).toBeNull();
+      expect(rendered!.querySelector('[contenteditable="true"]')).toBeNull();
     });
   });
 

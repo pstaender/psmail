@@ -9,9 +9,16 @@
  * link destinations) rather than color-coding it, and keep everything close to the
  * surrounding text color — it should read like a plain markdown file, not a syntax-highlighted
  * one.
+ *
+ * This file also styles RenderPureMarkdown (the `.psmail-markdown-render` rules near the
+ * bottom) — a separate, non-editable component (real HTML via markdown-it, not a disabled
+ * editor) for showing markdown that was never meant to be edited here (a received message's
+ * body). The two share the same custom properties/typography below so they read as the same
+ * "plain markdown, lightly de-emphasized syntax" look, even though their DOM shapes differ.
  */
 
-.psmail-markdown-editor {
+.psmail-markdown-editor,
+.psmail-markdown-render {
   display: block;
   color: var(--foreground);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
@@ -34,12 +41,6 @@
   font-size: inherit;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-/* read-only: same rendering, just no text-cursor/pointer affordances implying it's editable */
-.psmail-markdown-editor--readonly .TinyMDE,
-.psmail-markdown-editor--readonly .TinyMDE .TMCheckbox {
-  cursor: default;
 }
 
 .psmail-markdown-editor .TinyMDE.TinyMDE_empty {
@@ -273,4 +274,114 @@
 .psmail-markdown-editor .TinyMDE .TMHTMLBlock {
   font-family: inherit;
   color: var(--muted-foreground);
+}
+
+/*
+ * RenderPureMarkdown: real HTML from markdown-it (see RenderPureMarkdown.tsx for the renderer
+ * rules that emit `.md-mark` around markup characters), not TinyMDE's line-based editing
+ * surface — so the selectors below target plain semantic tags instead of TinyMDE's TM*
+ * classes, but reuse the same tokens/intent as the rules above.
+ */
+.psmail-markdown-render {
+  white-space: normal;
+  word-break: break-word;
+  line-height: var(--tmde-line-height);
+}
+
+.psmail-markdown-render > :first-child {
+  margin-top: 0;
+}
+.psmail-markdown-render > :last-child {
+  margin-bottom: 0;
+}
+
+.psmail-markdown-render p,
+.psmail-markdown-render ul,
+.psmail-markdown-render ol,
+.psmail-markdown-render blockquote,
+.psmail-markdown-render pre,
+.psmail-markdown-render h1,
+.psmail-markdown-render h2,
+.psmail-markdown-render h3,
+.psmail-markdown-render h4,
+.psmail-markdown-render h5,
+.psmail-markdown-render h6 {
+  margin: 0 0 var(--tmde-space) 0;
+}
+
+/* markup characters (#, *, -, >, etc.) — de-emphasized rather than color-coded, matching the editor */
+.psmail-markdown-render .md-mark {
+  color: var(--tmde-grey-lighter);
+}
+
+/* headings: bold only, no size scaling — this stays "plain markdown", not a WYSIWYG renderer */
+.psmail-markdown-render h1,
+.psmail-markdown-render h2,
+.psmail-markdown-render h3,
+.psmail-markdown-render h4,
+.psmail-markdown-render h5,
+.psmail-markdown-render h6 {
+  font-size: 1em;
+  font-weight: bold;
+}
+
+.psmail-markdown-render ul,
+.psmail-markdown-render ol {
+  padding-left: 1.5em;
+}
+.psmail-markdown-render li {
+  margin-bottom: 0.25em;
+}
+.psmail-markdown-render li::marker {
+  color: var(--muted-foreground);
+}
+
+/* code */
+.psmail-markdown-render code {
+  font-family: inherit;
+  border-radius: var(--tmde-border-radius);
+  background: var(--muted);
+  padding: 0.1em 0.15em;
+}
+.psmail-markdown-render pre {
+  background: var(--muted);
+  border-radius: var(--tmde-border-radius);
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+}
+.psmail-markdown-render pre code {
+  background: none;
+  padding: 0;
+}
+.psmail-markdown-render .md-info {
+  opacity: 0.5;
+}
+
+.psmail-markdown-render blockquote {
+  background: var(--muted);
+  border-radius: var(--tmde-border-radius);
+  padding: 1rem;
+}
+.psmail-markdown-render blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+/* links / images */
+.psmail-markdown-render a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--primary);
+}
+.psmail-markdown-render .md-link-dest {
+  color: var(--tmde-grey-lighter);
+}
+
+.psmail-markdown-render hr {
+  border: none;
+  border-bottom: 3px solid var(--border);
+  margin: var(--tmde-space) 0;
+}
+
+.psmail-markdown-render s {
+  text-decoration-color: var(--tmde-grey-lighter);
 }

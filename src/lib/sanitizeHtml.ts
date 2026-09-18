@@ -59,7 +59,11 @@ export interface SanitizeOptions {
 export function sanitizeEmailHtml(html: string, options: SanitizeOptions = {}): string {
   const container = document.createElement("div");
 
-  const clean = DOMPurify.sanitize(html, {
+  // Wrapped in an extra <div>: DOMPurify (at least under happy-dom, our test DOM) drops the
+  // single outermost node of whatever fragment it's given — e.g. sanitizing "<h2>x</h2>" alone
+  // returns just "x" — but preserves the same content correctly once it isn't the outermost
+  // node. The wrapper itself is unwrapped away in the output, so this only affects what survives.
+  const clean = DOMPurify.sanitize(`<div>${html}</div>`, {
     FORBID_TAGS: BASE_FORBID_TAGS,
     FORBID_ATTR: ["srcdoc"],
     ALLOW_UNKNOWN_PROTOCOLS: false,
