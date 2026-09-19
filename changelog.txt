@@ -7,6 +7,18 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Empty password allowed (55118e8)
+----------------------------------------------
+Changing the password in Settings > Credentials now also accepts an empty new password (leave both
+new-password fields empty): the profile becomes passwordless, like the built-in default profile. The
+server already allowed this; only the form blocked it. It is the same all-or-nothing change as any
+other: the saved account passwords are re-encrypted with the key an empty-password login derives (so
+they stay readable), and the other sessions are signed out. The toast says "Password removed." and the
+form notes that anyone who can reach the app can then sign in to the profile. Tests: model (empty new
+password keeps accounts readable) and the form (an empty new password is sent; a mismatched
+confirmation is still caught).
+
+
 2026-09-19 - Change password, tabbed Settings (a3f2792)
 -----------------------------------------------------
 - The Settings dialog now has three tabs: Inboxes (sync interval, folders in the combined Inbox),
