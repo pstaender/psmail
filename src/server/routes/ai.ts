@@ -36,10 +36,16 @@ export function aiRoutes(db: Database) {
     return getUserSettings(db, userId).aiTargetLanguage ?? DEFAULT_LANGUAGE;
   }
 
-  function requireSkill(userId: number, category: AiCategory): AiSkillRecord {
-    const skill = findSkillForCategory(db, userId, category);
+  function requireSkill(userId: number, category: AiCategory, skillId?: unknown): AiSkillRecord {
+    const skill = findSkillForCategory(db, userId, category, typeof skillId === "number" ? skillId : undefined);
     if (!skill) throw new ApiError(409, `No "${category}" skill is set up yet — add one in Settings → AI.`);
     return skill;
+  }
+
+  /** The JSON body of a request that may have none (the buttons of a single-skill category post nothing). */
+  async function optionalBody(req: Bun.BunRequest): Promise<{ skillId?: unknown; language?: unknown }> {
+    if (req.headers.get("content-length") === "0") return {};
+    return req.json().catch(() => ({}));
   }
 
   /** The message, checked to belong to one of the caller's accounts. */
@@ -110,12 +116,12 @@ export function aiRoutes(db: Database) {
     "/api/ai/run": {
       POST: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
-        const body = await readJsonBody<{ category?: unknown; text?: unknown; language?: unknown }>(req);
+        const body = await readJsonBody<{ category?: unknown; text?: unknown; language?: unknown; skillId?: unknown }>(req);
         if (!isAiCategory(body.category) || body.category === "categorize") throw new ApiError(400, "category must be summarize, translate, grammar or improve");
         if (typeof body.text !== "string" || !body.text.trim()) throw new ApiError(400, "text is required");
         if (body.text.length > MAX_TEXT) throw new ApiError(400, "The text is too long for the AI");
 
-        const skill = requireSkill(session.userId, body.category);
+        const skill = requireSkill(session.userId, body.category, body.skillId);
         const api = getAiApiConfig(db, session.userId, skill.aiApiId, encryptionKey);
         return json({ text: await runSkill(skill, api, body.text, languageFor(session.userId, body.language)) });
       }),
@@ -125,8 +131,9 @@ export function aiRoutes(db: Database) {
       POST: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
         const email = ownedEmail(req, session.userId);
+        const body = await optionalBody(req);
 
-        const skill = requireSkill(session.userId, "summarize");
+        const skill = requireSkill(session.userId, "summarize", body.skillId);
         const api = getAiApiConfig(db, session.userId, skill.aiApiId, encryptionKey);
         const summary = await runSkill(skill, api, emailTextForAi(email), DEFAULT_LANGUAGE);
         let updated = setEmailAiFields(db, email.id, { aiSummary: summary });
@@ -154,10 +161,10 @@ export function aiRoutes(db: Database) {
       POST: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
         const email = ownedEmail(req, session.userId);
-        const body = req.headers.get("content-length") === "0" ? {} : await readJsonBody<{ language?: unknown }>(req).catch(() => ({}));
+        const body = await optionalBody(req);
 
-        const skill = requireSkill(session.userId, "translate");
-        const language = languageFor(session.userId, (body as { language?: unknown }).language);
+        const skill = requireSkill(session.userId, "translate", body.skillId);
+        const language = languageFor(session.userId, body.language);
         const api = getAiApiConfig(db, session.userId, skill.aiApiId, encryptionKey);
         const translated = await runSkill(skill, api, emailTextForAi(email), language);
         return json({ email: setEmailAiFields(db, email.id, { translatedText: translated, translatedLanguage: language }) });

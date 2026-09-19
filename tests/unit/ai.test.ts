@@ -14,7 +14,7 @@ import {
   updateAiSkill,
 } from "../../src/server/models/ai";
 import { aiHttp, complete, emailTextForAi, parseTaxonomy, renderPrompt } from "../../src/server/services/ai";
-import { SKILL_DEFAULTS, AI_CATEGORIES } from "../../src/ai/categories";
+import { SKILL_DEFAULTS, AI_CATEGORIES, defaultSkillLabel } from "../../src/ai/categories";
 
 const key = deriveEncryptionKey("pw", generateSalt());
 
@@ -94,7 +94,10 @@ describe("AI skills", () => {
     createAiSkill(db, user.id, { aiApiId: a.id, category: "summarize", name: "Sum", prompt: "Summarize." });
     createAiSkill(db, user.id, { aiApiId: b.id, category: "translate", prompt: "Translate to {{language}}." });
 
-    expect(listAiSkills(db, user.id).map(s => [s.category, s.name, s.aiApiId])).toEqual([["summarize", "Sum", a.id], ["translate", "translate", b.id]]);
+    expect(listAiSkills(db, user.id).map(s => [s.category, s.name, s.label, s.aiApiId])).toEqual([
+      ["summarize", "Sum", "Sum", a.id],
+      ["translate", "", "Ollama.llama3", b.id], // no name of its own: shown as Vendor.model
+    ]);
     deleteAiApi(db, user.id, a.id);
     expect(listAiSkills(db, user.id).map(s => s.category)).toEqual(["translate"]);
   });
@@ -109,6 +112,36 @@ describe("AI skills", () => {
     const skill = createAiSkill(db, user.id, { aiApiId: api.id, category: "grammar", prompt: "Fix it." });
     const updated = updateAiSkill(db, user.id, skill.id, { prompt: "Fix it better.", name: "Proofread" });
     expect(updated).toMatchObject({ prompt: "Fix it better.", name: "Proofread", category: "grammar" });
+  });
+
+  test("a skill's label is its name, or Vendor.model of its provider when the name is empty — also after editing", async () => {
+    const { db, user } = await setup();
+    const api = createAiApi(db, user.id, { vendor: "anthropic", model: "claude-opus-5", apiKey: "k" }, key);
+    const skill = createAiSkill(db, user.id, { aiApiId: api.id, category: "summarize", prompt: "p" });
+    expect(skill).toMatchObject({ name: "", label: "Anthropic.claude-opus-5" });
+
+    expect(updateAiSkill(db, user.id, skill.id, { name: "Short" }).label).toBe("Short");
+    expect(updateAiSkill(db, user.id, skill.id, { name: "  " })).toMatchObject({ name: "", label: "Anthropic.claude-opus-5" }); // cleared again
+    updateAiApi(db, user.id, api.id, { model: "claude-sonnet-5" }, key);
+    expect(listAiSkills(db, user.id)[0]!.label).toBe("Anthropic.claude-sonnet-5"); // follows the provider
+    expect(defaultSkillLabel("openai", "gpt-5")).toBe("OpenAI.gpt-5");
+    expect(defaultSkillLabel("google", "gemini-2.5-pro")).toBe("Google.gemini-2.5-pro");
+  });
+
+  test("a specific skill can be asked for, as long as it is the user's and of that category", async () => {
+    const { db, user } = await setup();
+    const bob = await createUser(db, "bob", "pw");
+    const api = createAiApi(db, user.id, { vendor: "ollama", model: "llama3" }, key);
+    const bobsApi = createAiApi(db, bob.id, { vendor: "ollama", model: "llama3" }, key);
+    const first = createAiSkill(db, user.id, { aiApiId: api.id, category: "translate", prompt: "one" });
+    const second = createAiSkill(db, user.id, { aiApiId: api.id, category: "translate", prompt: "two" });
+    const summarizer = createAiSkill(db, user.id, { aiApiId: api.id, category: "summarize", prompt: "s" });
+    const bobs = createAiSkill(db, bob.id, { aiApiId: bobsApi.id, category: "translate", prompt: "bob" });
+
+    expect(findSkillForCategory(db, user.id, "translate")!.id).toBe(first.id);
+    expect(findSkillForCategory(db, user.id, "translate", second.id)!.id).toBe(second.id);
+    expect(() => findSkillForCategory(db, user.id, "translate", summarizer.id)).toThrow(/isn't a translate skill/);
+    expect(() => findSkillForCategory(db, user.id, "translate", bobs.id)).toThrow(/not found/);
   });
 
   test("the skill used for a category is the user's first one", async () => {

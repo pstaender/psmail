@@ -222,9 +222,11 @@ function installMockFetch(
   bulkRequests.length = 0;
   aiRequests.length = 0;
   let currentAiApis = [...(opts.aiApis ?? [])];
-  let currentAiSkills = (opts.aiSkillCategories ?? []).map((category, i) => ({
-    id: i + 1, aiApiId: 1, category, name: category, prompt: `prompt for ${category}`, createdAt: NOW, updatedAt: NOW,
-  }));
+  // "summarize" or "summarize:Short" (a skill with a name of its own); unnamed ones are labelled like the server does.
+  let currentAiSkills = (opts.aiSkillCategories ?? []).map((spec, i) => {
+    const [category, name = ""] = spec.split(":");
+    return { id: i + 1, aiApiId: 1, category, name, label: name || "Anthropic.claude-opus-5", prompt: `prompt for ${category}`, createdAt: NOW, updatedAt: NOW };
+  });
   contactRequests.length = 0;
   folderRequests = 0;
   unreadRequests = 0;
@@ -335,7 +337,11 @@ function installMockFetch(
       if (/^\/api\/ai\/apis\/\d+\/test$/.test(path)) return jsonResponse({ ok: true, answer: "OK" });
       if (path === "/api/ai/skills" && method === "GET") return jsonResponse(currentAiSkills);
       if (path === "/api/ai/skills" && method === "POST") {
-        const record = { id: currentAiSkills.length + 10, createdAt: NOW, updatedAt: NOW, ...body };
+        const provider = currentAiApis.find(a => a.id === body.aiApiId);
+        const record = {
+          id: currentAiSkills.length + 10, createdAt: NOW, updatedAt: NOW, ...body,
+          label: body.name || `${provider ? provider.vendor[0]!.toUpperCase() + provider.vendor.slice(1) : "?"}.${provider?.model}`,
+        };
         currentAiSkills = [...currentAiSkills, record];
         return jsonResponse(record, 201);
       }
@@ -2433,12 +2439,14 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await openAiTab();
 
       await userEvent.click(await screen.findByRole("button", { name: /add skill/i }));
+      // The empty name shows what it will be called instead.
+      expect((screen.getByLabelText(/^Name/) as HTMLInputElement).placeholder).toBe("Anthropic.claude-opus-5");
       const prompt = () => (screen.getByLabelText("Instruction (prompt)") as HTMLTextAreaElement).value;
       expect(prompt()).toContain("summarizes e-mail messages"); // first category, suggested
 
       await userEvent.selectOptions(screen.getByLabelText("Category"), "translate");
       expect(prompt()).toContain("helpful translator");
-      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Translate");
+      expect((screen.getByLabelText(/^Name/) as HTMLInputElement).value).toBe(""); // no name unless you give one
 
       // Once edited by hand, changing the category leaves the prompt alone…
       await userEvent.type(screen.getByLabelText("Instruction (prompt)"), " Be brief.");
@@ -2450,8 +2458,10 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
       await userEvent.click(screen.getByRole("button", { name: "Save skill" }));
       await waitFor(() => expect(calls("POST", "/api/ai/skills")).toHaveLength(1));
-      expect(calls("POST", "/api/ai/skills")[0]).toMatchObject({ category: "grammar", aiApiId: 1, prompt: expect.stringContaining("careful proofreader") });
-      expect(await screen.findByText(/Spelling \+ Grammar · Work Claude/)).toBeTruthy();
+      expect(calls("POST", "/api/ai/skills")[0]).toMatchObject({ category: "grammar", aiApiId: 1, name: "", prompt: expect.stringContaining("careful proofreader") });
+      // Shown as Vendor.model (the default label) and under its category and provider.
+      expect(await screen.findByText("Anthropic.claude-opus-5")).toBeTruthy();
+      expect(screen.getByText(/Spelling \+ Grammar · Work Claude/)).toBeTruthy();
     });
 
     test("skills need a provider first, and deleting a provider takes its skills along", async () => {
@@ -2588,7 +2598,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
       await userEvent.click(screen.getByRole("menuitem", { name: "Spelling + Grammar" }));
       await waitFor(() => expect(editorText(dialog)).toContain("Corrected text"));
-      expect(calls("POST", "/api/ai/run")).toEqual([{ category: "grammar", text: "Getting there..." }]);
+      expect(calls("POST", "/api/ai/run")).toEqual([{ category: "grammar", text: "Getting there...", skillId: 1 }]);
 
       await userEvent.click(within(dialog).getByRole("button", { name: /undo/i }));
       await waitFor(() => expect(editorText(dialog)).toContain("Getting there"));
@@ -2608,7 +2618,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await userEvent.type(language, "Spanish");
       await userEvent.click(within(dialog).getByRole("button", { name: "Translate" }));
 
-      await waitFor(() => expect(calls("POST", "/api/ai/run")).toEqual([{ category: "translate", text: "Getting there...", language: "Spanish" }]));
+      await waitFor(() => expect(calls("POST", "/api/ai/run")).toEqual([{ category: "translate", text: "Getting there...", language: "Spanish", skillId: 1 }]));
       await waitFor(() => expect(editorText(dialog)).toContain("Corrected text"));
     });
 
@@ -2619,6 +2629,71 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
       await userEvent.click(within(dialog).getByRole("button", { name: /refine/i }));
       expect((await screen.findAllByRole("menuitem")).map(i => i.textContent)).toEqual(["Spelling + Grammar"]);
+    });
+
+    describe("several skills of one category", () => {
+      async function openMessage() {
+        await userEvent.click(await screen.findByText("Hello there"));
+        await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+      }
+      const posts = (suffix: string) => aiRequests.filter(([m, p]) => m === "POST" && p.endsWith(suffix)).map(([, , body]) => body);
+
+      test("one skill: the button runs it right away, and unnamed skills aren't offered as a choice", async () => {
+        installMockFetch({ aiSkillCategories: ["summarize"] });
+        await login();
+        await openMessage();
+        await userEvent.click(screen.getByRole("button", { name: /^summarize$/i }));
+        await waitFor(() => expect(posts("/ai/summarize")).toEqual([{ skillId: 1 }]));
+        expect(screen.queryByRole("menuitem")).toBeNull();
+      });
+
+      test("several summarizers: clicking Summarize shows one entry per skill, labelled with its name (or Vendor.model)", async () => {
+        installMockFetch({ aiSkillCategories: ["summarize:Short", "summarize", "summarize:Detailed"] });
+        await login();
+        await openMessage();
+
+        await userEvent.click(screen.getByRole("button", { name: /^summarize/i }));
+        expect((await screen.findAllByRole("menuitem")).map(i => i.textContent)).toEqual(["Short", "Anthropic.claude-opus-5", "Detailed"]);
+        expect(posts("/ai/summarize")).toEqual([]); // the click only opened the menu
+
+        await userEvent.click(screen.getByRole("menuitem", { name: "Detailed" }));
+        await waitFor(() => expect(posts("/ai/summarize")).toEqual([{ skillId: 3 }]));
+        // The Summary tab's own button is the same kind of menu.
+        await userEvent.click(await screen.findByRole("button", { name: "Summarize again" }));
+        expect((await screen.findAllByRole("menuitem")).map(i => i.textContent)).toEqual(["Short", "Anthropic.claude-opus-5", "Detailed"]);
+      });
+
+      test("several translators work the same way, and the chosen one is used", async () => {
+        installMockFetch({ aiSkillCategories: ["translate:Formal", "translate:Casual"] });
+        await login();
+        await openMessage();
+
+        await userEvent.click(screen.getByRole("button", { name: /^translate/i }));
+        await userEvent.click(await screen.findByRole("menuitem", { name: "Casual" }));
+        await waitFor(() => expect(posts("/ai/translate")).toEqual([{ skillId: 2 }]));
+      });
+
+      test("Refine lists each skill of Phrase / Spelling + Grammar / Translate by name and runs the chosen one", async () => {
+        installMockFetch({ aiSkillCategories: ["improve:Formal", "improve:Casual", "grammar", "translate:DeepL-ish", "translate:Local"] });
+        await login();
+        await userEvent.click(await screen.findByText("Unfinished draft"));
+        await waitFor(() => expect(screen.getAllByText("Unfinished draft").length).toBeGreaterThan(1));
+        await userEvent.click(screen.getByRole("button", { name: /edit draft/i }));
+        const dialog = (await screen.findByText("Edit draft", { selector: "[data-slot=dialog-title]" })).closest('[role="dialog"]') as HTMLElement;
+        await waitFor(() => expect(dialog.querySelector(".psmail-markdown-editor .TinyMDE")!.textContent).toContain("Getting there"));
+
+        await userEvent.click(within(dialog).getByRole("button", { name: /refine/i }));
+        expect((await screen.findAllByRole("menuitem")).map(i => i.textContent)).toEqual([
+          "Phrase · Formal",
+          "Phrase · Casual",
+          "Spelling + Grammar", // a single skill keeps the plain title
+          "Translate… · DeepL-ish",
+          "Translate… · Local",
+        ]);
+
+        await userEvent.click(screen.getByRole("menuitem", { name: "Phrase · Casual" }));
+        await waitFor(() => expect(calls("POST", "/api/ai/run")).toEqual([{ category: "improve", text: "Getting there...", skillId: 2 }]));
+      });
     });
   });
 });

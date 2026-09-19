@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { api, type UserSettings } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { AI_CATEGORIES, AI_VENDORS, SKILL_DEFAULTS, VENDOR_LABELS, type AiCategory, type AiVendor } from "../../ai/categories";
+import { AI_CATEGORIES, AI_VENDORS, SKILL_DEFAULTS, VENDOR_LABELS, defaultSkillLabel, type AiCategory, type AiVendor } from "../../ai/categories";
 import type { AiApiRecord, AiSkillRecord } from "../../server/models/ai";
 
 const MODEL_EXAMPLES: Record<AiVendor, string> = {
@@ -151,7 +151,7 @@ export function AiSettings({
   }
 
   async function removeSkill(skill: AiSkillRecord) {
-    if (!token || !window.confirm(`Delete the skill "${skill.name}"?`)) return;
+    if (!token || !window.confirm(`Delete the skill "${skill.label}"?`)) return;
     try {
       await api.deleteAiSkill(token, skill.id);
       await load();
@@ -163,10 +163,10 @@ export function AiSettings({
 
   function newSkillForm(): SkillForm {
     const category: AiCategory = AI_CATEGORIES.find(c => !skills.some(s => s.category === c)) ?? "summarize";
-    return { id: null, category, name: SKILL_DEFAULTS[category].label, aiApiId: apis![0]!.id, prompt: SKILL_DEFAULTS[category].prompt };
+    return { id: null, category, name: "", aiApiId: apis![0]!.id, prompt: SKILL_DEFAULTS[category].prompt };
   }
 
-  /** Picking a category suggests its prompt (and name) — unless the user already changed those by hand. */
+  /** Picking a category suggests its prompt — unless the user already changed it by hand. */
   function changeCategory(category: AiCategory) {
     setSkillForm(form => {
       if (!form) return form;
@@ -174,13 +174,17 @@ export function AiSettings({
       return {
         ...form,
         category,
-        name: form.name === old.label || form.name === "" ? SKILL_DEFAULTS[category].label : form.name,
         prompt: form.prompt === old.prompt || form.prompt.trim() === "" ? SKILL_DEFAULTS[category].prompt : form.prompt,
       };
     });
   }
 
   const apiName = (id: number) => apis?.find(a => a.id === id)?.name ?? "?";
+  /** What a skill without a name is called: Vendor.model of the chosen provider. */
+  const skillDefaultLabel = (apiId: number) => {
+    const record = apis?.find(a => a.id === apiId);
+    return record ? defaultSkillLabel(record.vendor, record.model) : "Vendor.model";
+  };
 
   return (
     <div className="space-y-6">
@@ -308,15 +312,15 @@ export function AiSettings({
           {skills.map(skill => (
             <li key={skill.id} className="flex items-center gap-2 rounded-md border p-2 text-sm">
               <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">{skill.name}</div>
+                <div className="truncate font-medium">{skill.label}</div>
                 <div className="truncate text-xs text-muted-foreground">
                   {SKILL_DEFAULTS[skill.category].label} · {apiName(skill.aiApiId)}
                 </div>
               </div>
-              <Button type="button" variant="ghost" size="sm" title={`Edit ${skill.name}`} onClick={() => setSkillForm({ id: skill.id, category: skill.category, name: skill.name, aiApiId: skill.aiApiId, prompt: skill.prompt })}>
+              <Button type="button" variant="ghost" size="sm" title={`Edit ${skill.label}`} onClick={() => setSkillForm({ id: skill.id, category: skill.category, name: skill.name, aiApiId: skill.aiApiId, prompt: skill.prompt })}>
                 <Pencil className="size-3.5" />
               </Button>
-              <Button type="button" variant="ghost" size="sm" title={`Delete ${skill.name}`} onClick={() => removeSkill(skill)}>
+              <Button type="button" variant="ghost" size="sm" title={`Delete ${skill.label}`} onClick={() => removeSkill(skill)}>
                 <Trash2 className="size-3.5" />
               </Button>
             </li>
@@ -349,8 +353,14 @@ export function AiSettings({
             </div>
             <p className="text-xs text-muted-foreground">{SKILL_DEFAULTS[skillForm.category].description}</p>
             <div className="space-y-1.5">
-              <Label htmlFor="ai-skill-name">Name</Label>
-              <Input id="ai-skill-name" value={skillForm.name} onChange={e => setSkillForm({ ...skillForm, name: e.target.value })} />
+              <Label htmlFor="ai-skill-name">Name (optional)</Label>
+              <Input
+                id="ai-skill-name"
+                placeholder={skillDefaultLabel(skillForm.aiApiId)}
+                value={skillForm.name}
+                onChange={e => setSkillForm({ ...skillForm, name: e.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">The label of the button or menu entry. Empty: {skillDefaultLabel(skillForm.aiApiId)}.</p>
             </div>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">

@@ -18,7 +18,7 @@ import { AccountTree } from "@/components/sidebar/AccountTree";
 import { SettingsDialog, type SettingsPatch } from "@/components/layout/SettingsDialog";
 import { showNewMailToast } from "@/components/mail/newMailToast";
 import { hasFinePointer } from "@/lib/pointer";
-import type { AiCategory } from "../../ai/categories";
+import type { AiSkillRecord } from "../../server/models/ai";
 import { DEFAULT_NOTIFICATION_SOUND, playNotificationSound, showBrowserNotification, type NewMailPreview } from "@/lib/notifications";
 import { EditAccountDialog } from "@/components/sidebar/EditAccountDialog";
 import { ResizeHandle } from "@/components/layout/ResizeHandle";
@@ -111,10 +111,10 @@ export function AppShell() {
       .catch(() => {});
   }, [token]);
   // Which AI skills the user has set up: the summarize/translate/refine buttons are only offered for those.
-  const [aiCategories, setAiCategories] = useState<Set<AiCategory>>(new Set());
+  const [aiSkills, setAiSkills] = useState<AiSkillRecord[]>([]);
   const refreshAiSkills = useCallback(() => {
     if (!token) return;
-    api.listAiSkills(token).then(skills => setAiCategories(new Set(skills.map(s => s.category)))).catch(() => {});
+    api.listAiSkills(token).then(setAiSkills).catch(() => {});
   }, [token]);
   useEffect(() => {
     refreshAiSkills();
@@ -128,15 +128,15 @@ export function AppShell() {
   // stored on the message by the server; here it is just put into the open message.
   const [aiBusy, setAiBusy] = useState<"summarize" | "translate" | null>(null);
   const openEmailId = useRef<number | null>(null);
-  async function runAi(kind: "summarize" | "translate") {
+  async function runAi(kind: "summarize" | "translate", skillId: number) {
     if (!token || !selectedAccountEmail || !selectedEmail) return;
     const id = selectedEmail.id;
     setAiBusy(kind);
     try {
       const result =
         kind === "summarize"
-          ? await api.aiSummarize(token, selectedAccountEmail, id)
-          : await api.aiTranslate(token, selectedAccountEmail, id);
+          ? await api.aiSummarize(token, selectedAccountEmail, id, skillId)
+          : await api.aiTranslate(token, selectedAccountEmail, id, undefined, skillId);
       if (openEmailId.current === id) setSelectedEmailDetail(result.email);
       if ("taxonomyError" in result && result.taxonomyError) toast.error(`Categorizing failed: ${result.taxonomyError}`);
     } catch (err) {
@@ -962,10 +962,10 @@ export function AppShell() {
               onMove={handleMove}
               onToggleRead={toggleRead}
               onEditDraft={() => openCompose(editDraft(selectedEmail))}
-              aiCategories={aiCategories}
+              aiSkills={aiSkills}
               aiBusy={aiBusy}
-              onSummarize={() => runAi("summarize")}
-              onTranslate={() => runAi("translate")}
+              onSummarize={skillId => runAi("summarize", skillId)}
+              onTranslate={skillId => runAi("translate", skillId)}
             />
           ) : (
             <EmptyState title="Select a message" description="Choose a message from the list to read it here." />
@@ -981,7 +981,7 @@ export function AppShell() {
           open={composeOpen}
           onOpenChange={setComposeOpen}
           initial={composeInitial}
-          aiCategories={aiCategories}
+          aiSkills={aiSkills}
           aiLanguage={settings.aiTargetLanguage ?? "English"}
           onSent={sent => {
             refreshEmails();

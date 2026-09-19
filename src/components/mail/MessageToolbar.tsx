@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { FolderInput, Forward, Languages, Loader2, Mail, PenSquare, Reply, ReplyAll, Sparkles, Trash2 } from "lucide-react";
+import { FolderInput, Forward, Languages, Mail, PenSquare, Reply, ReplyAll, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import type { EmailRecord } from "../../server/types";
 import type { FolderInfo } from "@/lib/api";
-import type { AiCategory } from "../../ai/categories";
+import type { AiSkillRecord } from "../../server/models/ai";
+import { AiSkillButton } from "./AiSkillButton";
 
 /**
  * The delete confirmation (skipped entirely when the message would only be soft-deleted, i.e.
@@ -23,7 +24,7 @@ export function MessageToolbar({
   onMove,
   onToggleRead,
   onEditDraft,
-  aiCategories,
+  aiSkills,
   aiBusy,
   onSummarize,
   onTranslate,
@@ -37,12 +38,14 @@ export function MessageToolbar({
   onMove: (folder: string) => void;
   onToggleRead: () => void;
   onEditDraft: () => void;
-  /** Which AI skills exist: Summarize/Translate are only shown for those (set up in Settings → AI). */
-  aiCategories: Set<AiCategory>;
+  /** The user's AI skills: Summarize/Translate are only shown for categories that have one (set up in Settings → AI), and offer a choice when there are several. */
+  aiSkills: AiSkillRecord[];
   aiBusy: "summarize" | "translate" | null;
-  onSummarize: () => void;
-  onTranslate: () => void;
+  onSummarize: (skillId: number) => void;
+  onTranslate: (skillId: number) => void;
 }) {
+  const summarizers = aiSkills.filter(skill => skill.category === "summarize");
+  const translators = aiSkills.filter(skill => skill.category === "translate");
   // "Reply all" only appears once the pointer or keyboard focus reaches "Reply", so it can't be hit by accident
   // (it messes up more people than a plain reply). It then stays for the rest of this message.
   const [replyAllShown, setReplyAllShown] = useState(false);
@@ -69,20 +72,26 @@ export function MessageToolbar({
       </Button>
 
       {/* The AI buttons only exist for skills the user has set up — nobody who doesn't want AI is nudged to. */}
-      {(aiCategories.has("summarize") || aiCategories.has("translate")) && (
+      {(summarizers.length > 0 || translators.length > 0) && (
         <>
           <Separator orientation="vertical" className="mx-1 h-5" />
 
-          {aiCategories.has("summarize") && (
-            <Button variant="ghost" size="sm" disabled={aiBusy !== null} title="Summarize (and categorize) this message with AI" onClick={onSummarize}>
-              {aiBusy === "summarize" ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} Summarize
-            </Button>
-          )}
-          {aiCategories.has("translate") && (
-            <Button variant="ghost" size="sm" disabled={aiBusy !== null} title="Translate this message with AI" onClick={onTranslate}>
-              {aiBusy === "translate" ? <Loader2 className="size-4 animate-spin" /> : <Languages className="size-4" />} Translate
-            </Button>
-          )}
+          <AiSkillButton
+            skills={summarizers}
+            busy={aiBusy === "summarize"}
+            icon={<Sparkles className="size-4" />}
+            label="Summarize"
+            title="Summarize (and categorize) this message with AI"
+            onRun={onSummarize}
+          />
+          <AiSkillButton
+            skills={translators}
+            busy={aiBusy === "translate"}
+            icon={<Languages className="size-4" />}
+            label="Translate"
+            title="Translate this message with AI"
+            onRun={onTranslate}
+          />
         </>
       )}
 

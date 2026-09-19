@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { sanitizeEmailHtml } from "@/lib/sanitizeHtml";
 import { buildClearestText, markdownFromHtml } from "@/lib/textView";
 import { Languages, Sparkles } from "lucide-react";
+import type { AiSkillRecord } from "../../server/models/ai";
 import { AiSummaryPanel } from "./AiSummaryPanel";
 import { HtmlFrame } from "./HtmlFrame";
 import { RenderPureMarkdown } from "./RenderPureMarkdown";
@@ -54,7 +55,7 @@ export function MessageBody({
   email,
   preferredView,
   onViewChange,
-  canSummarize = false,
+  summarizeSkills = [],
   summarizing = false,
   onSummarize = () => {},
 }: {
@@ -62,10 +63,10 @@ export function MessageBody({
   preferredView: BodyView | null;
   /** Called only when the user picks a tab — never for an automatic fallback — so it's safe to remember/persist. */
   onViewChange: (view: BodyView) => void;
-  /** A Summarize skill exists: the Summary tab is offered (it can make the summary itself). */
-  canSummarize?: boolean;
+  /** The user's Summarize skills: with any, the Summary tab is offered (it can make the summary itself). */
+  summarizeSkills?: AiSkillRecord[];
   summarizing?: boolean;
-  onSummarize?: () => void;
+  onSummarize?: (skillId: number) => void;
 }) {
   const [showExternal, setShowExternal] = useState(false);
 
@@ -121,7 +122,7 @@ export function MessageBody({
     hadTranslation.current = !!email.translatedText;
     hadSummary.current = !!email.aiSummary;
   }, [email.id, email.translatedText, email.aiSummary]);
-  const hasSummaryTab = !!email.aiSummary || (email.taxonomyList ?? []).length > 0 || canSummarize;
+  const hasSummaryTab = !!email.aiSummary || (email.taxonomyList ?? []).length > 0 || summarizeSkills.length > 0;
 
   if (!hasHtml && !hasPlain) {
     return <p className="p-4 text-sm text-muted-foreground">This message has no readable body.</p>;
@@ -197,7 +198,7 @@ export function MessageBody({
 
       {hasSummaryTab && (
         <TabsContent value="summary">
-          <AiSummaryPanel email={email} canSummarize={canSummarize} busy={summarizing} onSummarize={onSummarize} />
+          <AiSummaryPanel email={email} skills={summarizeSkills} busy={summarizing} onSummarize={onSummarize} />
         </TabsContent>
       )}
 

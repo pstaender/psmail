@@ -212,13 +212,19 @@ export const api = {
   updateAiSkill: (token: string, id: number, input: AiSkillInput) => request<AiSkillRecord>("PATCH", `/api/ai/skills/${id}`, { token, body: input }),
   deleteAiSkill: (token: string, id: number) => request<void>("DELETE", `/api/ai/skills/${id}`, { token }),
   /** Composing: the user's skill of `category` applied to `text`; nothing is stored. */
-  aiRun: (token: string, category: Exclude<AiCategory, "categorize">, text: string, language?: string) =>
-    request<{ text: string }>("POST", "/api/ai/run", { token, body: { category, text, language } }),
+  aiRun: (token: string, category: Exclude<AiCategory, "categorize">, text: string, language?: string, skillId?: number) =>
+    request<{ text: string }>("POST", "/api/ai/run", { token, body: { category, text, language, skillId } }),
   /** Summarizes a message (and categorizes it if that skill exists); both are stored on the message. */
-  aiSummarize: (token: string, accountEmail: string, emailId: number) =>
-    request<{ email: EmailRecord; taxonomyError?: string }>("POST", `/api/accounts/${enc(accountEmail)}/emails/${emailId}/ai/summarize`, { token }),
-  aiTranslate: (token: string, accountEmail: string, emailId: number, language?: string) =>
-    request<{ email: EmailRecord }>("POST", `/api/accounts/${enc(accountEmail)}/emails/${emailId}/ai/translate`, { token, body: { language } }),
+  aiSummarize: (token: string, accountEmail: string, emailId: number, skillId?: number) =>
+    request<{ email: EmailRecord; taxonomyError?: string }>("POST", `/api/accounts/${enc(accountEmail)}/emails/${emailId}/ai/summarize`, {
+      token,
+      body: { skillId },
+    }),
+  aiTranslate: (token: string, accountEmail: string, emailId: number, language?: string, skillId?: number) =>
+    request<{ email: EmailRecord }>("POST", `/api/accounts/${enc(accountEmail)}/emails/${emailId}/ai/translate`, {
+      token,
+      body: { language, skillId },
+    }),
   getSettings: (token: string) => request<UserSettings>("GET", "/api/settings", { token }),
   /** Shallow-merges into the stored settings; a key set to null is removed. */
   updateSettings: (token: string, patch: { [K in keyof UserSettings]?: UserSettings[K] | null }) =>

@@ -4,7 +4,7 @@ import { MessageHeader } from "./MessageHeader";
 import { MessageToolbar } from "./MessageToolbar";
 import type { EmailRecord } from "../../server/types";
 import type { FolderInfo } from "@/lib/api";
-import type { AiCategory } from "../../ai/categories";
+import type { AiSkillRecord } from "../../server/models/ai";
 
 export function MessageView({
   accountEmail,
@@ -19,7 +19,7 @@ export function MessageView({
   onMove,
   onToggleRead,
   onEditDraft,
-  aiCategories,
+  aiSkills,
   aiBusy,
   onSummarize,
   onTranslate,
@@ -36,10 +36,10 @@ export function MessageView({
   onMove: (folder: string) => void;
   onToggleRead: () => void;
   onEditDraft: () => void;
-  aiCategories: Set<AiCategory>;
+  aiSkills: AiSkillRecord[];
   aiBusy: "summarize" | "translate" | null;
-  onSummarize: () => void;
-  onTranslate: () => void;
+  onSummarize: (skillId: number) => void;
+  onTranslate: (skillId: number) => void;
 }) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -53,7 +53,7 @@ export function MessageView({
         onMove={onMove}
         onToggleRead={onToggleRead}
         onEditDraft={onEditDraft}
-        aiCategories={aiCategories}
+        aiSkills={aiSkills}
         aiBusy={aiBusy}
         onSummarize={onSummarize}
         onTranslate={onTranslate}
@@ -65,7 +65,7 @@ export function MessageView({
           email={email}
           preferredView={preferredView}
           onViewChange={onViewChange}
-          canSummarize={aiCategories.has("summarize")}
+          summarizeSkills={aiSkills.filter(skill => skill.category === "summarize")}
           summarizing={aiBusy === "summarize"}
           onSummarize={onSummarize}
         />

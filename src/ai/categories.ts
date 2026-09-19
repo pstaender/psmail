@@ -30,3 +30,16 @@ export const VENDOR_LABELS: Record<AiVendor, string> = {
 export function isAiVendor(value: unknown): value is AiVendor {
   return typeof value === "string" && (AI_VENDORS as readonly string[]).includes(value);
 }
+
+/** Short vendor names for labels like `Anthropic.claude-opus-5`. */
+export const VENDOR_SHORT_NAMES: Record<AiVendor, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  google: "Google",
+  ollama: "Ollama",
+};
+
+/** What a skill without a name of its own is called: its provider's vendor and model, `Anthropic.claude-opus-5`. */
+export function defaultSkillLabel(vendor: AiVendor, model: string): string {
+  return `${VENDOR_SHORT_NAMES[vendor]}.${model}`;
+}

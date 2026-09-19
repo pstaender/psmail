@@ -148,6 +148,32 @@ describe("AI endpoints", () => {
     expect(getEmail(db, emailId).translatedText).toContain("Translate into French.");
   });
 
+  test("with several skills of a category the request can choose one; without a choice the first is used", async () => {
+    const second = await api("POST", "/api/ai/skills", { token, body: { aiApiId: apiId, category: "translate", name: "Formal", prompt: "Translate formally into {{language}}." } });
+    expect(second.json).toMatchObject({ name: "Formal", label: "Formal" });
+    const list = (await api("GET", "/api/ai/skills", { token })).json as { id: number; category: string; label: string }[];
+    expect(list.find(s => s.category === "summarize")!.label).toBe("Anthropic.claude-opus-5"); // created without a name
+
+    const sent = fakeAi(() => "ok");
+    await api("POST", `${emailPath()}/${emailId}/ai/translate`, { token, body: { language: "German", skillId: second.json.id } });
+    await api("POST", `${emailPath()}/${emailId}/ai/translate`, { token, body: { language: "German" } });
+    expect(sent.map(s => s.system)).toEqual(["Translate formally into German.", "Translate into German."]);
+
+    // A skill of another category (or someone else's) is refused.
+    const summarizer = list.find(s => s.category === "summarize")!;
+    expect((await api("POST", `${emailPath()}/${emailId}/ai/translate`, { token, body: { skillId: summarizer.id } })).status).toBe(400);
+    expect((await api("POST", `${emailPath()}/${emailId}/ai/translate`, { token, body: { skillId: 9999 } })).status).toBe(404);
+
+    // Composing too.
+    const grammar2 = await api("POST", "/api/ai/skills", { token, body: { aiApiId: apiId, category: "grammar", name: "Strict", prompt: "Proofread strictly." } });
+    sent.length = 0;
+    await api("POST", "/api/ai/run", { token, body: { category: "grammar", text: "hi", skillId: grammar2.json.id } });
+    expect(sent[0]!.system).toBe("Proofread strictly.");
+
+    await api("DELETE", `/api/ai/skills/${second.json.id}`, { token });
+    await api("DELETE", `/api/ai/skills/${grammar2.json.id}`, { token });
+  });
+
   test("run (composing) returns the text without storing anything, and only for compose categories", async () => {
     const sent = fakeAi(() => "Corrected text");
     const res = await api("POST", "/api/ai/run", { token, body: { category: "grammar", text: "i has a mistake" } });

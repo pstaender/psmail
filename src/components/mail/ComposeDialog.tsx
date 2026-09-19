@@ -13,6 +13,7 @@ import { parseAddressList } from "@/lib/addresses";
 import { joinRefined, splitRefinable } from "@/lib/compose";
 import { resolveSpecialFolder } from "@/lib/folders";
 import type { AiCategory } from "../../ai/categories";
+import type { AiSkillRecord } from "../../server/models/ai";
 import type { AttachmentRecord, EmailRecord } from "../../server/types";
 
 function formatSizeMB(bytes: number): string {
@@ -42,7 +43,7 @@ export function ComposeDialog({
   onOpenChange,
   initial,
   onSent,
-  aiCategories,
+  aiSkills,
   aiLanguage,
 }: {
   accountEmail: string;
@@ -55,8 +56,8 @@ export function ComposeDialog({
   initial: ComposeDraft | null;
   /** `sent` is true when the draft was actually sent, false when it was just saved. */
   onSent: (sent: boolean) => void;
-  /** Which AI skills the user has set up — the Refine button and its items exist only for those. */
-  aiCategories: Set<AiCategory>;
+  /** The user's AI skills — the Refine button and its items exist only for those, one entry per skill when a category has several. */
+  aiSkills: AiSkillRecord[];
   /** The language Translate starts with (the user's setting). */
   aiLanguage: string;
 }) {
@@ -80,8 +81,11 @@ export function ComposeDialog({
   const [refining, setRefining] = useState<AiCategory | null>(null);
   const [beforeRefine, setBeforeRefine] = useState<string | null>(null);
   const [translateTo, setTranslateTo] = useState<string | null>(null);
+  // Which translation skill the language box belongs to (when the user has several).
+  const [translateSkillId, setTranslateSkillId] = useState<number | undefined>(undefined);
+  const skillsOf = (category: AiCategory) => aiSkills.filter(skill => skill.category === category);
 
-  async function refine(category: "improve" | "grammar" | "translate", language?: string) {
+  async function refine(category: "improve" | "grammar" | "translate", language?: string, skillId?: number) {
     if (!token) return;
     const parts = splitRefinable(body);
     if (!parts.head.trim()) {
@@ -91,7 +95,7 @@ export function ComposeDialog({
     setRefining(category);
     setError(null);
     try {
-      const result = await api.aiRun(token, category, parts.head.trim(), language);
+      const result = await api.aiRun(token, category, parts.head.trim(), language, skillId);
       const next = joinRefined(parts, result.text);
       setBeforeRefine(body);
       editorRef.current?.setContent(next);
@@ -249,8 +253,8 @@ export function ComposeDialog({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 empty:hidden">
-            {/* Only for skills that exist: no Refine at all without any, and no items for the missing ones. */}
-            {(aiCategories.has("improve") || aiCategories.has("grammar") || aiCategories.has("translate")) && (
+            {/* Only for skills that exist: no Refine at all without any, and one entry per skill (named) when a category has several. */}
+            {aiSkills.some(skill => skill.category === "improve" || skill.category === "grammar" || skill.category === "translate") && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button type="button" variant="outline" size="sm" disabled={refining !== null || busy !== null}>
@@ -259,9 +263,29 @@ export function ComposeDialog({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start">
-                  {aiCategories.has("improve") && <DropdownMenuItem onSelect={() => refine("improve")}>Phrase</DropdownMenuItem>}
-                  {aiCategories.has("grammar") && <DropdownMenuItem onSelect={() => refine("grammar")}>Spelling + Grammar</DropdownMenuItem>}
-                  {aiCategories.has("translate") && <DropdownMenuItem onSelect={() => setTranslateTo(aiLanguage)}>Translate…</DropdownMenuItem>}
+                  {(
+                    [
+                      ["improve", "Phrase"],
+                      ["grammar", "Spelling + Grammar"],
+                    ] as const
+                  ).flatMap(([category, title]) =>
+                    skillsOf(category).map((skill, _, all) => (
+                      <DropdownMenuItem key={skill.id} onSelect={() => refine(category, undefined, skill.id)}>
+                        {all.length > 1 ? `${title} · ${skill.label}` : title}
+                      </DropdownMenuItem>
+                    ))
+                  )}
+                  {skillsOf("translate").map((skill, _, all) => (
+                    <DropdownMenuItem
+                      key={skill.id}
+                      onSelect={() => {
+                        setTranslateSkillId(skill.id);
+                        setTranslateTo(aiLanguage);
+                      }}
+                    >
+                      {all.length > 1 ? `Translate… · ${skill.label}` : "Translate…"}
+                    </DropdownMenuItem>
+                  ))}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
@@ -270,7 +294,7 @@ export function ComposeDialog({
                 className="flex items-center gap-1.5"
                 onSubmit={e => {
                   e.preventDefault();
-                  if (translateTo.trim()) refine("translate", translateTo.trim());
+                  if (translateTo.trim()) refine("translate", translateTo.trim(), translateSkillId);
                 }}
               >
                 <Languages className="size-3.5 text-muted-foreground" />

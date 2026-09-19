@@ -1,7 +1,8 @@
-import { Loader2, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import type { EmailRecord } from "../../server/types";
+import type { AiSkillRecord } from "../../server/models/ai";
+import { AiSkillButton } from "./AiSkillButton";
 import { RenderPureMarkdown } from "./RenderPureMarkdown";
 
 /**
@@ -11,14 +12,15 @@ import { RenderPureMarkdown } from "./RenderPureMarkdown";
  */
 export function AiSummaryPanel({
   email,
-  canSummarize,
+  skills,
   busy,
   onSummarize,
 }: {
   email: EmailRecord;
-  canSummarize: boolean;
+  /** The user's Summarize skills (empty: no button, just what is stored). */
+  skills: AiSkillRecord[];
   busy: boolean;
-  onSummarize: () => void;
+  onSummarize: (skillId: number) => void;
 }) {
   const labels = email.taxonomyList ?? [];
 
@@ -26,7 +28,7 @@ export function AiSummaryPanel({
     <div className="space-y-3 p-4">
       {email.aiSummary ? (
         <RenderPureMarkdown markdown={email.aiSummary} aria-label="AI summary" />
-      ) : canSummarize ? (
+      ) : skills.length > 0 ? (
         <p className="text-sm text-muted-foreground">No summary yet. The AI summarizes this message when you press the button.</p>
       ) : null}
 
@@ -40,12 +42,14 @@ export function AiSummaryPanel({
         </ul>
       )}
 
-      {canSummarize && (
-        <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onSummarize}>
-          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-          {email.aiSummary ? "Summarize again" : "Summarize with AI"}
-        </Button>
-      )}
+      <AiSkillButton
+        skills={skills}
+        busy={busy}
+        icon={<Sparkles className="size-3.5" />}
+        label={email.aiSummary ? "Summarize again" : "Summarize with AI"}
+        variant="outline"
+        onRun={onSummarize}
+      />
     </div>
   );
 }

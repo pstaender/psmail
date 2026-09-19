@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { AI_VENDORS, VENDOR_LABELS, isAiCategory, isAiVendor, type AiCategory, type AiVendor } from "../../ai/categories";
+import { AI_VENDORS, VENDOR_LABELS, defaultSkillLabel, isAiCategory, isAiVendor, type AiCategory, type AiVendor } from "../../ai/categories";
 import { decryptSecret, encryptSecret } from "../crypto/secrets";
 import { ApiError, NotFoundError } from "../types";
 
@@ -150,7 +150,10 @@ export interface AiSkillRecord {
   id: number;
   aiApiId: number;
   category: AiCategory;
+  /** The name the user gave it; may be empty. */
   name: string;
+  /** What to show for it: the name, or — when there is none — `Vendor.model` of its provider. */
+  label: string;
   prompt: string;
   createdAt: string;
   updatedAt: string;
@@ -165,7 +168,13 @@ interface AiSkillRow {
   prompt: string;
   created_at: string;
   updated_at: string;
+  api_vendor: string;
+  api_model: string;
 }
+
+/** A skill row joined with its provider (for the label). */
+const SKILL_SELECT = `SELECT s.*, a.vendor AS api_vendor, a.model AS api_model
+  FROM ai_skills s JOIN ai_apis a ON a.id = s.ai_api_id`;
 
 export interface AiSkillInput {
   aiApiId?: number;
@@ -182,6 +191,7 @@ function toSkill(row: AiSkillRow): AiSkillRecord {
     aiApiId: row.ai_api_id,
     category: row.category as AiCategory,
     name: row.name,
+    label: row.name || defaultSkillLabel(row.api_vendor as AiVendor, row.api_model),
     prompt: row.prompt,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -196,11 +206,11 @@ function cleanPrompt(value: string | undefined): string {
 }
 
 export function listAiSkills(db: Database, userId: number): AiSkillRecord[] {
-  return db.query<AiSkillRow, [number]>("SELECT * FROM ai_skills WHERE user_id = ? ORDER BY id").all(userId).map(toSkill);
+  return db.query<AiSkillRow, [number]>(`${SKILL_SELECT} WHERE s.user_id = ? ORDER BY s.id`).all(userId).map(toSkill);
 }
 
 function getSkillRow(db: Database, userId: number, id: number): AiSkillRow {
-  const row = db.query<AiSkillRow, [number, number]>("SELECT * FROM ai_skills WHERE id = ? AND user_id = ?").get(id, userId);
+  const row = db.query<AiSkillRow, [number, number]>(`${SKILL_SELECT} WHERE s.id = ? AND s.user_id = ?`).get(id, userId);
   if (!row) throw new NotFoundError(`AI skill ${id} not found`);
   return row;
 }
@@ -209,14 +219,13 @@ export function createAiSkill(db: Database, userId: number, input: AiSkillInput)
   if (!isAiCategory(input.category)) throw new ApiError(400, "Unknown skill category");
   if (typeof input.aiApiId !== "number") throw new ApiError(400, "aiApiId is required");
   getApiRow(db, userId, input.aiApiId); // must be one of this user's
-  const name = input.name?.trim() || input.category;
 
-  const row = db
-    .query<AiSkillRow, [number, number, string, string, string]>(
-      `INSERT INTO ai_skills (user_id, ai_api_id, category, name, prompt) VALUES (?, ?, ?, ?, ?) RETURNING *`
+  const created = db
+    .query<{ id: number }, [number, number, string, string, string]>(
+      `INSERT INTO ai_skills (user_id, ai_api_id, category, name, prompt) VALUES (?, ?, ?, ?, ?) RETURNING id`
     )
-    .get(userId, input.aiApiId, input.category, name, cleanPrompt(input.prompt));
-  return toSkill(row!);
+    .get(userId, input.aiApiId, input.category, input.name?.trim() ?? "", cleanPrompt(input.prompt));
+  return toSkill(getSkillRow(db, userId, created!.id));
 }
 
 export function updateAiSkill(db: Database, userId: number, id: number, input: AiSkillInput): AiSkillRecord {
@@ -224,19 +233,17 @@ export function updateAiSkill(db: Database, userId: number, id: number, input: A
   if (input.category !== undefined && !isAiCategory(input.category)) throw new ApiError(400, "Unknown skill category");
   if (input.aiApiId !== undefined) getApiRow(db, userId, input.aiApiId);
 
-  const row = db
-    .query<AiSkillRow, [number, string, string, string, number]>(
-      `UPDATE ai_skills SET ai_api_id = ?, category = ?, name = ?, prompt = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? RETURNING *`
-    )
-    .get(
-      input.aiApiId ?? existing.ai_api_id,
-      input.category ?? existing.category,
-      input.name !== undefined ? input.name.trim() || existing.name : existing.name,
-      input.prompt !== undefined ? cleanPrompt(input.prompt) : existing.prompt,
-      id
-    );
-  return toSkill(row!);
+  db.query(
+    `UPDATE ai_skills SET ai_api_id = ?, category = ?, name = ?, prompt = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`
+  ).run(
+    input.aiApiId ?? existing.ai_api_id,
+    input.category ?? existing.category,
+    // An empty name is allowed: the skill is then shown as `Vendor.model`.
+    input.name !== undefined ? input.name.trim() : existing.name,
+    input.prompt !== undefined ? cleanPrompt(input.prompt) : existing.prompt,
+    id
+  );
+  return toSkill(getSkillRow(db, userId, id));
 }
 
 export function deleteAiSkill(db: Database, userId: number, id: number): void {
@@ -244,10 +251,16 @@ export function deleteAiSkill(db: Database, userId: number, id: number): void {
   db.query("DELETE FROM ai_skills WHERE id = ?").run(id);
 }
 
-/** The skill used when a button of this category is pressed: the user's first one (oldest). */
-export function findSkillForCategory(db: Database, userId: number, category: AiCategory): AiSkillRecord | null {
-  const row = db
-    .query<AiSkillRow, [number, string]>("SELECT * FROM ai_skills WHERE user_id = ? AND category = ? ORDER BY id LIMIT 1")
-    .get(userId, category);
+/**
+ * The skill to run for a category: the one asked for by `skillId` (it must be the user's and of that category),
+ * otherwise the user's first (oldest) one.
+ */
+export function findSkillForCategory(db: Database, userId: number, category: AiCategory, skillId?: number | null): AiSkillRecord | null {
+  if (skillId !== undefined && skillId !== null) {
+    const chosen = getSkillRow(db, userId, skillId);
+    if (chosen.category !== category) throw new ApiError(400, `That skill isn't a ${category} skill`);
+    return toSkill(chosen);
+  }
+  const row = db.query<AiSkillRow, [number, string]>(`${SKILL_SELECT} WHERE s.user_id = ? AND s.category = ? ORDER BY s.id LIMIT 1`).get(userId, category);
   return row ? toSkill(row) : null;
 }
