@@ -7,6 +7,37 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Gmail folder list that never answered (7dd7bfa)
+-----------------------------------------------------------
+Diagnosis (done against the real Gmail account, with a separate diagnostic server on another port; only
+read-only IMAP calls): curl showed "Empty reply from server" after ~10 s. Two causes together:
+1. The live IMAP listing was extremely slow - connect+login 30 s, LIST 10 s, LOGOUT 10 s (~50 s in total) -
+   and a moment later Gmail closed the connection right after the TLS handshake with "Account exceeded command
+   or bandwidth limits." So Gmail is throttling the account (other clients - Apple Mail, a ruby process - were
+   connected too, and our sync of all folders downloads whole mailboxes at once, 44,000 messages in the
+   Inbox). Nothing in the app can lift that; it usually clears after some hours without heavy use.
+2. The app hid it: Bun.serve's default idleTimeout is 10 s and silently drops a request that hasn't
+   answered by then, so instead of any error the browser got an empty reply.
+Fixes:
+- Bun.serve idleTimeout: 120 (restart `bun run dev` - hot reload does not re-apply server options).
+- The folder list is now remembered per account (accounts.folders_cache): a plain request is answered from
+  it instantly with fresh counts, and never touches IMAP; `?live=1` reads IMAP. The web client shows the
+  cached tree first and refreshes it live in the background (keeping what is shown if that fails); refreshing
+  counts after a sync no longer opens an IMAP connection at all. Without a cache the first request goes
+  live. Concurrent live listings of an account share one connection.
+- Failures are errors with the reason instead of silence: "Couldn't read the folders of ... from
+  imap.gmail.com: Unexpected close (code=ClosedAfterConnectTLS, server said: "Account exceeded command or
+  bandwidth limits.") - the mail server is throttling this account; it usually lifts after some hours". That is
+  also what the sidebar shows now. IMAP connections time out after 30 s (connect) / 20 s (greeting), and the
+  client gets an "error" listener so a dropped connection can't become an uncaught exception.
+- Tests: the folder route with cache/no cache/live failures, the error text, and the tree showing cached
+  folders first, keeping them when the live read fails, and not re-reading IMAP for count refreshes.
+Not fixed here (worth doing next): a sync downloads a whole folder in one request and stores nothing until
+it is complete, so an interrupted or restarted sync (dev hot reload!) starts over from zero - repeated
+full downloads are exactly what triggers Gmail's limits, and the dev server had grown to ~2.6 GB. Downloading
+and storing in batches (say 200 messages at a time) would fix both.
+
+
 2026-09-19 - Disabled mail accounts (047798c)
 ----------------------------------------------
 Account settings > Safety has a new "Disabled" switch (new accounts.disabled column, migrated; also
