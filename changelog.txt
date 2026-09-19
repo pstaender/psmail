@@ -7,6 +7,21 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Tab renames, fallback tab not remembered (f1a895f)
+--------------------------------------------------------------
+- The reading-pane tabs "Plain text" and "Full HTML" are now called "Plain" and "HTML". Only the
+  labels changed; the stored setting values (plain, full) are the same.
+- A tab that is shown only because the preferred one isn't available on that message (MD on a
+  message without HTML falls back to Plain) is no longer remembered. Storing it on the server was
+  already limited to explicit clicks, but the in-session preference did drift: after the fallback,
+  the next message that does have MD kept opening on Plain. Now the preference only ever changes
+  when you click a tab, so that next message opens on MD again, and nothing is stored on a fallback.
+- "HTML" is still never carried over to another message automatically (it opens as Safe HTML), and
+  that no longer changes the remembered choice either.
+- Tests updated for the new names; new test for the fallback (no settings write, preference kept,
+  explicit pick stores).
+
+
 2026-09-19 - Clickable new-mail toast, monospace text (1b9b1d5)
 ---------------------------------------------------------------
 - The "Open" and "Show inbox" buttons are gone from the new-mail toast: the whole toast is now the
