@@ -110,3 +110,7 @@ bun --hot ./index.ts
 ```
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+
+## Changelog
+
+`changelog.txt` records the summary given after each piece of work. After every git commit, add the summary you write for the user (what changed and why, in the same words) to `changelog.txt` as a new entry at the top, headed `YYYY-MM-DD - <short title> (<commit hash>)`, and include the changelog update in a follow-up commit (do not amend the commit the summary describes).

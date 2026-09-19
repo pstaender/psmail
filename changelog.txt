@@ -1,0 +1,221 @@
+P.S.Mail changelog
+==================
+
+Newest entries first. Each entry is the summary given after a piece of work was committed.
+Entries up to and including "Fix a delete data-loss bug" (2026-09-18) were reconstructed from
+the git commit messages, not from the original end-of-task summaries. Later entries are the
+summaries as written.
+
+
+2026-09-19 - Interval sync only syncs Inboxes (34c5d90)
+--------------------------------------------------------
+The interval sync now syncs only each account's Inbox. Clicking "Sync now" still syncs every
+folder. The Settings dialog text and the README say this too. The interval-sync test now expects
+an Inbox-only sync request.
+Because the interval sync only pulls the Inbox, mail sorted into other folders shows up in the
+combined Inbox (with the folder option on) only after a manual sync.
+
+
+2026-09-19 - Settings dialog, read-only delete tombstones (e0b1ae1)
+--------------------------------------------------------------------
+- Folder mail in the combined Inbox: now an opt-in user setting, off by default. When on, the
+  combined Inbox and its unread badge also cover each account's other incoming folders. Sent,
+  Drafts, Trash, Junk and Archive are left out, recognised by the server's folder flags (learned
+  from its folder list) or by common names like Papierkorb and Spam. Each row still shows which
+  folder the message is in.
+- Deleting in read-only mode: a small tombstone table (deleted_uids) instead of an
+  is_permanently_deleted flag. Only the message's UID is remembered; the message itself (body,
+  attachments) is really deleted. A flag would have needed a filter in every list, search, count
+  and contact query. The next sync skips tombstoned UIDs and counts them in its "newer than"
+  cutoff (deleting the newest message used to make it look new again), and drops a tombstone once
+  the server no longer has that message.
+- Local-only moves in read-only accounts tombstone the old folder's UID too, and the moved row
+  loses its old UID (it belonged to the old folder and could collide with a real message in the
+  destination). This changes the old behaviour of keeping the UID; the integration test was
+  updated.
+- Settings dialog: the username next to logout is now a subtle button with a gear icon ("Settings"
+  for the default profile). Two fields, stored on the server: sync interval in minutes (whole
+  number 1-1440, empty = never, the default) and the combined-Inbox folder option. While the web
+  client is open it syncs on that interval; an account still busy with the previous run is
+  skipped and failures to start an automatic sync stay quiet. Sync state moved out of the sidebar
+  rows into one shared hook (useSyncJobs) so manual and automatic runs can't overlap. The interval
+  only fires while the tab is open; the first run happens after one full interval.
+- Removed the never-used downloadIntervalSeconds from settings.json (an existing file that still
+  has it is unaffected).
+- Tests added for the tombstones, folder inclusion rules, the new settings and the dialog.
+
+
+2026-09-19 - Bare URL links, star icons (c53d0d2)
+--------------------------------------------------
+- RenderPureMarkdown: a link that is just a URL (bare https://..., <https://...>, or
+  [https://x](https://x)) shows only the URL, without the [ ](url) marks. A link with its own text
+  is unchanged.
+- Starred messages show a filled yellow star in search results and the combined Inbox/Sent lists
+  (indicator only; toggling still happens in the folder list).
+- The reading pane header shows the star next to the subject instead of the "Flagged" badge.
+- www.example.com without a scheme is not turned into a link (unchanged from before).
+- Tests added for the link cases and the star indicator.
+
+
+2026-09-19 - Sync all folders, unread badge, paperclip, calmer tree refresh (1b57ade)
+--------------------------------------------------------------------------------------
+- Unread badge on the combined Inbox: counts unread messages across all accounts' Inboxes via
+  GET /api/unified/inbox/unread. Drops immediately as messages are read; re-read from the server
+  after a sync or send. A partial index covering only unread rows keeps the count cheap.
+- Tree reloading during sync: after a sync finished, the folder list was reloaded behind a
+  "Loading folders..." spinner, blanking the tree. Now only the very first load for an account
+  shows the spinner; later refreshes update counts in place. Switching accounts no longer briefly
+  shows the previous account's folders. When a sync ends, folder counts, the open list, the
+  combined lists and the unread badge are refreshed.
+- Empty folders: "Sync now" only ever synced the Inbox. It now syncs every folder, Inbox first,
+  with cumulative progress. It skips unselectable folders and Gmail-style "All Mail"/"Flagged"
+  views. If one folder fails the rest still sync and the job ends failed naming the folder and
+  error. The CLI's --folder and the API's folder field still limit it to one folder. The server
+  also remembers each account's Sent folder while syncing.
+- Paperclip on rows with real attachments (inline images don't count), in folder lists, search
+  results and the combined lists. List rows now carry an attachment count.
+- Existing accounts need one full "Sync now" to pull their other folders; each folder is fetched
+  in one go with no batching yet.
+
+
+2026-09-19 - Reading tab, favs search, account position, combined Inbox/Sent (cabdab3)
+--------------------------------------------------------------------------------------
+- Reading-tab setting: the last picked tab (Text, MD, Plain text, Safe HTML, Full HTML) is stored
+  in the user settings on the server (GET/PATCH /api/settings) and restored on load. Only an
+  explicit tab click saves it.
+- favs search: a leading "favs" limits the search to flagged messages ("favs amazon", or "favs"
+  alone). Anywhere else, or quoted, it is an ordinary word.
+- Misc tab in account settings with the account's position in the sidebar list, stored in the
+  database. Moving an account shifts the others; deleting one closes the gap; a number above the
+  account count puts it last.
+- Combined Inbox and Sent at the top of the sidebar (GET /api/unified/inbox and /sent). Paged as
+  you scroll, rows show account and folder, Sent shows the recipient. Search results now page too
+  (beyond the old cap of 50).
+- The server learns each account's real Sent folder from the live folder list or when you send,
+  falling back to common names (Sent, Sent Items, Gesendet, ...).
+- Not included: no unread badge on the combined Inbox at that point (added in 1b57ade).
+
+
+2026-09-18 - Recipient autocomplete, faster list, infinite scroll (421682c)
+---------------------------------------------------------------------------
+- Recipient autocomplete: GET /api/accounts/:email/contacts?q=... suggests addresses by prefix
+  or name word. Ranking: people who wrote to you, then people Cc'd, then everyone else (mainly
+  people you only sent to); within each group by frequency, then recency. A contacts table is
+  updated whenever a message is stored or a draft is sent; existing databases are backfilled once.
+  To, Cc and a new Bcc field use RecipientInput with keyboard and mouse selection, debounced and
+  cached lookups. About 3 ms on 20,000 contacts.
+- Slow message list: the query loaded every column including full HTML bodies and raw headers,
+  and sorted the whole folder each time. It now loads only what the list shows (snippet cut to
+  200 characters) and uses an index on account, folder, date and id. On 5,000 messages: about
+  296 ms down to about 1 ms. List rows no longer carry the HTML body or raw headers; opening a
+  message still fetches it in full.
+- Infinite scroll: the list loads 100 messages at a time and fetches the next page near the
+  bottom. Refreshing keeps already scrolled-in pages; duplicates from shifting pages are dropped.
+- Known gap noted at the time: the paperclip icon never showed because list rows had no
+  attachment info (fixed in 1b57ade).
+
+
+2026-09-18 - Fix "Too long argument" on resumed sync (8356a44)
+---------------------------------------------------------------
+- The flag reconcile sent every stored UID; it now sends one min:max range (for example
+  1:48213). UIDs stored locally but missing from the response are still treated as deleted.
+- Fetching new messages had the same problem in another form: passing { uid: range } is a search
+  in imapflow, whose hits get listed in the fetch command. It now passes a plain range string
+  such as 41:*, so the command stays short however large the mailbox is.
+
+
+2026-09-18 - Download progress on the sync job (44fcb9e)
+---------------------------------------------------------
+- GET /api/accounts/:email/downloads/:id shows the download count while messages are still being
+  downloaded: progressCurrent updates per downloaded message (same count as the server log's
+  "still downloading: n message(s)"). progressTotal is an estimate (folder size minus what is
+  stored) until the download ends. Status switches to running as soon as the folder is open.
+- When the download ends, progressTotal becomes exact and progressCurrent drops back to 0 and then
+  counts messages stored. Documented in the README.
+
+
+2026-09-18 - Sync logging (82a86c4, 28aed1d)
+---------------------------------------------
+- The server console prints each sync step: [sync <timestamp>] lines for connection target
+  (never the password), reconcile/fetch stages, message counts, progress every 25 messages,
+  total time. Silent under bun test.
+- A failed sync logs the stage it died in plus the IMAP server's own response (error code,
+  response status, response text), and the same text is stored as the job's error, so the toast
+  in the UI says what went wrong.
+- Fetch-level logging: connect, login, folder open ("opened: N message(s) in folder,
+  uidNext=..."), and a 10-second "still downloading" heartbeat with message and MB counts.
+- Diagnosis given for a sync that "freezes" at "fetching messages newer than UID 0": a first sync
+  downloads every message in one request and stores nothing until the end, so a big mailbox looks
+  frozen; other candidates were connection/TLS problems, server throttling, or a folder that
+  cannot be opened.
+
+
+2026-09-18 - Recover from orphaned sync jobs; toast sync errors (f3898f3)
+--------------------------------------------------------------------------
+- On server start, any job still pending or running (orphaned by a killed server) is marked
+  failed with "Interrupted by server restart", so syncing works again. Marked failed rather than
+  deleted to keep the history.
+- useSync now calls toast.error for every sync error: a failed job, a polling error, or a failed
+  start such as the "already has an active download job" conflict.
+
+
+2026-09-18 - Replace the read-only MarkdownEditor mode with RenderPureMarkdown (5dba216)
+-----------------------------------------------------------------------------------------
+- Removed MarkdownEditor's broken readOnly mode (it never registered the destroy cleanup, leaking
+  editor instances).
+- Added RenderPureMarkdown, a non-editable component using markdown-it with custom renderer rules
+  matching the de-emphasized-markup look of the compose editor, sanitized through the same
+  DOMPurify pipeline as the Safe HTML view. CSS shared with the editor in tinyMarkdownEditor.css.
+- Root-caused and fixed a bug in sanitizeEmailHtml: DOMPurify (under happy-dom) dropped the single
+  outermost tag of any fragment it was given (sanitizing "<h2>x</h2>" alone returned "x"), which
+  would have broken headings and code blocks. Fixed by wrapping the input in a throwaway div
+  before sanitizing.
+- Updated MessageBody's Text/MD tabs, fixed the affected test, added a test suite for
+  RenderPureMarkdown, updated the README.
+
+
+2026-09-18 - Fix a delete data-loss bug; five smaller UX fixes (e91e170)
+-------------------------------------------------------------------------
+Reconstructed from the commit message and session notes:
+- Fixed a data-loss bug in the delete path: a failing IMAP teardown after a successful delete
+  masked the success (withImapClient teardown-masking-success), so a fail-closed caller could
+  leave the local database changed while reporting failure. Teardown failures no longer override
+  the operation's own result.
+- Five smaller fixes: Cmd/Ctrl+K search focus, hiding the "default" username in the header,
+  skipping the password prompt for profiles with an empty password, and related polish.
+
+
+2026-09-18 - Earlier work in this session (reconstructed from commit messages)
+-------------------------------------------------------------------------------
+- Read-only Text/MD rendering, tabbed account settings (Server/Safety/Signature) with sender name
+  and signature (00c6f2a).
+- Drafts are editable: Edit-draft button and double-click to open (5195ed6).
+- "INBOX" displayed as "Inbox"; redundant markdown link syntax skipped for bare URLs (6bc1b88).
+- Radix ScrollArea table-display wrapper no longer breaks text truncation (ab5c542).
+- Drafts/Sent/Trash resolved by IMAP special-use flag instead of an assumed English name (7fd30c6).
+- Sidebar unread badge updates immediately on read/unread, delete and move (5b50590); only
+  permanent deletes ask for confirmation, Backspace/Delete shortcut added (1b0d44b); bulk delete
+  of a single message skips the confirmation (c322f9f); stale delete-confirmation copy fixed
+  (04351db).
+- Two-way sync, Sent-folder copies (APPEND), soft-delete to Trash with UIDPLUS detection, and
+  pooled bulk IMAP connections (dc3e597).
+- Read/move/delete pushed to IMAP when the account is not read-only (30bb4dd).
+
+
+2026-09-17 - Initial build (reconstructed from commit messages)
+----------------------------------------------------------------
+- Backend API server with sqlite storage, IMAP/SMTP sync and a CLI (d908df2).
+- Web client: login, account tree, mail reading pane, compose (af26e61); test-mailbox seeding
+  script (82f3546).
+- Compose dialog fixes: viewport overflow, wider on large screens, focus rings, monospace body
+  (9d38dc0, 7610f31); TinyMDE for the compose body (43b7d4a).
+- Reading views: Text (cleanest text or HTML->Markdown), MD, Plain text, Safe HTML, Full HTML;
+  monospace for Text/Plain; last-used view remembered, Full HTML never carried over
+  (585a851, 0099516, dcef37c, 5435397).
+- Curated tracking-parameter removal for safe-HTML links (0a4903c, 592d303).
+- Cross-account search on subject and sender (df95e72, 36735c6); search results reflect
+  mark-as-read/unread and moves (56d7813).
+- Cmd/Ctrl+click multi-select and Shift+click range selection with bulk mark-read/move/delete
+  (9cb6d16, 340df9a).
+- Resizable sidebar and message list, collapsible sidebar (35b4ebc).
+- Per-account read-only flag and a full account-settings editor (cb23925).
