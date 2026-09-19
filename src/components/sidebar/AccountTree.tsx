@@ -1,5 +1,7 @@
-import { Loader2, PanelLeftClose } from "lucide-react";
+import { Inbox, Loader2, PanelLeftClose, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import type { UnifiedKind } from "@/lib/api";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AccountRow, type SharedFolders } from "./AccountRow";
 import { AddAccountDialog } from "./AddAccountDialog";
@@ -15,6 +17,8 @@ export function AccountTree({
   onEditAccount,
   onCollapse,
   sharedFolders,
+  unifiedView,
+  onSelectUnified,
 }: {
   accounts: Account[];
   loading: boolean;
@@ -31,6 +35,9 @@ export function AccountTree({
    * fetching (and staying stale) on its own. See AccountRow.
    */
   sharedFolders: SharedFolders;
+  /** Which cross-account mailbox (all Inboxes / all Sents) is showing, if any. */
+  unifiedView: UnifiedKind | null;
+  onSelectUnified: (kind: UnifiedKind) => void;
 }) {
   return (
     <div className="flex h-full flex-col border-r bg-muted/20">
@@ -39,6 +46,28 @@ export function AccountTree({
         <Button variant="ghost" size="icon" className="size-6" onClick={onCollapse} title="Collapse accounts">
           <PanelLeftClose className="size-3.5" />
         </Button>
+      </div>
+
+      <div className="space-y-0.5 px-2 pb-2">
+        {(
+          [
+            { kind: "inbox", label: "Inbox", Icon: Inbox },
+            { kind: "sent", label: "Sent", Icon: Send },
+          ] as const
+        ).map(({ kind, label, Icon }) => (
+          <button
+            key={kind}
+            onClick={() => onSelectUnified(kind)}
+            title={`${label} of all accounts`}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent",
+              unifiedView === kind && "bg-accent font-medium"
+            )}
+          >
+            <Icon className="size-4 shrink-0 text-muted-foreground" />
+            <span className="flex-1 truncate">{label}</span>
+          </button>
+        ))}
       </div>
 
       <ScrollArea className="flex-1 px-2">

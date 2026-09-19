@@ -11,6 +11,7 @@ describe("parseSearchQuery", () => {
     expect(parseSearchQuery("amazon gutschein")).toEqual({
       generalTerms: ["amazon", "gutschein"],
       fromTerms: [],
+      favsOnly: false,
     });
   });
 
@@ -18,6 +19,7 @@ describe("parseSearchQuery", () => {
     expect(parseSearchQuery('"Mountain Bike"')).toEqual({
       generalTerms: ["Mountain Bike"],
       fromTerms: [],
+      favsOnly: false,
     });
   });
 
@@ -25,6 +27,7 @@ describe("parseSearchQuery", () => {
     expect(parseSearchQuery("from:alice@example.com amazon*gutschein")).toEqual({
       generalTerms: ["amazon*gutschein"],
       fromTerms: ["alice@example.com"],
+      favsOnly: false,
     });
   });
 
@@ -32,6 +35,7 @@ describe("parseSearchQuery", () => {
     expect(parseSearchQuery('from:"jane doe" hello')).toEqual({
       generalTerms: ["hello"],
       fromTerms: ["jane doe"],
+      favsOnly: false,
     });
   });
 
@@ -39,7 +43,19 @@ describe("parseSearchQuery", () => {
     expect(parseSearchQuery("from:alice@x.com from:bob@x.com")).toEqual({
       generalTerms: [],
       fromTerms: ["alice@x.com", "bob@x.com"],
+      favsOnly: false,
     });
+  });
+
+  test("a leading `favs` is a command, not a search term; the rest filters as usual", () => {
+    expect(parseSearchQuery("favs amazon from:bob")).toEqual({ generalTerms: ["amazon"], fromTerms: ["bob"], favsOnly: true });
+    expect(parseSearchQuery("FAVS")).toEqual({ generalTerms: [], fromTerms: [], favsOnly: true });
+  });
+
+  test("`favs` anywhere but first, inside a longer word, or quoted is an ordinary term", () => {
+    expect(parseSearchQuery("amazon favs").favsOnly).toBe(false);
+    expect(parseSearchQuery("favsfoo").favsOnly).toBe(false);
+    expect(parseSearchQuery('"favs" x')).toEqual({ generalTerms: ["favs", "x"], fromTerms: [], favsOnly: false });
   });
 });
 

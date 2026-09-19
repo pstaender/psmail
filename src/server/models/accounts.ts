@@ -23,6 +23,9 @@ interface AccountRow {
   imap_uidplus: number | null;
   sender_name: string | null;
   signature: string | null;
+  position: number;
+  /** Path of this account's Sent folder as last seen on the server (learned from the live folder list / a send); NULL = not learned yet. */
+  sent_folder: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -54,7 +57,10 @@ export interface CreateAccountInput {
   signature?: string;
 }
 
-export type UpdateAccountInput = Partial<CreateAccountInput>;
+export type UpdateAccountInput = Partial<CreateAccountInput> & {
+  /** 1-based place in the account list; the other accounts shift to make room (see setAccountPosition). */
+  position?: number;
+};
 
 function toAccount(row: AccountRow): Account {
   return {
@@ -75,6 +81,7 @@ function toAccount(row: AccountRow): Account {
     supportsUidPlus: row.imap_uidplus === null ? null : !!row.imap_uidplus,
     senderName: row.sender_name,
     signature: row.signature,
+    position: row.position,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -93,8 +100,9 @@ export function createAccount(db: Database, userId: number, input: CreateAccount
         user_id, email, display_name,
         imap_host, imap_port, imap_secure, imap_username, imap_password_encrypted,
         smtp_host, smtp_port, smtp_secure, smtp_username, smtp_password_encrypted, read_only, skip_soft_delete,
-        sender_name, signature
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        sender_name, signature, position
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        (SELECT COALESCE(MAX(position), 0) + 1 FROM accounts WHERE user_id = ?1))
       RETURNING *`
     )
     .get(
@@ -121,7 +129,7 @@ export function createAccount(db: Database, userId: number, input: CreateAccount
 }
 
 export function listAccounts(db: Database, userId: number): Account[] {
-  const rows = db.query<AccountRow, [number]>("SELECT * FROM accounts WHERE user_id = ? ORDER BY id").all(userId);
+  const rows = db.query<AccountRow, [number]>("SELECT * FROM accounts WHERE user_id = ? ORDER BY position, id").all(userId);
   return rows.map(toAccount);
 }
 
@@ -217,7 +225,51 @@ export function updateAccount(db: Database, id: number, input: UpdateAccountInpu
       id
     );
 
+  if (input.position !== undefined) return setAccountPosition(db, id, input.position);
   return toAccount(row!);
+}
+
+/** Renumbers a user's accounts 1..n in their current (position, id) order, closing any gaps/ties. */
+function renumberAccounts(db: Database, orderedIds: number[]): void {
+  const stmt = db.query("UPDATE accounts SET position = ? WHERE id = ?");
+  db.transaction(() => {
+    orderedIds.forEach((accountId, index) => stmt.run(index + 1, accountId));
+  })();
+}
+
+/**
+ * Moves an account to `position` (1-based, clamped to the valid range) in its user's list; the
+ * accounts in between shift by one, so positions always stay a gap-free 1..n.
+ */
+export function setAccountPosition(db: Database, id: number, position: number): Account {
+  const account = getAccountRow(db, id);
+  const ids = db
+    .query<{ id: number }, [number]>("SELECT id FROM accounts WHERE user_id = ? ORDER BY position, id")
+    .all(account.user_id)
+    .map(r => r.id)
+    .filter(other => other !== id);
+
+  const index = Math.min(Math.max(Math.round(position) - 1, 0), ids.length);
+  ids.splice(index, 0, id);
+  renumberAccounts(db, ids);
+  return getAccount(db, id);
+}
+
+/** Startup fix-up: existing databases have position 0 everywhere — this gives every user's accounts a clean 1..n. */
+export function normalizeAccountPositions(db: Database): void {
+  const users = db.query<{ user_id: number }, []>("SELECT DISTINCT user_id FROM accounts").all();
+  for (const { user_id } of users) {
+    const ids = db
+      .query<{ id: number; position: number }, [number]>("SELECT id, position FROM accounts WHERE user_id = ? ORDER BY position, id")
+      .all(user_id);
+    if (ids.every((row, i) => row.position === i + 1)) continue;
+    renumberAccounts(db, ids.map(r => r.id));
+  }
+}
+
+/** Remembers where this account's Sent folder lives on the server, so the unified Sent view can find it without an IMAP round trip. */
+export function setSentFolder(db: Database, id: number, path: string): void {
+  db.query("UPDATE accounts SET sent_folder = ? WHERE id = ? AND (sent_folder IS NOT ?)").run(path, id, path);
 }
 
 /** Persists the result of the last UIDPLUS capability check (see checkImapCapabilities in services/imap.ts). */
@@ -232,8 +284,13 @@ export function setImapUidPlus(db: Database, id: number, supported: boolean): Ac
 }
 
 export function deleteAccount(db: Database, id: number): void {
-  const result = db.query("DELETE FROM accounts WHERE id = ?").run(id);
-  if (result.changes === 0) throw new NotFoundError(`Account ${id} not found`);
+  const existing = getAccountRow(db, id);
+  db.query("DELETE FROM accounts WHERE id = ?").run(id);
+  // Close the gap the deleted account leaves in the position order.
+  renumberAccounts(
+    db,
+    db.query<{ id: number }, [number]>("SELECT id FROM accounts WHERE user_id = ? ORDER BY position, id").all(existing.user_id).map(r => r.id)
+  );
 }
 
 export interface DecryptedAccountCredentials {

@@ -10,12 +10,16 @@ export interface SearchResult {
   isFlagged: boolean;
   subject: string | null;
   from: EmailAddress[];
+  /** Recipients — only filled by the unified Sent list, which shows who a message went to rather than who sent it. */
+  to?: EmailAddress[];
   date: string | null;
 }
 
 interface ParsedQuery {
   generalTerms: string[];
   fromTerms: string[];
+  /** Set by a leading `favs` word: only flagged ("favorite") messages match. */
+  favsOnly: boolean;
 }
 
 /**
@@ -51,13 +55,19 @@ export function parseSearchQuery(query: string): ParsedQuery {
   const generalTerms: string[] = [];
   const fromTerms: string[] = [];
 
-  for (const token of tokenizeQuery(query)) {
+  // `favs` only counts as a command as the very first word (checked on the raw text, so a quoted
+  // "favs" — a phrase to search for — isn't mistaken for it). Everything after it filters as usual:
+  // `favs amazon` = flagged messages matching "amazon"; a lone `favs` lists all flagged messages.
+  const favsMatch = /^\s*favs(?:\s+|$)/i.exec(query);
+  const favsOnly = favsMatch !== null;
+
+  for (const token of tokenizeQuery(favsMatch ? query.slice(favsMatch[0].length) : query)) {
     const fromMatch = /^from:(.+)$/i.exec(token);
     if (fromMatch) fromTerms.push(fromMatch[1]!);
     else generalTerms.push(token);
   }
 
-  return { generalTerms, fromTerms };
+  return { generalTerms, fromTerms, favsOnly };
 }
 
 /**
@@ -134,8 +144,8 @@ export interface SearchOptions {
  * top of that. Always case-insensitive.
  */
 export function searchEmails(db: Database, userId: number, query: string, options: SearchOptions = {}): SearchResult[] {
-  const { generalTerms, fromTerms } = parseSearchQuery(query);
-  if (generalTerms.length === 0 && fromTerms.length === 0) return [];
+  const { generalTerms, fromTerms, favsOnly } = parseSearchQuery(query);
+  if (generalTerms.length === 0 && fromTerms.length === 0 && !favsOnly) return [];
 
   const generalRegexes = generalTerms.map(wildcardToRegExp);
   const fromRegexes = fromTerms.map(wildcardToRegExp);
@@ -146,7 +156,7 @@ export function searchEmails(db: Database, userId: number, query: string, option
               emails.is_read, emails.is_flagged, emails.subject, emails.from_addr, emails.date
        FROM emails
        JOIN accounts ON accounts.id = emails.account_id
-       WHERE accounts.user_id = ?
+       WHERE accounts.user_id = ?${favsOnly ? " AND emails.is_flagged = 1" : ""}
        ORDER BY emails.date DESC`
     )
     .all(userId);

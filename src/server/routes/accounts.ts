@@ -84,6 +84,7 @@ export function accountsRoutes(db: Database) {
         const row = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
 
         const body = await readJsonBody<UpdateAccountInput>(req);
+        if (body.position !== undefined && !Number.isFinite(body.position)) throw new ApiError(400, "position must be a number");
         const account = updateAccount(db, row.id, body, encryptionKey);
         return json(account);
       }),

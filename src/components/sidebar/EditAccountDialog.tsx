@@ -28,6 +28,7 @@ interface EditForm {
   skipSoftDelete: boolean;
   senderName: string;
   signature: string;
+  position: number;
 }
 
 const EMPTY: EditForm = {
@@ -46,6 +47,7 @@ const EMPTY: EditForm = {
   skipSoftDelete: false,
   senderName: "",
   signature: "",
+  position: 1,
 };
 
 function formFromAccount(account: Account): EditForm {
@@ -65,6 +67,7 @@ function formFromAccount(account: Account): EditForm {
     skipSoftDelete: account.skipSoftDelete,
     senderName: account.senderName ?? "",
     signature: account.signature ?? "",
+    position: account.position,
   };
 }
 
@@ -84,11 +87,14 @@ export function EditAccountDialog({
   open,
   onOpenChange,
   onSaved,
+  accountCount,
 }: {
   account: Account | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
+  /** How many accounts there are — the upper bound for the Position field. */
+  accountCount: number;
 }) {
   const { token } = useAuth();
   const [form, setForm] = useState<EditForm>(EMPTY);
@@ -155,6 +161,7 @@ export function EditAccountDialog({
         senderName: form.senderName,
         signature: form.signature,
       };
+      if (account.position !== form.position) patch.position = form.position;
       if (form.imapPassword) patch.imapPassword = form.imapPassword;
       if (form.smtpPassword) patch.smtpPassword = form.smtpPassword;
 
@@ -184,6 +191,7 @@ export function EditAccountDialog({
               <TabsTrigger value="server">Server</TabsTrigger>
               <TabsTrigger value="safety">Safety</TabsTrigger>
               <TabsTrigger value="signature">Signature</TabsTrigger>
+              <TabsTrigger value="misc">Misc</TabsTrigger>
             </TabsList>
 
             <TabsContent value="server" className="space-y-5">
@@ -381,6 +389,24 @@ export function EditAccountDialog({
                     className="min-h-[8rem]"
                   />
                 </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="misc" className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-position">Position in the account list</Label>
+                <Input
+                  id="edit-position"
+                  type="number"
+                  min={1}
+                  className="w-24"
+                  value={form.position}
+                  onChange={e => set("position", Number(e.target.value))}
+                />
+                <p className="text-xs text-muted-foreground">
+                  1 is the top of the sidebar's account list (below the combined Inbox and Sent); the other accounts move
+                  to make room. There {accountCount === 1 ? "is 1 account" : `are ${accountCount} accounts`}; a larger number puts this one last.
+                </p>
               </div>
             </TabsContent>
           </Tabs>

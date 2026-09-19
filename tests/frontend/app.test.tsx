@@ -34,6 +34,7 @@ const ACCOUNT: Account = {
   supportsUidPlus: null,
   senderName: null,
   signature: null,
+  position: 1,
   createdAt: NOW,
   updatedAt: NOW,
 };
@@ -124,6 +125,9 @@ let capturedCreateDraftBody: Record<string, unknown> | null = null;
 let capturedUpdateDraftBody: Record<string, unknown> | null = null;
 // Every limit/offset the paged-emails mock (pagedEmailCount) was asked for, in order.
 const pagedRequests: { limit: number; offset: number }[] = [];
+// Bodies of every PATCH /api/settings and of the last PATCH /api/accounts/:email.
+const capturedSettingsPatches: Record<string, unknown>[] = [];
+let capturedAccountPatch: Record<string, unknown> | null = null;
 
 function installMockFetch(
   opts: {
@@ -133,6 +137,8 @@ function installMockFetch(
     extraUsers?: { id: number; username: string }[];
     /** When set, GET .../emails serves this many generated INBOX messages, honoring limit/offset like the real API. */
     pagedEmailCount?: number;
+    /** The server-side user settings GET /api/settings starts out with. */
+    settings?: { bodyView?: string };
   } = {}
 ) {
   // A fresh mutable copy per test (installMockFetch runs in beforeEach), so a PATCH in one
@@ -141,6 +147,9 @@ function installMockFetch(
   capturedCreateDraftBody = null;
   capturedUpdateDraftBody = null;
   pagedRequests.length = 0;
+  capturedSettingsPatches.length = 0;
+  capturedAccountPatch = null;
+  let currentSettings: Record<string, unknown> = { ...opts.settings };
 
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
@@ -170,6 +179,7 @@ function installMockFetch(
     if (method === "GET" && path === "/api/accounts") return jsonResponse([currentAccount]);
     if (method === "PATCH" && path === "/api/accounts/me%40example.com") {
       const body = init?.body ? JSON.parse(init.body as string) : {};
+      capturedAccountPatch = body;
       currentAccount = { ...currentAccount, ...body };
       return jsonResponse(currentAccount);
     }
@@ -194,6 +204,29 @@ function installMockFetch(
         return jsonResponse(all.slice(offset, offset + limit));
       }
       return jsonResponse([EMAIL, SECOND_EMAIL, THIRD_EMAIL, DRAFT_EMAIL]);
+    }
+    if (method === "GET" && path === "/api/settings") return jsonResponse(currentSettings);
+    if (method === "PATCH" && path === "/api/settings") {
+      const body = init?.body ? JSON.parse(init.body as string) : {};
+      capturedSettingsPatches.push(body);
+      currentSettings = { ...currentSettings, ...body };
+      return jsonResponse(currentSettings);
+    }
+    if (method === "GET" && path === "/api/unified/inbox") {
+      return jsonResponse([
+        {
+          id: 10, accountEmail: "me@example.com", folder: "INBOX", uid: 1, isRead: true, isFlagged: false,
+          subject: "Unified hello", from: [{ name: "Alice", address: "alice@example.com" }], date: NOW,
+        },
+      ]);
+    }
+    if (method === "GET" && path === "/api/unified/sent") {
+      return jsonResponse([
+        {
+          id: 20, accountEmail: "me@example.com", folder: "Sent", uid: 5, isRead: true, isFlagged: false,
+          subject: "Unified outgoing", from: [{ address: "me@example.com" }], to: [{ name: "Zed Zebra", address: "zed@example.com" }], date: NOW,
+        },
+      ]);
     }
     if (method === "GET" && path === "/api/accounts/me%40example.com/contacts") {
       const q = (new URL(url, "http://localhost").searchParams.get("q") ?? "").toLowerCase();
@@ -1078,5 +1111,78 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     } finally {
       globalThis.IntersectionObserver = originalIO;
     }
+  });
+
+  test("the reading-pane tab is stored in the user settings when picked, and restored from them", async () => {
+    installMockFetch({ settings: { bodyView: "md" } });
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    // The stored preference wins over the built-in default (Safe HTML)…
+    await userEvent.click(await screen.findByText("Hello there"));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "MD" }).getAttribute("data-state")).toBe("active"));
+    // …and merely opening a message doesn't rewrite the stored value.
+    expect(capturedSettingsPatches).toEqual([]);
+
+    await userEvent.click(screen.getByRole("tab", { name: "Plain text" }));
+    await waitFor(() => expect(capturedSettingsPatches).toEqual([{ bodyView: "plain" }]));
+  });
+
+  test("account settings have a Misc tab that saves the account's position", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(screen.getByTitle("More actions"));
+    await userEvent.click(screen.getByText("Account settings"));
+    await userEvent.click(await screen.findByRole("tab", { name: "Misc" }));
+
+    const position = screen.getByLabelText("Position in the account list") as HTMLInputElement;
+    expect(position.value).toBe("1");
+    await userEvent.clear(position);
+    await userEvent.type(position, "3");
+    await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => expect(capturedAccountPatch?.position).toBe(3));
+  });
+
+  test("an unchanged position isn't sent when saving other account settings", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(screen.getByTitle("More actions"));
+    await userEvent.click(screen.getByText("Account settings"));
+    await userEvent.click(await screen.findByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => expect(capturedAccountPatch).not.toBeNull());
+    expect("position" in capturedAccountPatch!).toBe(false);
+  });
+
+  test("the sidebar starts with a combined Inbox and Sent that list all accounts' mail", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(screen.getByTitle("Inbox of all accounts"));
+    expect(await screen.findByText("Unified hello")).toBeTruthy();
+    expect(screen.getByText("Inbox · all accounts")).toBeTruthy();
+    expect(screen.getByText("me@example.com · INBOX")).toBeTruthy();
+
+    // Opening a result shows the message in the reading pane, like a search hit does.
+    await userEvent.click(screen.getByText("Unified hello"));
+    await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(0));
+
+    // Sent lists who each message went to, not who it was from.
+    await userEvent.click(screen.getByTitle("Sent of all accounts"));
+    expect(await screen.findByText("Unified outgoing")).toBeTruthy();
+    expect(screen.getByText("Zed Zebra")).toBeTruthy();
+    expect(screen.getByText("Sent · all accounts")).toBeTruthy();
+
+    // Picking a real folder goes back to that account's own list.
+    await userEvent.click(screen.getAllByText("Inbox")[1]!); // [0] is the combined Inbox row above the accounts
+    await waitFor(() => expect(screen.queryByText("Sent · all accounts")).toBeNull());
+    expect(await screen.findByText("Hello there")).toBeTruthy();
   });
 });

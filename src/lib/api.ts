@@ -32,6 +32,13 @@ export interface Contact {
   lastUsed: string;
 }
 
+export type UnifiedKind = "inbox" | "sent";
+
+/** Server-persisted per-user preferences (GET/PATCH /api/settings). */
+export interface UserSettings {
+  bodyView?: "text" | "md" | "plain" | "safe" | "full";
+}
+
 export interface BulkResult {
   id: number;
   ok: boolean;
@@ -166,6 +173,17 @@ export const api = {
   getDownloadJob: (token: string, accountEmail: string, jobId: number) =>
     request<DownloadJob>("GET", `/api/accounts/${enc(accountEmail)}/downloads/${jobId}`, { token }),
 
+  getSettings: (token: string) => request<UserSettings>("GET", "/api/settings", { token }),
+  /** Shallow-merges into the stored settings; a key set to null is removed. */
+  updateSettings: (token: string, patch: { [K in keyof UserSettings]?: UserSettings[K] | null }) =>
+    request<UserSettings>("PATCH", "/api/settings", { token, body: patch }),
+  /** Newest-first messages across all accounts' Inboxes (`inbox`) or Sent folders (`sent`). */
+  listUnified: (token: string, kind: UnifiedKind, opts: { limit?: number; offset?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.offset) params.set("offset", String(opts.offset));
+    return request<SearchResult[]>("GET", `/api/unified/${kind}?${params}`, { token });
+  },
   /** Searches across every account the user owns. See src/server/models/search.ts for query syntax. */
   search: (token: string, query: string, opts: { limit?: number; offset?: number } = {}) => {
     const params = new URLSearchParams({ q: query });

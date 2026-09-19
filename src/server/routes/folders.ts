@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { decryptAccountCredentials } from "../models/accounts";
+import { decryptAccountCredentials, setSentFolder } from "../models/accounts";
 import { getFolderCounts, type FolderCount } from "../models/emails";
 import { json, requireAuth, withErrorHandling } from "../http";
 import { listFolders, withImapClient, type ImapFolder } from "../services/imap";
@@ -71,6 +71,9 @@ export function foldersRoutes(db: Database) {
           },
           client => listFolders(client)
         );
+
+        const sent = folders.find(f => f.specialUse === "\\Sent");
+        if (sent) setSentFolder(db, account.id, sent.path);
 
         return json(mergeFolderCounts(folders, getFolderCounts(db, account.id)));
       }),

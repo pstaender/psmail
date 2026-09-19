@@ -27,6 +27,8 @@ export interface Account {
   senderName: string | null;
   /** Markdown, appended to new/reply/forward compositions from this account. */
   signature: string | null;
+  /** 1-based place in the sidebar's account list (see setAccountPosition). */
+  position: number;
   createdAt: string;
   updatedAt: string;
 }

@@ -52,10 +52,13 @@ export function MessageBody({
   email,
   preferredView,
   onViewChange,
+  onUserViewChange,
 }: {
   email: EmailRecord;
   preferredView: BodyView | null;
   onViewChange: (view: BodyView) => void;
+  /** Only for the user actually picking a tab — unlike `onViewChange`, not for the automatic fallbacks when a tab isn't available. */
+  onUserViewChange?: (view: BodyView) => void;
 }) {
   const [showExternal, setShowExternal] = useState(false);
 
@@ -109,7 +112,10 @@ export function MessageBody({
   }
 
   return (
-    <Tabs key={email.id} defaultValue={initialView} onValueChange={value => onViewChange(value as BodyView)} className="gap-0">
+    <Tabs key={email.id} defaultValue={initialView} onValueChange={value => {
+        onViewChange(value as BodyView);
+        onUserViewChange?.(value as BodyView);
+      }} className="gap-0">
       <TabsList className="mx-4 mt-3 w-fit">
         {clearestText !== null && <TabsTrigger value="text">Text</TabsTrigger>}
         {hasHtml && <TabsTrigger value="md">MD</TabsTrigger>}

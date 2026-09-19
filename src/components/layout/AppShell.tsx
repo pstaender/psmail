@@ -32,7 +32,7 @@ import { useSearchResults } from "@/hooks/useSearchResults";
 import { useResizableWidth } from "@/hooks/useResizableWidth";
 import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import { useAuth } from "@/contexts/AuthContext";
-import { api, type BulkResult, type FolderInfo } from "@/lib/api";
+import { api, type BulkResult, type FolderInfo, type UnifiedKind } from "@/lib/api";
 import { editDraft, forwardDraft, replyDraft, withSignature } from "@/lib/compose";
 import { resolveSpecialFolder } from "@/lib/folders";
 import type { Account, EmailRecord } from "../../server/types";
@@ -80,15 +80,37 @@ export function AppShell() {
   // Remembered across messages (and folder/account switches) so the next message
   // opened reuses whatever body view the user was last reading with.
   const [preferredBodyView, setPreferredBodyView] = useState<BodyView | null>(null);
+  // Loaded from the server-side user settings, so the last tab picked survives reloads and devices.
+  useEffect(() => {
+    if (!token) return;
+    api
+      .getSettings(token)
+      .then(settings => {
+        if (settings.bodyView) setPreferredBodyView(settings.bodyView);
+      })
+      .catch(() => {});
+  }, [token]);
+  function persistBodyView(view: BodyView) {
+    if (token) api.updateSettings(token, { bodyView: view }).catch(() => {});
+  }
+  // A cross-account mailbox (all Inboxes / all Sents) shown instead of one account's folder. Set from
+  // the top of the sidebar, cleared by picking a real folder; a running search takes precedence over it.
+  const [unifiedView, setUnifiedView] = useState<UnifiedKind | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
   const {
     results: searchResults,
     loading: searchLoading,
+    loadingMore: searchLoadingMore,
+    hasMore: searchHasMore,
+    loadMore: loadMoreSearchResults,
+    refresh: refreshSearchResults,
     patchLocal: patchSearchResult,
     removeLocal: removeSearchResult,
-  } = useSearchResults(searchQuery);
+  } = useSearchResults(searchQuery, unifiedView);
   const isSearching = searchQuery.trim().length > 0;
+  // The cross-account result list (search hits or a unified mailbox) replaces the folder's message list.
+  const showingResults = isSearching || unifiedView !== null;
 
   const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorageState("psmail.sidebarCollapsed", false);
   const { width: sidebarWidth, startResize: startSidebarResize } = useResizableWidth("psmail.sidebarWidth", 240, 160, 480);
@@ -154,7 +176,7 @@ export function AppShell() {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
       if (composeOpen || editingAccountEmail !== null || pendingDeleteAccount !== null || confirmDelete !== null) return;
-      if (!(!isSearching && selectedIds.size > 0) && !selectedEmail) return;
+      if (!(!showingResults && selectedIds.size > 0) && !selectedEmail) return;
 
       e.preventDefault();
       requestDelete();
@@ -164,7 +186,16 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", onKeyDown);
   });
 
+  function selectUnified(kind: UnifiedKind) {
+    setUnifiedView(kind);
+    setSearchQuery("");
+    setSelectedEmailId(null);
+    setSelectedIds(new Set());
+    setSelectionAnchorId(null);
+  }
+
   function selectFolder(accountEmail: string, folder: string) {
+    setUnifiedView(null);
     setSelectedAccountEmail(accountEmail);
     setSelectedFolder(folder);
     setSelectedEmailId(null);
@@ -292,9 +323,11 @@ export function AppShell() {
       return;
     }
     removeLocal(selectedEmail.id);
-    // Unlike the folder-scoped list, a moved message still matches the search — just with a
-    // new folder — so it's patched in place rather than removed from the results.
-    patchSearchResult(selectedEmail.id, { folder });
+    // Unlike the folder-scoped list, a moved message still matches a search — just with a new
+    // folder — so it's patched in place. A unified Inbox/Sent only lists that one folder, though,
+    // so a moved message leaves it.
+    if (unifiedView !== null && !isSearching) removeSearchResult(selectedEmail.id);
+    else patchSearchResult(selectedEmail.id, { folder });
     patchFolderCounts(selectedEmail.folder, { total: -1, unread: selectedEmail.isRead ? 0 : -1 });
     patchFolderCounts(folder, { total: 1, unread: selectedEmail.isRead ? 0 : 1 });
     setSelectedEmailId(null);
@@ -396,7 +429,7 @@ export function AppShell() {
    * mutually exclusive by construction — selecting one clears the other (see selectEmail).
    */
   function requestDelete() {
-    if (!isSearching && selectedIds.size > 0) {
+    if (!showingResults && selectedIds.size > 0) {
       const selectedEmails = emails.filter(e => selectedIds.has(e.id));
       if (selectedEmails.length === 0) return;
       if (selectedEmails.every(e => willSoftDelete(selectedAccount, e, folders))) bulkDelete();
@@ -498,10 +531,12 @@ export function AppShell() {
                 accounts={accounts}
                 loading={accountsLoading}
                 refreshAccounts={refreshAccounts}
-                selected={selected}
+                selected={unifiedView ? null : selected}
                 onSelectFolder={selectFolder}
                 onDeleteAccount={setPendingDeleteAccount}
                 onEditAccount={setEditingAccountEmail}
+                unifiedView={unifiedView}
+                onSelectUnified={selectUnified}
                 onCollapse={() => setSidebarCollapsed(true)}
                 sharedFolders={{
                   accountEmail: selectedAccountEmail,
@@ -517,7 +552,7 @@ export function AppShell() {
         )}
 
         <div style={{ width: messageListWidth }} className="flex shrink-0 flex-col border-r">
-          {!isSearching && selectedIds.size > 0 ? (
+          {!showingResults && selectedIds.size > 0 ? (
             <BulkActionBar
               count={selectedIds.size}
               folders={folders.filter(f => f.path !== selectedFolder)}
@@ -530,7 +565,11 @@ export function AppShell() {
           ) : (
             <div className="flex items-center justify-between border-b px-3 py-2">
               <span className="truncate text-sm font-medium">
-                {isSearching ? `Search: "${searchQuery.trim()}"` : selectedFolder ?? "—"}
+                {isSearching
+                  ? `Search: "${searchQuery.trim()}"`
+                  : unifiedView
+                    ? `${unifiedView === "inbox" ? "Inbox" : "Sent"} · all accounts`
+                    : selectedFolder ?? "—"}
               </span>
               <Button size="sm" disabled={!selectedAccountEmail} onClick={() => openCompose(null)}>
                 <PenSquare className="size-4" /> New
@@ -538,10 +577,14 @@ export function AppShell() {
             </div>
           )}
           <div className="min-h-0 flex-1">
-            {isSearching ? (
+            {showingResults ? (
               <SearchResultList
                 results={searchResults}
                 loading={searchLoading}
+                hasMore={searchHasMore}
+                loadingMore={searchLoadingMore}
+                onLoadMore={loadMoreSearchResults}
+                showRecipient={unifiedView === "sent" && !isSearching}
                 selectedId={selectedEmailId}
                 onSelect={selectSearchResult}
               />
@@ -575,6 +618,7 @@ export function AppShell() {
               folders={folders}
               preferredView={preferredBodyView}
               onViewChange={setPreferredBodyView}
+              onUserViewChange={persistBodyView}
               onReply={() => openCompose(replyDraft(selectedEmail))}
               onForward={() => openCompose(forwardDraft(selectedEmail))}
               onDelete={requestDelete}
@@ -598,6 +642,7 @@ export function AppShell() {
           initial={composeInitial}
           onSent={sent => {
             refreshEmails();
+            refreshSearchResults();
             refreshFolders();
             toast.success(sent ? "E-Mail sent" : "Saved");
           }}
@@ -609,6 +654,7 @@ export function AppShell() {
         open={editingAccountEmail !== null}
         onOpenChange={open => !open && setEditingAccountEmail(null)}
         onSaved={refreshAccounts}
+        accountCount={accounts.length}
       />
 
       <AlertDialog open={pendingDeleteAccount !== null} onOpenChange={open => !open && setPendingDeleteAccount(null)}>

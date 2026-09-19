@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { join } from "node:path";
 import type { ImapFlow } from "imapflow";
-import { decryptAccountCredentials, type AccountRow } from "../models/accounts";
+import { decryptAccountCredentials, setSentFolder, type AccountRow } from "../models/accounts";
 import {
   addAttachment,
   createEmail,
@@ -368,6 +368,7 @@ export function emailsRoutes(db: Database) {
             sentFolder = await withImapClient(imapCredentialsFor(account, imapPassword), async client => {
               const liveFolders = await listFolders(client);
               const target = resolveSpecialFolder(liveFolders, "\\Sent", SENT_FOLDER);
+              setSentFolder(db, account.id, target);
               const result = await appendMessage(client, target, composed.raw, ["\\Seen"]);
               sentUid = result.uid;
               return target;
