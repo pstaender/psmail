@@ -8,7 +8,7 @@ export const BODY_VIEWS = ["text", "md", "plain", "safe", "full"] as const;
 
 /** Per-user preferences persisted server-side (users.settings, JSON). Every key is optional. */
 export interface UserSettings {
-  /** The reading-pane tab last used (Text / MD / Plain text / Safe HTML / Full HTML). */
+  /** The reading-pane tab last used (Text / MD / Plain / Safe HTML / HTML). */
   bodyView?: (typeof BODY_VIEWS)[number];
   /** How often (minutes) the web client triggers a sync of all accounts while it's open. Unset = never. */
   syncIntervalMinutes?: number;

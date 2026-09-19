@@ -98,7 +98,10 @@ export function AppShell() {
       })
       .catch(() => {});
   }, [token]);
-  function persistBodyView(view: BodyView) {
+  // Only an explicit tab click lands here: a mail lacking the preferred tab just shows another one
+  // without changing (or storing) the preference.
+  function pickBodyView(view: BodyView) {
+    setPreferredBodyView(view);
     if (token) api.updateSettings(token, { bodyView: view }).then(setSettings).catch(() => {});
   }
   // A cross-account mailbox (all Inboxes / all Sents) shown instead of one account's folder. Set from
@@ -773,8 +776,7 @@ export function AppShell() {
               email={selectedEmail}
               folders={folders}
               preferredView={preferredBodyView}
-              onViewChange={setPreferredBodyView}
-              onUserViewChange={persistBodyView}
+              onViewChange={pickBodyView}
               onReply={() => openCompose(replyDraft(selectedEmail))}
               onForward={() => openCompose(forwardDraft(selectedEmail))}
               onDelete={requestDelete}

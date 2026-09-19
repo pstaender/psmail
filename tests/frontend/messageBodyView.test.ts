@@ -6,7 +6,7 @@ describe("resolveInitialView", () => {
     expect(resolveInitialView(null, { text: true, plain: true, html: true })).toBe("safe");
   });
 
-  test("with no remembered preference, defaults to Plain text when there's no HTML", () => {
+  test("with no remembered preference, defaults to Plain when there's no HTML", () => {
     expect(resolveInitialView(null, { text: true, plain: true, html: false })).toBe("plain");
   });
 
@@ -17,7 +17,7 @@ describe("resolveInitialView", () => {
     expect(resolveInitialView("safe", { text: true, plain: true, html: true })).toBe("safe");
   });
 
-  test("never carries Full HTML over to a new message, downgrading to Safe HTML", () => {
+  test("never carries HTML over to a new message, downgrading to Safe HTML", () => {
     expect(resolveInitialView("full", { text: true, plain: true, html: true })).toBe("safe");
   });
 

@@ -388,16 +388,16 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Reading pane: header, toolbar, and body tabs all rendered
     await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(0));
     expect(screen.getAllByText(/Alice/).length).toBeGreaterThan(0);
-    expect(screen.getByRole("tab", { name: "Plain text" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Plain" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Safe HTML" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Full HTML" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "HTML" })).toBeTruthy();
     expect(screen.getByText("Reply")).toBeTruthy();
     expect(screen.getByText("Delete")).toBeTruthy();
 
-    // MD tab sits between Text and Plain text, and shows the HTML converted to Markdown.
+    // MD tab sits between Text and Plain, and shows the HTML converted to Markdown.
     const tabs = screen.getAllByRole("tab").map(t => t.textContent);
     expect(tabs.indexOf("Text")).toBeLessThan(tabs.indexOf("MD"));
-    expect(tabs.indexOf("MD")).toBeLessThan(tabs.indexOf("Plain text"));
+    expect(tabs.indexOf("MD")).toBeLessThan(tabs.indexOf("Plain"));
     await userEvent.click(screen.getByRole("tab", { name: "MD" }));
     // Rendered via the read-only MarkdownEditor now, so "**" and "from" are separate inline
     // elements (mark + bold text) rather than one plain-text node — check the panel's overall
@@ -637,7 +637,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(screen.queryByText("Edit draft", { selector: "[data-slot=dialog-title]" })).toBeNull();
   });
 
-  test("remembers the last body view across messages, downgrading Full HTML to Safe HTML", async () => {
+  test("remembers the last body view across messages, downgrading HTML to Safe HTML", async () => {
     render(<App />);
 
     function isTabSelected(name: string): boolean {
@@ -649,25 +649,25 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.click(await screen.findByText("default"));
     await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
 
-    // Open the first message and switch it to Full HTML.
+    // Open the first message and switch it to HTML.
     await userEvent.click(await screen.findByText("Hello there"));
-    await userEvent.click(await screen.findByRole("tab", { name: "Full HTML" }));
-    await waitFor(() => expect(isTabSelected("Full HTML")).toBe(true));
+    await userEvent.click(await screen.findByRole("tab", { name: "HTML" }));
+    await waitFor(() => expect(isTabSelected("HTML")).toBe(true));
 
-    // Switching to the second message must not carry Full HTML over — it should land on Safe HTML.
+    // Switching to the second message must not carry HTML over — it should land on Safe HTML.
     await userEvent.click(await screen.findByText("Second message"));
     await waitFor(() => expect(screen.getAllByText("Second message").length).toBeGreaterThan(0));
     await waitFor(() => expect(isTabSelected("Safe HTML")).toBe(true));
-    expect(isTabSelected("Full HTML")).toBe(false);
+    expect(isTabSelected("HTML")).toBe(false);
 
-    // Explicitly picking Plain text on the second message...
-    await userEvent.click(screen.getByRole("tab", { name: "Plain text" }));
-    await waitFor(() => expect(isTabSelected("Plain text")).toBe(true));
+    // Explicitly picking Plain on the second message...
+    await userEvent.click(screen.getByRole("tab", { name: "Plain" }));
+    await waitFor(() => expect(isTabSelected("Plain")).toBe(true));
 
     // ...should be remembered when going back to the first message.
     await userEvent.click(await screen.findByText("Hello there"));
     await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(0));
-    await waitFor(() => expect(isTabSelected("Plain text")).toBe(true));
+    await waitFor(() => expect(isTabSelected("Plain")).toBe(true));
   });
 
   test("Cmd/Ctrl+K focuses the search input from anywhere on the page", async () => {
@@ -1185,7 +1185,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // …and merely opening a message doesn't rewrite the stored value.
     expect(capturedSettingsPatches).toEqual([]);
 
-    await userEvent.click(screen.getByRole("tab", { name: "Plain text" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Plain" }));
     await waitFor(() => expect(capturedSettingsPatches).toEqual([{ bodyView: "plain" }]));
   });
 
@@ -1726,5 +1726,31 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(await screen.findByText(/blocked notifications for this site/)).toBeTruthy();
       expect(capturedSettingsPatches).toEqual([]);
     });
+  });
+
+  test("a fallback tab (preferred one missing on this mail) is neither stored nor remembered — only an explicit pick is", async () => {
+    installMockFetch({ settings: { bodyView: "md" } });
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    const isTabSelected = (name: string) => screen.getByRole("tab", { name }).getAttribute("aria-selected") === "true";
+
+    await userEvent.click(await screen.findByText("Hello there"));
+    await waitFor(() => expect(isTabSelected("MD")).toBe(true));
+
+    // The draft has no HTML part, so no MD tab: it falls back to Plain…
+    await userEvent.click(await screen.findByText("Unfinished draft"));
+    await waitFor(() => expect(screen.queryByRole("tab", { name: "MD" })).toBeNull());
+    await waitFor(() => expect(isTabSelected("Plain")).toBe(true));
+    expect(capturedSettingsPatches).toEqual([]); // …without storing that
+
+    // …and the next mail that has MD opens on it again (the in-session preference didn't drift to Plain either).
+    await userEvent.click(await screen.findByText("Second message"));
+    await waitFor(() => expect(isTabSelected("MD")).toBe(true));
+    expect(capturedSettingsPatches).toEqual([]);
+
+    // Explicitly picking a tab is what stores it.
+    await userEvent.click(screen.getByRole("tab", { name: "Plain" }));
+    await waitFor(() => expect(capturedSettingsPatches).toEqual([{ bodyView: "plain" }]));
   });
 });

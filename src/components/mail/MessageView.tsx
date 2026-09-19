@@ -11,7 +11,6 @@ export function MessageView({
   folders,
   preferredView,
   onViewChange,
-  onUserViewChange,
   onReply,
   onForward,
   onDelete,
@@ -24,7 +23,6 @@ export function MessageView({
   folders: FolderInfo[];
   preferredView: BodyView | null;
   onViewChange: (view: BodyView) => void;
-  onUserViewChange?: (view: BodyView) => void;
   onReply: () => void;
   onForward: () => void;
   onDelete: () => void;
@@ -47,7 +45,7 @@ export function MessageView({
       <MessageHeader email={email} />
       <AttachmentList accountEmail={accountEmail} emailId={email.id} attachments={email.attachments ?? []} />
       <div className="flex-1 overflow-y-auto">
-        <MessageBody email={email} preferredView={preferredView} onViewChange={onViewChange} onUserViewChange={onUserViewChange} />
+        <MessageBody email={email} preferredView={preferredView} onViewChange={onViewChange} />
       </div>
     </div>
   );
