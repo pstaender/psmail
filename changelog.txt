@@ -7,6 +7,21 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Inbox/Sent by name, Inbox always first (ec3a83e)
+------------------------------------------------------------
+- Some servers don't flag their Inbox and Sent folders (no \Inbox / \Sent special-use). When no folder carries
+  the flag but a folder is named "inbox" / "sent" in any case (the folder's own name, so INBOX.Sent works too),
+  that folder is now taken for it. A real flag always wins over a name. This feeds everything that looks for
+  those folders: the sidebar icons, the Sent folder the app learns for sent copies and the combined Sent, the
+  Inbox-first order of a sync, and (through the saved folder list) lists remembered before this change.
+  Locally-only folders are guessed case-insensitively too (sent, drafts, trash, inbox).
+- The Inbox is always the first folder of an account in the sidebar; the rest keep the server's order.
+- The combined Inbox, its unread badge and the new-mail check no longer assume the exact spelling INBOX: a
+  folder called Inbox / inbox counts (the sidebar shows it as "Inbox" as well).
+- Tests: the fallback (flag wins, nested names, non-matches), ordering, local-only guesses, the combined
+  Inbox with a differently spelled Inbox, and the sidebar label.
+
+
 2026-09-19 - Stored folders when the server is unreachable (9667ebe)
 --------------------------------------------------------------------
 If an account's IMAP server can't be reached (or is throttling us, like Gmail's "Account exceeded command or
