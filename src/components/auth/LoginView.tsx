@@ -119,7 +119,9 @@ export function LoginView() {
   }
 
   return (
-    <div className="h-full w-full flex items-center justify-center bg-muted/30 p-4">
+    // Scrolls when the card is taller than the window (many profiles, a small screen), with room above and below it.
+    <div className="h-full w-full overflow-y-auto bg-muted/30">
+      <div className="flex min-h-full items-center justify-center px-4 py-10 sm:py-14">
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center text-center gap-2">
           <img src={logoUrl} alt="P.S.Mail logo" className="size-20" />
@@ -226,6 +228,7 @@ export function LoginView() {
           )}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

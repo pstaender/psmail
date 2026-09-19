@@ -1904,6 +1904,12 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(document.querySelector(".bg-primary\\/10")).toBeNull();
     // Centered above the title, in the card header.
     expect(logo.closest('[data-slot="card-header"]')!.textContent).toContain("P.S.Mail");
+
+    // Room above and below the card, and the screen scrolls when the card is taller than the window.
+    const card = logo.closest('[data-slot="card"]')!;
+    const centered = card.parentElement!;
+    expect(centered.className).toMatch(/\bpy-10\b/);
+    expect(centered.parentElement!.className).toContain("overflow-y-auto");
   });
 
   test("sync progress is a tooltip on the spinner, not a block under the account", async () => {
