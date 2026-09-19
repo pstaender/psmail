@@ -7,6 +7,15 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Sync button before the unread count (4203969)
+---------------------------------------------------------
+In the combined Inbox row the order is now: icon, "Inbox", the sync button, then the unread count (the sync
+button used to come after the count). To make that possible the row itself (a div) is the click target and
+opens the combined Inbox - so clicking the count still does - while the inner button carries the keyboard
+focus and the sync button stops the click from also opening the Inbox. Test added for the order and the
+click targets.
+
+
 2026-09-19 - Sync button on the combined Inbox (32faf0b)
 -------------------------------------------------------
 The combined Inbox row in the sidebar has a refresh button (shown on hover, like the ones on accounts) that
