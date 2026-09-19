@@ -7,6 +7,23 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - AI usage per provider (7d4bbac)
+--------------------------------------------
+Every AI call is now counted on the provider (ai_apis) it went through: new columns calls, input_tokens and
+output_tokens (existing databases are migrated, starting at 0), returned by the API as calls / inputTokens /
+outputTokens and shown in Settings > AI > AI providers under each provider: "8 calls . 12k tokens in . 4.6k
+out" (the exact numbers on hover) or "Not used yet".
+- Where the tokens come from: the vendor's own report - Anthropic usage.input_tokens/output_tokens, OpenAI
+  prompt_tokens/completion_tokens, Gemini usageMetadata, Ollama prompt_eval_count/eval_count. A service that
+  reports nothing (some OpenAI-compatible ones) is estimated at about 4 characters per token.
+- What counts: every successful call - summarize and categorize (two calls), translate, Refine, and the
+  provider's Test button. A call the vendor refuses or that fails adds nothing. Totals survive editing the
+  provider (a model change doesn't reset them) and are kept per provider; counting doesn't change updated_at.
+- Tests: usage extraction per vendor and the estimate, recording (accumulation, edits, garbage values), the
+  migration, the HTTP flow (incl. failures adding nothing), and the list text.
+- Not done: per-day/month breakdowns, cost in money, a reset button.
+
+
 2026-09-19 - Sync button before the unread count (4203969)
 ---------------------------------------------------------
 In the combined Inbox row the order is now: icon, "Inbox", the sync button, then the unread count (the sync
