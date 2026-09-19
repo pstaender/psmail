@@ -36,6 +36,11 @@ interface EmailRow {
   updated_at: string;
   /** Only present on message-list rows (see LIST_COLUMNS). */
   attachment_count?: number;
+  /** AI results — absent on message-list rows. */
+  taxonomy_list?: string | null;
+  ai_summary?: string | null;
+  translated_text?: string | null;
+  translated_language?: string | null;
 }
 
 interface AttachmentRow {
@@ -96,6 +101,10 @@ function toEmail(row: EmailRow, attachments?: AttachmentRow[]): EmailRecord {
     htmlText: row.html_text,
     headersRaw: row.headers_raw,
     size: row.size,
+    taxonomyList: parseStringList(row.taxonomy_list ?? null),
+    aiSummary: row.ai_summary ?? null,
+    translatedText: row.translated_text ?? null,
+    translatedLanguage: row.translated_language ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     attachments: attachments?.map(toAttachment),
@@ -446,4 +455,24 @@ export function emailIdsWithAttachments(db: Database, ids: number[]): Set<number
     for (const row of rows) found.add(row.email_id);
   }
   return found;
+}
+
+export interface AiFieldsPatch {
+  aiSummary?: string | null;
+  taxonomyList?: string[];
+  translatedText?: string | null;
+  translatedLanguage?: string | null;
+}
+
+/** Stores AI results on a message (and nothing else: updated_at stays, so a summary doesn't reorder anything). */
+export function setEmailAiFields(db: Database, id: number, patch: AiFieldsPatch): EmailRecord {
+  const existing = getEmailRow(db, id);
+  db.query("UPDATE emails SET ai_summary = ?, taxonomy_list = ?, translated_text = ?, translated_language = ? WHERE id = ?").run(
+    patch.aiSummary !== undefined ? patch.aiSummary : existing.ai_summary ?? null,
+    patch.taxonomyList !== undefined ? JSON.stringify(patch.taxonomyList) : existing.taxonomy_list ?? null,
+    patch.translatedText !== undefined ? patch.translatedText : existing.translated_text ?? null,
+    patch.translatedLanguage !== undefined ? patch.translatedLanguage : existing.translated_language ?? null,
+    id
+  );
+  return getEmail(db, id);
 }

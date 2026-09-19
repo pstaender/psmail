@@ -87,3 +87,22 @@ export function withSignature(draft: ComposeDraft | null, signature: string | nu
   const body = draft?.body ? `${draft.body}\n\n-- \n${signature}` : `\n\n-- \n${signature}`;
   return { ...draft, body };
 }
+
+/**
+ * Splits a draft into the part you wrote and the tail that must be left alone when refining with AI: the
+ * signature ("-- "), the quoted original of a reply ("On … wrote:" / "> …") or a forwarded message. The tail
+ * starts at the first such marker; `head` keeps its own leading/trailing whitespace so the text can be put
+ * back exactly around the refined version.
+ */
+export function splitRefinable(body: string): { head: string; tail: string } {
+  const marker = /\n(?:-- \n|On [^\n]+ wrote:\n|-{5,} Forwarded message -{5,}|> )/.exec(body);
+  const cut = marker ? marker.index : body.length;
+  return { head: body.slice(0, cut), tail: body.slice(cut) };
+}
+
+/** Puts an AI result back where the written part was, keeping the whitespace around it and the untouched tail. */
+export function joinRefined(original: { head: string; tail: string }, refined: string): string {
+  const leading = /^\s*/.exec(original.head)![0];
+  const trailing = /\s*$/.exec(original.head)![0];
+  return `${leading}${refined.trim()}${trailing}${original.tail}`;
+}

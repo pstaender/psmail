@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { forwardDraft, replyDraft, withSignature } from "../../src/lib/compose";
+import { forwardDraft, joinRefined, replyDraft, splitRefinable, withSignature } from "../../src/lib/compose";
 import type { EmailRecord } from "../../src/server/types";
 
 const email = {
@@ -35,5 +35,31 @@ describe("withSignature", () => {
   test("without a signature, replies and forwards keep their quoted body untouched", () => {
     expect(withSignature(replyDraft(email), null).body).toBe(replyDraft(email).body);
     expect(withSignature(forwardDraft(email), "").body).toBe(forwardDraft(email).body);
+  });
+});
+
+describe("splitRefinable / joinRefined (what the AI Refine may rewrite)", () => {
+  test("only the part you wrote is refined: not the signature, the quoted original, or a forwarded message", () => {
+    const signed = splitRefinable("Hi Bob,\nsee attached\n\n-- \nCheers\nMe");
+    expect(signed.head).toBe("Hi Bob,\nsee attached\n");
+    expect(signed.tail).toBe("\n-- \nCheers\nMe");
+
+    const reply = splitRefinable("Thanks!\n\nOn Monday, Alice wrote:\n> Hello\n> there");
+    expect(reply.head).toBe("Thanks!\n");
+    expect(reply.tail.startsWith("\nOn Monday, Alice wrote:")).toBe(true);
+
+    expect(splitRefinable("Please see below.\n\n---------- Forwarded message ----------\nFrom: x").head).toBe("Please see below.\n");
+    expect(splitRefinable("Just a note").tail).toBe("");
+  });
+
+  test("a draft that starts with the signature or quote has nothing of its own to refine", () => {
+    expect(splitRefinable("\n\n-- \nCheers").head.trim()).toBe("");
+    expect(splitRefinable("\n\nOn Monday, Alice wrote:\n> Hello").head.trim()).toBe("");
+  });
+
+  test("the result goes back between the same whitespace, in front of the untouched tail", () => {
+    const parts = splitRefinable("\nhi bob\n\n-- \nCheers");
+    expect(joinRefined(parts, "  Hello Bob,  ")).toBe("\nHello Bob,\n\n-- \nCheers");
+    expect(joinRefined(splitRefinable("only text"), "Only text.")).toBe("Only text.");
   });
 });

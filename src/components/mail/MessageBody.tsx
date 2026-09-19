@@ -1,5 +1,5 @@
 import "./MessageBody.css";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ImageOff, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -98,18 +98,37 @@ export function MessageBody({
     [email.id]
   );
 
+  // The open tab. Controlled so a translation that has just arrived can be shown right away; a new message
+  // starts on its resolved initial view.
+  const [tab, setTab] = useState<BodyView | "translated">(initialView);
+  useEffect(() => setTab(initialView), [email.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const hadTranslation = useRef(!!email.translatedText);
+  useEffect(() => {
+    // Translated while this message is open: switch to it (a transient choice, never stored as the preferred view).
+    if (email.translatedText && !hadTranslation.current) setTab("translated");
+    hadTranslation.current = !!email.translatedText;
+  }, [email.id, email.translatedText]);
+
   if (!hasHtml && !hasPlain) {
     return <p className="p-4 text-sm text-muted-foreground">This message has no readable body.</p>;
   }
 
   return (
-    <Tabs key={email.id} defaultValue={initialView} onValueChange={value => onViewChange(value as BodyView)} className="gap-0">
+    <Tabs
+      value={tab}
+      onValueChange={value => {
+        setTab(value as BodyView | "translated");
+        if (value !== "translated") onViewChange(value as BodyView);
+      }}
+      className="gap-0"
+    >
       <TabsList className="mx-4 mt-3 w-fit">
         {clearestText !== null && <TabsTrigger value="text">Text</TabsTrigger>}
         {hasHtml && <TabsTrigger value="md">MD</TabsTrigger>}
         {hasPlain && <TabsTrigger value="plain">Plain</TabsTrigger>}
         {hasHtml && <TabsTrigger value="safe">Safe HTML</TabsTrigger>}
         {hasHtml && <TabsTrigger value="full">HTML</TabsTrigger>}
+        {email.translatedText && <TabsTrigger value="translated">Translation</TabsTrigger>}
       </TabsList>
 
       {clearestText !== null && (
@@ -143,6 +162,13 @@ export function MessageBody({
             </div>
           )}
           <HtmlFrame html={safeHtml} />
+        </TabsContent>
+      )}
+
+      {email.translatedText && (
+        <TabsContent value="translated">
+          <p className="px-4 pt-3 text-xs text-muted-foreground">Translated into {email.translatedLanguage ?? "another language"} by AI</p>
+          <MarkdownPreview text={email.translatedText} />
         </TabsContent>
       )}
 

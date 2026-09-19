@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Paperclip, Send as SendIcon, X } from "lucide-react";
+import { Languages, Loader2, Paperclip, Send as SendIcon, Sparkles, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RecipientInput } from "./RecipientInput";
@@ -9,7 +10,9 @@ import { MarkdownEditor, type MarkdownEditorHandle } from "./MarkdownEditor";
 import { api, type FolderInfo } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { parseAddressList } from "@/lib/addresses";
+import { joinRefined, splitRefinable } from "@/lib/compose";
 import { resolveSpecialFolder } from "@/lib/folders";
+import type { AiCategory } from "../../ai/categories";
 import type { AttachmentRecord, EmailRecord } from "../../server/types";
 
 function formatSizeMB(bytes: number): string {
@@ -39,6 +42,8 @@ export function ComposeDialog({
   onOpenChange,
   initial,
   onSent,
+  aiCategories,
+  aiLanguage,
 }: {
   accountEmail: string;
   /** Used as the From display name on outgoing mail, instead of the bare address. */
@@ -50,6 +55,10 @@ export function ComposeDialog({
   initial: ComposeDraft | null;
   /** `sent` is true when the draft was actually sent, false when it was just saved. */
   onSent: (sent: boolean) => void;
+  /** Which AI skills the user has set up — the Refine menu offers only those. */
+  aiCategories: Set<AiCategory>;
+  /** The language Translate starts with (the user's setting). */
+  aiLanguage: string;
 }) {
   const { token } = useAuth();
   const editorRef = useRef<MarkdownEditorHandle>(null);
@@ -66,6 +75,42 @@ export function ComposeDialog({
 
   const isEditing = initial?.id !== undefined;
 
+  // "Refine" (AI): rewrites the part of the draft you wrote — not the signature or the quoted original — and keeps the
+  // text from before so it can be undone.
+  const [refining, setRefining] = useState<AiCategory | null>(null);
+  const [beforeRefine, setBeforeRefine] = useState<string | null>(null);
+  const [translateTo, setTranslateTo] = useState<string | null>(null);
+
+  async function refine(category: "improve" | "grammar" | "translate", language?: string) {
+    if (!token) return;
+    const parts = splitRefinable(body);
+    if (!parts.head.trim()) {
+      setError("Write something first — there is no text to refine yet.");
+      return;
+    }
+    setRefining(category);
+    setError(null);
+    try {
+      const result = await api.aiRun(token, category, parts.head.trim(), language);
+      const next = joinRefined(parts, result.text);
+      setBeforeRefine(body);
+      editorRef.current?.setContent(next);
+      setBody(next);
+      setTranslateTo(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRefining(null);
+    }
+  }
+
+  function undoRefine() {
+    if (beforeRefine === null) return;
+    editorRef.current?.setContent(beforeRefine);
+    setBody(beforeRefine);
+    setBeforeRefine(null);
+  }
+
   useEffect(() => {
     if (open) {
       setTo(initial?.to ?? "");
@@ -77,6 +122,8 @@ export function ComposeDialog({
       setFiles([]);
       setExistingAttachments(initial?.attachments ?? []);
       setError(null);
+      setBeforeRefine(null);
+      setTranslateTo(null);
     }
   }, [open, initial]);
 
@@ -199,6 +246,64 @@ export function ComposeDialog({
                 className="min-h-[12rem]"
               />
             </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="outline" size="sm" disabled={refining !== null || busy !== null}>
+                  {refining ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                  Refine
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {(
+                  [
+                    ["improve", "Phrase"],
+                    ["grammar", "Spelling + Grammar"],
+                  ] as const
+                ).map(([category, label]) => (
+                  <DropdownMenuItem
+                    key={category}
+                    disabled={!aiCategories.has(category)}
+                    title={aiCategories.has(category) ? undefined : "Set up this skill in Settings → AI"}
+                    onSelect={() => refine(category)}
+                  >
+                    {label}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuItem
+                  disabled={!aiCategories.has("translate")}
+                  title={aiCategories.has("translate") ? undefined : "Set up this skill in Settings → AI"}
+                  onSelect={() => setTranslateTo(aiLanguage)}
+                >
+                  Translate…
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {translateTo !== null && (
+              <form
+                className="flex items-center gap-1.5"
+                onSubmit={e => {
+                  e.preventDefault();
+                  if (translateTo.trim()) refine("translate", translateTo.trim());
+                }}
+              >
+                <Languages className="size-3.5 text-muted-foreground" />
+                <Input aria-label="Translate into" className="h-8 w-40" value={translateTo} onChange={e => setTranslateTo(e.target.value)} placeholder="Language" autoFocus />
+                <Button type="submit" size="sm" disabled={refining !== null || !translateTo.trim()}>
+                  Translate
+                </Button>
+                <Button type="button" variant="ghost" size="icon" className="size-7" title="Cancel translating" onClick={() => setTranslateTo(null)}>
+                  <X className="size-3.5" />
+                </Button>
+              </form>
+            )}
+            {beforeRefine !== null && (
+              <Button type="button" variant="ghost" size="sm" onClick={undoRefine}>
+                <Undo2 className="size-3.5" /> Undo
+              </Button>
+            )}
           </div>
 
           <div className="space-y-1.5">

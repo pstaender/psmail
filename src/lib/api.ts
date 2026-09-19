@@ -1,4 +1,6 @@
 import type { NewMailResult } from "./notifications";
+import type { AiApiInput, AiApiRecord, AiSkillInput, AiSkillRecord } from "../server/models/ai";
+import type { AiCategory } from "../ai/categories";
 import type { Account, DownloadJob, EmailRecord, User } from "../server/types";
 import type { CreateAccountInput, UpdateAccountInput } from "../server/models/accounts";
 import type { EmailInput } from "../server/models/emails";
@@ -50,6 +52,8 @@ export interface UserSettings {
   notifyToast?: boolean;
   /** The toast's sound: crystal_clear (the default when unset), cute_bell, marimba or none. */
   notificationSound?: "crystal_clear" | "cute_bell" | "marimba" | "none";
+  /** The language the translate skill translates into (unset = English). */
+  aiTargetLanguage?: string;
 }
 
 export interface BulkResult {
@@ -197,6 +201,24 @@ export const api = {
       token,
       body: { currentPassword, newPassword },
     }),
+  // ---- AI (Settings → AI, and the summarize/translate/refine buttons) ----
+  listAiApis: (token: string) => request<AiApiRecord[]>("GET", "/api/ai/apis", { token }),
+  createAiApi: (token: string, input: AiApiInput) => request<AiApiRecord>("POST", "/api/ai/apis", { token, body: input }),
+  updateAiApi: (token: string, id: number, input: AiApiInput) => request<AiApiRecord>("PATCH", `/api/ai/apis/${id}`, { token, body: input }),
+  deleteAiApi: (token: string, id: number) => request<void>("DELETE", `/api/ai/apis/${id}`, { token }),
+  testAiApi: (token: string, id: number) => request<{ ok: true; answer: string }>("POST", `/api/ai/apis/${id}/test`, { token }),
+  listAiSkills: (token: string) => request<AiSkillRecord[]>("GET", "/api/ai/skills", { token }),
+  createAiSkill: (token: string, input: AiSkillInput) => request<AiSkillRecord>("POST", "/api/ai/skills", { token, body: input }),
+  updateAiSkill: (token: string, id: number, input: AiSkillInput) => request<AiSkillRecord>("PATCH", `/api/ai/skills/${id}`, { token, body: input }),
+  deleteAiSkill: (token: string, id: number) => request<void>("DELETE", `/api/ai/skills/${id}`, { token }),
+  /** Composing: the user's skill of `category` applied to `text`; nothing is stored. */
+  aiRun: (token: string, category: Exclude<AiCategory, "categorize">, text: string, language?: string) =>
+    request<{ text: string }>("POST", "/api/ai/run", { token, body: { category, text, language } }),
+  /** Summarizes a message (and categorizes it if that skill exists); both are stored on the message. */
+  aiSummarize: (token: string, accountEmail: string, emailId: number) =>
+    request<{ email: EmailRecord; taxonomyError?: string }>("POST", `/api/accounts/${enc(accountEmail)}/emails/${emailId}/ai/summarize`, { token }),
+  aiTranslate: (token: string, accountEmail: string, emailId: number, language?: string) =>
+    request<{ email: EmailRecord }>("POST", `/api/accounts/${enc(accountEmail)}/emails/${emailId}/ai/translate`, { token, body: { language } }),
   getSettings: (token: string) => request<UserSettings>("GET", "/api/settings", { token }),
   /** Shallow-merges into the stored settings; a key set to null is removed. */
   updateSettings: (token: string, patch: { [K in keyof UserSettings]?: UserSettings[K] | null }) =>

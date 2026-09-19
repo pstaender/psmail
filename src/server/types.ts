@@ -66,6 +66,13 @@ export interface EmailRecord {
   htmlText: string | null;
   headersRaw: string | null;
   size: number | null;
+  /** 2-6 short category labels from the categorize skill (empty until run). */
+  taxonomyList: string[];
+  /** Summary from the summarize skill, kept once computed. */
+  aiSummary: string | null;
+  /** Translation from the translate skill, and the language it is in. */
+  translatedText: string | null;
+  translatedLanguage: string | null;
   createdAt: string;
   updatedAt: string;
   attachments?: AttachmentRecord[];

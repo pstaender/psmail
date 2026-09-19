@@ -77,6 +77,11 @@ CREATE TABLE IF NOT EXISTS emails (
   html_text TEXT,
   headers_raw TEXT,
   size INTEGER,
+  -- AI results, kept once computed (see routes/ai.ts): 2-6 short labels as a JSON array, a summary, and a translation.
+  taxonomy_list TEXT,
+  ai_summary TEXT,
+  translated_text TEXT,
+  translated_language TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   UNIQUE(account_id, folder, uid)
@@ -127,6 +132,35 @@ CREATE TABLE IF NOT EXISTS deleted_uids (
   uid INTEGER NOT NULL,
   PRIMARY KEY (account_id, folder, uid)
 ) WITHOUT ROWID;
+
+-- AI providers a user has set up. The key is encrypted with the user's key, like the account passwords.
+CREATE TABLE IF NOT EXISTS ai_apis (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  vendor TEXT NOT NULL,
+  model TEXT NOT NULL,
+  base_url TEXT,
+  api_key_encrypted TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_apis_user_id ON ai_apis(user_id);
+
+-- What to ask an AI for (summarize, categorize, translate, ...): one prompt, run through one of the user's ai_apis.
+CREATE TABLE IF NOT EXISTS ai_skills (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  ai_api_id INTEGER NOT NULL REFERENCES ai_apis(id) ON DELETE CASCADE,
+  category TEXT NOT NULL,
+  name TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_skills_user_id ON ai_skills(user_id, category);
 
 CREATE TABLE IF NOT EXISTS downloads (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

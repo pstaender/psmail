@@ -18,6 +18,7 @@ import { AccountTree } from "@/components/sidebar/AccountTree";
 import { SettingsDialog, type SettingsPatch } from "@/components/layout/SettingsDialog";
 import { showNewMailToast } from "@/components/mail/newMailToast";
 import { hasFinePointer } from "@/lib/pointer";
+import type { AiCategory } from "../../ai/categories";
 import { DEFAULT_NOTIFICATION_SOUND, playNotificationSound, showBrowserNotification, type NewMailPreview } from "@/lib/notifications";
 import { EditAccountDialog } from "@/components/sidebar/EditAccountDialog";
 import { ResizeHandle } from "@/components/layout/ResizeHandle";
@@ -109,6 +110,42 @@ export function AppShell() {
       })
       .catch(() => {});
   }, [token]);
+  // Which AI skills the user has set up: the summarize/translate/refine buttons are only offered for those.
+  const [aiCategories, setAiCategories] = useState<Set<AiCategory>>(new Set());
+  const refreshAiSkills = useCallback(() => {
+    if (!token) return;
+    api.listAiSkills(token).then(skills => setAiCategories(new Set(skills.map(s => s.category)))).catch(() => {});
+  }, [token]);
+  useEffect(() => {
+    refreshAiSkills();
+  }, [refreshAiSkills]);
+
+  async function saveAiLanguage(language: string | null) {
+    if (token) setSettings(await api.updateSettings(token, { aiTargetLanguage: language }));
+  }
+
+  // The AI buttons of the reading pane: summarize (+ categorize when that skill exists) and translate. The result is
+  // stored on the message by the server; here it is just put into the open message.
+  const [aiBusy, setAiBusy] = useState<"summarize" | "translate" | null>(null);
+  const openEmailId = useRef<number | null>(null);
+  async function runAi(kind: "summarize" | "translate") {
+    if (!token || !selectedAccountEmail || !selectedEmail) return;
+    const id = selectedEmail.id;
+    setAiBusy(kind);
+    try {
+      const result =
+        kind === "summarize"
+          ? await api.aiSummarize(token, selectedAccountEmail, id)
+          : await api.aiTranslate(token, selectedAccountEmail, id);
+      if (openEmailId.current === id) setSelectedEmailDetail(result.email);
+      if ("taxonomyError" in result && result.taxonomyError) toast.error(`Categorizing failed: ${result.taxonomyError}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
   // Only an explicit tab click lands here: a mail lacking the preferred tab just shows another one
   // without changing (or storing) the preference.
   function pickBodyView(view: BodyView) {
@@ -241,6 +278,7 @@ export function AppShell() {
     }
   }
   const { email: selectedEmail, setEmail: setSelectedEmailDetail } = useEmailDetail(selectedAccountEmail, selectedEmailId);
+  openEmailId.current = selectedEmail?.id ?? null;
 
   // Mark-as-read on open, like every other mail client. Patches both the folder-scoped list
   // and the (separate) search results array, since a message can be open from either. Unlike
@@ -924,6 +962,10 @@ export function AppShell() {
               onMove={handleMove}
               onToggleRead={toggleRead}
               onEditDraft={() => openCompose(editDraft(selectedEmail))}
+              aiCategories={aiCategories}
+              aiBusy={aiBusy}
+              onSummarize={() => runAi("summarize")}
+              onTranslate={() => runAi("translate")}
             />
           ) : (
             <EmptyState title="Select a message" description="Choose a message from the list to read it here." />
@@ -939,6 +981,8 @@ export function AppShell() {
           open={composeOpen}
           onOpenChange={setComposeOpen}
           initial={composeInitial}
+          aiCategories={aiCategories}
+          aiLanguage={settings.aiTargetLanguage ?? "English"}
           onSent={sent => {
             refreshEmails();
             refreshSearchResults();
@@ -955,6 +999,8 @@ export function AppShell() {
         settings={settings}
         username={username}
         onSave={saveSettings}
+        onSaveLanguage={saveAiLanguage}
+        onAiChanged={refreshAiSkills}
       />
 
       <EditAccountDialog

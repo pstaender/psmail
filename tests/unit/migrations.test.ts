@@ -6,6 +6,7 @@ describe("runMigrations", () => {
   test("adds read_only to an accounts table that predates it, defaulting existing rows to 0", () => {
     const db = new Database(":memory:");
     db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT)");
+    db.exec("CREATE TABLE emails (id INTEGER PRIMARY KEY AUTOINCREMENT)");
     db.exec(`
       CREATE TABLE accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -20,9 +21,23 @@ describe("runMigrations", () => {
     expect(row?.read_only).toBe(0);
   });
 
+  test("adds the AI result columns to a pre-existing emails table", () => {
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT)");
+    db.exec("CREATE TABLE emails (id INTEGER PRIMARY KEY AUTOINCREMENT)");
+    db.exec("CREATE TABLE accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL)");
+    db.exec("INSERT INTO emails DEFAULT VALUES");
+
+    runMigrations(db);
+
+    const row = db.query<Record<string, unknown>, []>("SELECT taxonomy_list, ai_summary, translated_text, translated_language FROM emails").get();
+    expect(row).toEqual({ taxonomy_list: null, ai_summary: null, translated_text: null, translated_language: null });
+  });
+
   test("adds users.settings ('{}'), accounts.position and accounts.sent_folder to pre-existing tables", () => {
     const db = new Database(":memory:");
     db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT)");
+    db.exec("CREATE TABLE emails (id INTEGER PRIMARY KEY AUTOINCREMENT)");
     db.exec("CREATE TABLE accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL)");
     db.exec("INSERT INTO users DEFAULT VALUES");
     db.exec("INSERT INTO accounts (email) VALUES ('me@example.com')");
@@ -37,6 +52,7 @@ describe("runMigrations", () => {
   test("is idempotent — safe to run again against an already-migrated (or freshly-created) table", () => {
     const db = new Database(":memory:");
     db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT)");
+    db.exec("CREATE TABLE emails (id INTEGER PRIMARY KEY AUTOINCREMENT)");
     db.exec(`
       CREATE TABLE accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

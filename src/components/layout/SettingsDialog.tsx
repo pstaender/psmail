@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { Loader2, Volume2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AiSettings } from "./AiSettings";
 import { PasswordForm } from "./PasswordForm";
 import type { UserSettings } from "@/lib/api";
 import { DEFAULT_NOTIFICATION_SOUND, NOTIFICATION_SOUNDS, playNotificationSound } from "@/lib/notifications";
@@ -27,12 +29,18 @@ export function SettingsDialog({
   settings,
   username,
   onSave,
+  onSaveLanguage,
+  onAiChanged,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   settings: UserSettings;
   username: string | null;
   onSave: (patch: SettingsPatch) => Promise<void>;
+  /** Saves the language the Translate skill translates into (null = back to the default). */
+  onSaveLanguage: (language: string | null) => Promise<void>;
+  /** The AI providers/skills changed — the app re-reads which skills exist. */
+  onAiChanged: () => void;
 }) {
   const [interval, setInterval] = useState("");
   const [includeFolders, setIncludeFolders] = useState(false);
@@ -97,7 +105,7 @@ export function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+      <DialogContent className={cn("max-h-[90vh] overflow-y-auto", tab === "ai" ? "sm:max-w-2xl" : "sm:max-w-md")}>
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>{username && username !== "default" ? `For ${username}` : "Your preferences"}</DialogDescription>
@@ -107,12 +115,15 @@ export function SettingsDialog({
           <TabsList>
             <TabsTrigger value="inboxes">Inboxes</TabsTrigger>
             <TabsTrigger value="notifications">Notifications</TabsTrigger>
+            <TabsTrigger value="ai">AI</TabsTrigger>
             <TabsTrigger value="credentials">Credentials</TabsTrigger>
           </TabsList>
         </Tabs>
 
         {tab === "credentials" ? (
           <PasswordForm />
+        ) : tab === "ai" ? (
+          <AiSettings settings={settings} onSaveLanguage={onSaveLanguage} onChanged={onAiChanged} />
         ) : (
           <form onSubmit={submit} noValidate className="space-y-4">
             {error && <p className="text-sm text-destructive">{error}</p>}

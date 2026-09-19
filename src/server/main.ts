@@ -12,6 +12,7 @@ import { foldersRoutes } from "./routes/folders";
 import { searchRoutes } from "./routes/search";
 import { contactsRoutes } from "./routes/contacts";
 import { settingsRoutes } from "./routes/settings";
+import { aiRoutes } from "./routes/ai";
 
 export async function startServer() {
   const settings = await loadSettings();
@@ -29,6 +30,7 @@ export async function startServer() {
     ...searchRoutes(db),
     ...contactsRoutes(db),
     ...settingsRoutes(db),
+    ...aiRoutes(db),
 
     "/api/health": {
       GET: () => Response.json({ ok: true }),

@@ -5,6 +5,8 @@ import "./tinyMarkdownEditor.css";
 
 export interface MarkdownEditorHandle {
   focus: () => void;
+  /** Replaces the whole content (e.g. with an AI-refined draft). Doesn't go through the undo history's typing, but it is one undo step. */
+  setContent: (content: string) => void;
 }
 
 /**
@@ -32,6 +34,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, {
 
   useImperativeHandle(ref, () => ({
     focus: () => editorRef.current?.e?.focus(),
+    setContent: content => editorRef.current?.setContent(content),
   }));
 
   useEffect(() => {

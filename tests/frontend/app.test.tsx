@@ -160,6 +160,8 @@ const passwordChanges: Record<string, unknown>[] = [];
 // Every bulk PATCH/DELETE/move request, with the account it went to.
 // The `scope` param of every GET .../contacts call.
 const contactRequests: (string | null)[] = [];
+// Requests to the AI endpoints: [method, path, body].
+const aiRequests: [string, string, any][] = [];
 const bulkRequests: { account: string; method: string; move: string | null; body: Record<string, unknown> }[] = [];
 let folderRequests = 0;
 let unreadRequests = 0;
@@ -184,11 +186,16 @@ function installMockFetch(
       notifyBrowser?: boolean;
       notifyToast?: boolean;
       notificationSound?: string;
+      aiTargetLanguage?: string;
     };
     /** What GET /api/unified/inbox/unread reports (the combined Inbox's badge). */
     inboxUnread?: number;
     /** The sync job never finishes (GET job stays running at 12/340) — to look at the in-progress UI. */
     syncStaysRunning?: boolean;
+    /** Categories the user has AI skills for (all on one provider); they show up in GET /api/ai/skills. */
+    aiSkillCategories?: string[];
+    /** Provider records GET /api/ai/apis starts with. */
+    aiApis?: { id: number; name: string; vendor: string; model: string; baseUrl: string | null; hasKey: boolean }[];
     /** What GET .../downloads (the account's job history) lists: a sync already underway when the page loads. */
     earlierSyncJob?: "running" | "completed";
     /** Adds a contact from another account to the recipient suggestions. */
@@ -213,6 +220,11 @@ function installMockFetch(
   capturedResultPatches.length = 0;
   passwordChanges.length = 0;
   bulkRequests.length = 0;
+  aiRequests.length = 0;
+  let currentAiApis = [...(opts.aiApis ?? [])];
+  let currentAiSkills = (opts.aiSkillCategories ?? []).map((category, i) => ({
+    id: i + 1, aiApiId: 1, category, name: category, prompt: `prompt for ${category}`, createdAt: NOW, updatedAt: NOW,
+  }));
   contactRequests.length = 0;
   folderRequests = 0;
   unreadRequests = 0;
@@ -303,6 +315,42 @@ function installMockFetch(
       passwordChanges.push(init?.body ? JSON.parse(init.body as string) : {});
       if (opts.changePasswordError) return jsonResponse({ error: opts.changePasswordError }, 401);
       return jsonResponse({ ok: true, otherSessionsSignedOut: 2 });
+    }
+    if (path.startsWith("/api/ai/") || /\/ai\/(summarize|translate|categorize)$/.test(path)) {
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      aiRequests.push([method, path, body]);
+      if (path === "/api/ai/apis" && method === "GET") return jsonResponse(currentAiApis);
+      if (path === "/api/ai/apis" && method === "POST") {
+        const { apiKey, ...rest } = body;
+        const record = { id: currentAiApis.length + 1, baseUrl: null, ...rest, name: rest.name || `${rest.vendor} ${rest.model}`, hasKey: !!apiKey };
+        currentAiApis = [...currentAiApis, record];
+        return jsonResponse(record, 201);
+      }
+      const apiById = /^\/api\/ai\/apis\/(\d+)$/.exec(path);
+      if (apiById && method === "DELETE") {
+        currentAiApis = currentAiApis.filter(a => a.id !== Number(apiById[1]));
+        currentAiSkills = currentAiSkills.filter(s => s.aiApiId !== Number(apiById[1]));
+        return new Response(null, { status: 204 });
+      }
+      if (/^\/api\/ai\/apis\/\d+\/test$/.test(path)) return jsonResponse({ ok: true, answer: "OK" });
+      if (path === "/api/ai/skills" && method === "GET") return jsonResponse(currentAiSkills);
+      if (path === "/api/ai/skills" && method === "POST") {
+        const record = { id: currentAiSkills.length + 10, createdAt: NOW, updatedAt: NOW, ...body };
+        currentAiSkills = [...currentAiSkills, record];
+        return jsonResponse(record, 201);
+      }
+      const skillById = /^\/api\/ai\/skills\/(\d+)$/.exec(path);
+      if (skillById && method === "DELETE") {
+        currentAiSkills = currentAiSkills.filter(s => s.id !== Number(skillById[1]));
+        return new Response(null, { status: 204 });
+      }
+      if (path === "/api/ai/run") return jsonResponse({ text: "Corrected text" });
+      if (path.endsWith("/ai/summarize")) {
+        return jsonResponse({ email: { ...EMAIL, aiSummary: "- Alice says hello\n- No action needed", taxonomyList: ["greeting", "personal"] } });
+      }
+      if (path.endsWith("/ai/translate")) {
+        return jsonResponse({ email: { ...EMAIL, translatedText: "Hallo, Welt", translatedLanguage: body?.language ?? "English" } });
+      }
     }
     if (method === "GET" && path === "/api/settings") return jsonResponse(currentSettings);
     if (method === "PATCH" && path === "/api/settings") {
@@ -2321,6 +2369,204 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
       rerender(<MessageHeader email={{ ...(email as object), id: 999 } as never} />);
       await waitFor(() => expect(screen.queryByText("<abc123@mail.example.com>")).toBeNull());
+    });
+  });
+
+  describe("AI", () => {
+    const originalConfirm = window.confirm;
+    beforeEach(() => {
+      window.confirm = () => true;
+    });
+    afterEach(() => {
+      window.confirm = originalConfirm;
+    });
+
+    async function login() {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+    }
+    async function openAiTab() {
+      await userEvent.click(screen.getByTitle("Settings"));
+      await userEvent.click(await screen.findByRole("tab", { name: "AI" }));
+    }
+    const calls = (method: string, path: string) => aiRequests.filter(([m, p]) => m === method && p === path).map(([, , body]) => body);
+
+    test("Settings has an AI tab between Notifications and Credentials", async () => {
+      await login();
+      await userEvent.click(screen.getByTitle("Settings"));
+      const tabs = (await screen.findAllByRole("tab")).map(t => t.textContent);
+      expect(tabs).toEqual(["Inboxes", "Notifications", "AI", "Credentials"]);
+    });
+
+    test("adding an AI provider sends vendor, model and key, and the list never shows the key", async () => {
+      installMockFetch();
+      await login();
+      await openAiTab();
+      expect(await screen.findByText(/No provider yet/)).toBeTruthy();
+
+      await userEvent.click(screen.getByRole("button", { name: /add provider/i }));
+      await userEvent.selectOptions(screen.getByLabelText("Vendor"), "anthropic");
+      await userEvent.type(screen.getByLabelText("Model"), "claude-opus-5");
+      await userEvent.type(screen.getByLabelText(/API key/), "sk-ant-secret");
+      await userEvent.click(screen.getByRole("button", { name: "Save provider" }));
+
+      await waitFor(() => expect(calls("POST", "/api/ai/apis")).toEqual([{ name: "", vendor: "anthropic", model: "claude-opus-5", baseUrl: null, apiKey: "sk-ant-secret" }]));
+      expect(await screen.findByText("anthropic claude-opus-5")).toBeTruthy();
+      expect(screen.getByText(/Anthropic · claude-opus-5 · key saved/)).toBeTruthy();
+      expect(document.body.textContent).not.toContain("sk-ant-secret");
+    });
+
+    test("editing a provider keeps its key unless a new one is typed; Test reports the result", async () => {
+      installMockFetch({ aiApis: [{ id: 1, name: "Work", vendor: "openai", model: "gpt-5", baseUrl: null, hasKey: true }] });
+      await login();
+      await openAiTab();
+
+      await userEvent.click(await screen.findByTitle("Test Work"));
+      expect((await screen.findAllByText(/Work works — it answered "OK"/)).length).toBeGreaterThan(0);
+      expect(calls("POST", "/api/ai/apis/1/test")).toHaveLength(1);
+    });
+
+    test("a new skill suggests the prompt of its category, follows category changes until you edit it, and saves against a provider", async () => {
+      installMockFetch({ aiApis: [{ id: 1, name: "Work Claude", vendor: "anthropic", model: "claude-opus-5", baseUrl: null, hasKey: true }] });
+      await login();
+      await openAiTab();
+
+      await userEvent.click(await screen.findByRole("button", { name: /add skill/i }));
+      const prompt = () => (screen.getByLabelText("Instruction (prompt)") as HTMLTextAreaElement).value;
+      expect(prompt()).toContain("summarizes e-mail messages"); // first category, suggested
+
+      await userEvent.selectOptions(screen.getByLabelText("Category"), "translate");
+      expect(prompt()).toContain("helpful translator");
+      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Translate");
+
+      // Once edited by hand, changing the category leaves the prompt alone…
+      await userEvent.type(screen.getByLabelText("Instruction (prompt)"), " Be brief.");
+      await userEvent.selectOptions(screen.getByLabelText("Category"), "grammar");
+      expect(prompt()).toContain("helpful translator");
+      // …until the suggestion is asked for explicitly.
+      await userEvent.click(screen.getByRole("button", { name: "Use suggested prompt" }));
+      expect(prompt()).toContain("careful proofreader");
+
+      await userEvent.click(screen.getByRole("button", { name: "Save skill" }));
+      await waitFor(() => expect(calls("POST", "/api/ai/skills")).toHaveLength(1));
+      expect(calls("POST", "/api/ai/skills")[0]).toMatchObject({ category: "grammar", aiApiId: 1, prompt: expect.stringContaining("careful proofreader") });
+      expect(await screen.findByText(/Spelling \+ Grammar · Work Claude/)).toBeTruthy();
+    });
+
+    test("skills need a provider first, and deleting a provider takes its skills along", async () => {
+      installMockFetch({ aiApis: [{ id: 1, name: "Work", vendor: "openai", model: "gpt-5", baseUrl: null, hasKey: true }], aiSkillCategories: ["summarize"] });
+      await login();
+      await openAiTab();
+      expect(await screen.findByText(/Summarize · Work/)).toBeTruthy();
+
+      await userEvent.click(screen.getByTitle("Delete Work"));
+      await waitFor(() => expect(calls("DELETE", "/api/ai/apis/1")).toHaveLength(1));
+      await waitFor(() => expect(screen.queryByText(/Summarize · Work/)).toBeNull());
+      expect(screen.getByRole("button", { name: /add skill/i }).hasAttribute("disabled")).toBe(true);
+    });
+
+    test("the translation language is saved to the user settings", async () => {
+      installMockFetch();
+      await login();
+      await openAiTab();
+      const input = await screen.findByLabelText("Translation language");
+      await userEvent.type(input, "German");
+      await userEvent.tab(); // leaves the field: saved
+      await waitFor(() => expect(capturedSettingsPatches).toEqual([{ aiTargetLanguage: "German" }]));
+    });
+
+    test("Summarize and Translate are disabled until the matching skill exists", async () => {
+      installMockFetch();
+      await login();
+      await userEvent.click(await screen.findByText("Hello there"));
+      await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+      expect(screen.getByRole("button", { name: /summarize/i }).hasAttribute("disabled")).toBe(true);
+      expect(screen.getByRole("button", { name: /^translate/i }).hasAttribute("disabled")).toBe(true);
+    });
+
+    test("Summarize shows the summary and the categories on the message", async () => {
+      installMockFetch({ aiSkillCategories: ["summarize", "categorize"] });
+      await login();
+      await userEvent.click(await screen.findByText("Hello there"));
+      await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+      expect(screen.queryByLabelText("Categories")).toBeNull();
+
+      await userEvent.click(screen.getByRole("button", { name: /summarize/i }));
+      expect(await screen.findByText(/Alice says hello/)).toBeTruthy();
+      const chips = within(screen.getByLabelText("Categories")).getAllByRole("listitem").map(li => li.textContent);
+      expect(chips).toEqual(["greeting", "personal"]);
+      expect(aiRequests.some(([m, p]) => m === "POST" && p === "/api/accounts/me%40example.com/emails/10/ai/summarize")).toBe(true);
+    });
+
+    test("Translate adds a Translation tab and shows it", async () => {
+      installMockFetch({ aiSkillCategories: ["translate"] });
+      await login();
+      await userEvent.click(await screen.findByText("Hello there"));
+      await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+      expect(screen.queryByRole("tab", { name: "Translation" })).toBeNull();
+
+      await userEvent.click(screen.getByRole("button", { name: /^translate/i }));
+      const tab = await screen.findByRole("tab", { name: "Translation" });
+      await waitFor(() => expect(tab.getAttribute("aria-selected")).toBe("true"));
+      expect(await screen.findByText(/Hallo, Welt/)).toBeTruthy();
+      expect(screen.getByText(/Translated into English by AI/)).toBeTruthy();
+      expect(capturedSettingsPatches).toEqual([]); // switching to it isn't stored as the preferred view
+    });
+
+    async function openDraftInCompose() {
+      await userEvent.click(await screen.findByText("Unfinished draft"));
+      await waitFor(() => expect(screen.getAllByText("Unfinished draft").length).toBeGreaterThan(1));
+      await userEvent.click(screen.getByRole("button", { name: /edit draft/i }));
+      const dialog = (await screen.findByText("Edit draft", { selector: "[data-slot=dialog-title]" })).closest('[role="dialog"]') as HTMLElement;
+      await waitFor(() => expect(dialog.querySelector(".psmail-markdown-editor .TinyMDE")!.textContent).toContain("Getting there"));
+      return dialog;
+    }
+    const editorText = (dialog: HTMLElement) => dialog.querySelector(".psmail-markdown-editor .TinyMDE")!.textContent!;
+
+    test("Refine offers Phrase, Spelling + Grammar and Translate, runs the skill on the draft and can be undone", async () => {
+      installMockFetch({ aiSkillCategories: ["grammar", "improve", "translate"] });
+      await login();
+      const dialog = await openDraftInCompose();
+
+      await userEvent.click(within(dialog).getByRole("button", { name: /refine/i }));
+      const items = (await screen.findAllByRole("menuitem")).map(i => i.textContent);
+      expect(items).toEqual(["Phrase", "Spelling + Grammar", "Translate…"]);
+
+      await userEvent.click(screen.getByRole("menuitem", { name: "Spelling + Grammar" }));
+      await waitFor(() => expect(editorText(dialog)).toContain("Corrected text"));
+      expect(calls("POST", "/api/ai/run")).toEqual([{ category: "grammar", text: "Getting there..." }]);
+
+      await userEvent.click(within(dialog).getByRole("button", { name: /undo/i }));
+      await waitFor(() => expect(editorText(dialog)).toContain("Getting there"));
+      expect(editorText(dialog)).not.toContain("Corrected");
+    });
+
+    test("Translate in Refine asks for the language (default: the user's setting) and passes it on", async () => {
+      installMockFetch({ aiSkillCategories: ["translate"], settings: { aiTargetLanguage: "French" } });
+      await login();
+      const dialog = await openDraftInCompose();
+
+      await userEvent.click(within(dialog).getByRole("button", { name: /refine/i }));
+      await userEvent.click(await screen.findByRole("menuitem", { name: "Translate…" }));
+      const language = within(dialog).getByLabelText("Translate into") as HTMLInputElement;
+      expect(language.value).toBe("French");
+      await userEvent.clear(language);
+      await userEvent.type(language, "Spanish");
+      await userEvent.click(within(dialog).getByRole("button", { name: "Translate" }));
+
+      await waitFor(() => expect(calls("POST", "/api/ai/run")).toEqual([{ category: "translate", text: "Getting there...", language: "Spanish" }]));
+      await waitFor(() => expect(editorText(dialog)).toContain("Corrected text"));
+    });
+
+    test("Refine items without a matching skill are disabled", async () => {
+      installMockFetch({ aiSkillCategories: ["grammar"] });
+      await login();
+      const dialog = await openDraftInCompose();
+
+      await userEvent.click(within(dialog).getByRole("button", { name: /refine/i }));
+      const disabled = (await screen.findAllByRole("menuitem")).filter(i => i.getAttribute("data-disabled") !== null).map(i => i.textContent);
+      expect(disabled).toEqual(["Phrase", "Translate…"]);
     });
   });
 });

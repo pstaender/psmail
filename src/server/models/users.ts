@@ -106,6 +106,26 @@ export async function changeUserPassword(
       update.run(encryptSecret(imap, newKey), encryptSecret(smtp, newKey), account.id);
     }
 
+    // The AI API keys are encrypted with the same key, so they move along with the account passwords.
+    const apis = db
+      .query<{ id: number; name: string; api_key_encrypted: string }, [number]>(
+        "SELECT id, name, api_key_encrypted FROM ai_apis WHERE user_id = ? AND api_key_encrypted IS NOT NULL"
+      )
+      .all(id);
+    const updateApi = db.query("UPDATE ai_apis SET api_key_encrypted = ? WHERE id = ?");
+    for (const api of apis) {
+      let apiKey: string;
+      try {
+        apiKey = decryptSecret(api.api_key_encrypted, oldKey);
+      } catch {
+        throw new ApiError(
+          422,
+          `The saved API key of the AI API "${api.name}" can't be decrypted, so it can't be carried over to the new password. Re-enter it in Settings → AI first, then change your password.`
+        );
+      }
+      updateApi.run(encryptSecret(apiKey, newKey), api.id);
+    }
+
     db.query(
       `UPDATE users SET password_hash = ?, password_salt = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`
     ).run(newHash, newSalt, id);

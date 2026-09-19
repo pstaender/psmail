@@ -20,6 +20,8 @@ export interface UserSettings {
   notifyToast?: boolean;
   /** Sound played with the toast; unset means crystal_clear. */
   notificationSound?: (typeof NOTIFICATION_SOUNDS)[number];
+  /** The language the translate skill translates into (e.g. "German"); unset means English. */
+  aiTargetLanguage?: string;
 }
 
 export const MAX_SYNC_INTERVAL_MINUTES = 24 * 60;
@@ -56,6 +58,10 @@ export function updateUserSettings(db: Database, userId: number, patch: Record<s
       if (value === null) delete next[key];
       else if (typeof value === "boolean") next[key] = value;
       else throw new ApiError(400, `${key} must be true or false`);
+    } else if (key === "aiTargetLanguage") {
+      if (value === null) delete next.aiTargetLanguage;
+      else if (typeof value === "string" && value.trim() && value.trim().length <= 60) next.aiTargetLanguage = value.trim();
+      else throw new ApiError(400, "aiTargetLanguage must be a language name of up to 60 characters");
     } else if (key === "notificationSound") {
       if (value === null) delete next.notificationSound;
       else if (typeof value === "string" && (NOTIFICATION_SOUNDS as readonly string[]).includes(value)) next.notificationSound = value;
