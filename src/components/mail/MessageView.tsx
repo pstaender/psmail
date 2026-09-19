@@ -1,4 +1,3 @@
-import { AiSummaryPanel } from "./AiSummaryPanel";
 import { AttachmentList } from "./AttachmentList";
 import { MessageBody, type BodyView } from "./MessageBody";
 import { MessageHeader } from "./MessageHeader";
@@ -60,10 +59,16 @@ export function MessageView({
         onTranslate={onTranslate}
       />
       <MessageHeader email={email} />
-      <AiSummaryPanel email={email} />
       <AttachmentList accountEmail={accountEmail} emailId={email.id} attachments={email.attachments ?? []} />
       <div className="flex-1 overflow-y-auto">
-        <MessageBody email={email} preferredView={preferredView} onViewChange={onViewChange} />
+        <MessageBody
+          email={email}
+          preferredView={preferredView}
+          onViewChange={onViewChange}
+          canSummarize={aiCategories.has("summarize")}
+          summarizing={aiBusy === "summarize"}
+          onSummarize={onSummarize}
+        />
       </div>
     </div>
   );

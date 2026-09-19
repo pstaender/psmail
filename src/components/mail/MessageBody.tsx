@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { sanitizeEmailHtml } from "@/lib/sanitizeHtml";
 import { buildClearestText, markdownFromHtml } from "@/lib/textView";
+import { Languages, Sparkles } from "lucide-react";
+import { AiSummaryPanel } from "./AiSummaryPanel";
 import { HtmlFrame } from "./HtmlFrame";
 import { RenderPureMarkdown } from "./RenderPureMarkdown";
 import type { EmailRecord } from "../../server/types";
@@ -52,11 +54,18 @@ export function MessageBody({
   email,
   preferredView,
   onViewChange,
+  canSummarize = false,
+  summarizing = false,
+  onSummarize = () => {},
 }: {
   email: EmailRecord;
   preferredView: BodyView | null;
   /** Called only when the user picks a tab — never for an automatic fallback — so it's safe to remember/persist. */
   onViewChange: (view: BodyView) => void;
+  /** A Summarize skill exists: the Summary tab is offered (it can make the summary itself). */
+  canSummarize?: boolean;
+  summarizing?: boolean;
+  onSummarize?: () => void;
 }) {
   const [showExternal, setShowExternal] = useState(false);
 
@@ -100,14 +109,19 @@ export function MessageBody({
 
   // The open tab. Controlled so a translation that has just arrived can be shown right away; a new message
   // starts on its resolved initial view.
-  const [tab, setTab] = useState<BodyView | "translated">(initialView);
+  const [tab, setTab] = useState<BodyView | "translated" | "summary">(initialView);
   useEffect(() => setTab(initialView), [email.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const hadTranslation = useRef(!!email.translatedText);
+  const hadSummary = useRef(!!email.aiSummary);
   useEffect(() => {
-    // Translated while this message is open: switch to it (a transient choice, never stored as the preferred view).
+    // Translated or summarized while this message is open: switch to it (a transient choice, never stored as the
+    // preferred view).
     if (email.translatedText && !hadTranslation.current) setTab("translated");
+    if (email.aiSummary && !hadSummary.current) setTab("summary");
     hadTranslation.current = !!email.translatedText;
-  }, [email.id, email.translatedText]);
+    hadSummary.current = !!email.aiSummary;
+  }, [email.id, email.translatedText, email.aiSummary]);
+  const hasSummaryTab = !!email.aiSummary || (email.taxonomyList ?? []).length > 0 || canSummarize;
 
   if (!hasHtml && !hasPlain) {
     return <p className="p-4 text-sm text-muted-foreground">This message has no readable body.</p>;
@@ -117,8 +131,8 @@ export function MessageBody({
     <Tabs
       value={tab}
       onValueChange={value => {
-        setTab(value as BodyView | "translated");
-        if (value !== "translated") onViewChange(value as BodyView);
+        setTab(value as BodyView | "translated" | "summary");
+        if (value !== "translated" && value !== "summary") onViewChange(value as BodyView);
       }}
       className="gap-0"
     >
@@ -128,7 +142,16 @@ export function MessageBody({
         {hasPlain && <TabsTrigger value="plain">Plain</TabsTrigger>}
         {hasHtml && <TabsTrigger value="safe">Safe HTML</TabsTrigger>}
         {hasHtml && <TabsTrigger value="full">HTML</TabsTrigger>}
-        {email.translatedText && <TabsTrigger value="translated">Translation</TabsTrigger>}
+        {email.translatedText && (
+          <TabsTrigger value="translated">
+            <Languages className="size-3.5" /> Translation
+          </TabsTrigger>
+        )}
+        {hasSummaryTab && (
+          <TabsTrigger value="summary">
+            <Sparkles className="size-3.5" /> Summary
+          </TabsTrigger>
+        )}
       </TabsList>
 
       {clearestText !== null && (
@@ -169,6 +192,12 @@ export function MessageBody({
         <TabsContent value="translated">
           <p className="px-4 pt-3 text-xs text-muted-foreground">Translated into {email.translatedLanguage ?? "another language"} by AI</p>
           <MarkdownPreview text={email.translatedText} />
+        </TabsContent>
+      )}
+
+      {hasSummaryTab && (
+        <TabsContent value="summary">
+          <AiSummaryPanel email={email} canSummarize={canSummarize} busy={summarizing} onSummarize={onSummarize} />
         </TabsContent>
       )}
 

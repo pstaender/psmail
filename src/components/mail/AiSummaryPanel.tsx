@@ -1,19 +1,35 @@
-import { Sparkles } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import type { EmailRecord } from "../../server/types";
 import { RenderPureMarkdown } from "./RenderPureMarkdown";
 
-/** What the AI made of a message — its summary and 2-6 category labels — kept on the message once computed. Renders nothing until there is something. */
-export function AiSummaryPanel({ email }: { email: EmailRecord }) {
+/**
+ * The content of the "Summary" tab: what the AI made of the message — its summary and 2-6 category labels,
+ * kept on the message once computed — and a button to (re)generate them. Before there is a summary it says
+ * so and offers to make one.
+ */
+export function AiSummaryPanel({
+  email,
+  canSummarize,
+  busy,
+  onSummarize,
+}: {
+  email: EmailRecord;
+  canSummarize: boolean;
+  busy: boolean;
+  onSummarize: () => void;
+}) {
   const labels = email.taxonomyList ?? [];
-  if (!email.aiSummary && labels.length === 0) return null;
 
   return (
-    <div className="space-y-2 border-b bg-muted/30 px-4 py-3">
-      <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        <Sparkles className="size-3.5" /> {email.aiSummary ? "AI summary" : "AI categories"}
-      </div>
-      {email.aiSummary && <RenderPureMarkdown markdown={email.aiSummary} aria-label="AI summary" className="text-sm" />}
+    <div className="space-y-3 p-4">
+      {email.aiSummary ? (
+        <RenderPureMarkdown markdown={email.aiSummary} aria-label="AI summary" />
+      ) : (
+        <p className="text-sm text-muted-foreground">No summary yet. The AI summarizes this message when you press the button.</p>
+      )}
+
       {labels.length > 0 && (
         <ul className="flex flex-wrap gap-1.5" aria-label="Categories">
           {labels.map(label => (
@@ -23,6 +39,18 @@ export function AiSummaryPanel({ email }: { email: EmailRecord }) {
           ))}
         </ul>
       )}
+
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={!canSummarize || busy}
+        title={canSummarize ? undefined : "Set up a Summarize skill in Settings → AI"}
+        onClick={onSummarize}
+      >
+        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+        {email.aiSummary ? "Summarize again" : "Summarize with AI"}
+      </Button>
     </div>
   );
 }

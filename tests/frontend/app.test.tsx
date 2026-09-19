@@ -2485,18 +2485,56 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(screen.getByRole("button", { name: /^translate/i }).hasAttribute("disabled")).toBe(true);
     });
 
-    test("Summarize shows the summary and the categories on the message", async () => {
+    test("Summary is an extra tab after HTML, with the AI icon; it is offered only with a Summarize skill (or an existing summary)", async () => {
+      installMockFetch();
+      await login();
+      await userEvent.click(await screen.findByText("Hello there"));
+      await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+      expect(screen.queryByRole("tab", { name: "Summary" })).toBeNull(); // no skill, no summary yet
+
+      cleanup();
+      installMockFetch({ aiSkillCategories: ["summarize"] });
+      render(<App />); // still signed in
+      await openAccountInbox();
+      await userEvent.click(await screen.findByText("Hello there"));
+      const tab = await screen.findByRole("tab", { name: "Summary" });
+
+      const names = screen.getAllByRole("tab").map(t => t.textContent!.trim());
+      expect(names.at(-1)).toBe("Summary"); // the last one
+      expect(names.indexOf("HTML")).toBeLessThan(names.indexOf("Summary"));
+      expect(tab.querySelector("svg")).toBeTruthy(); // the sparkles icon marks it as AI
+    });
+
+    test("the Summary tab offers to summarize; the result (with the categories) shows in the tab, which opens by itself", async () => {
       installMockFetch({ aiSkillCategories: ["summarize", "categorize"] });
       await login();
       await userEvent.click(await screen.findByText("Hello there"));
       await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+      const tab = await screen.findByRole("tab", { name: "Summary" });
       expect(screen.queryByLabelText("Categories")).toBeNull();
 
-      await userEvent.click(screen.getByRole("button", { name: /summarize/i }));
+      await userEvent.click(tab);
+      expect(await screen.findByText(/No summary yet/)).toBeTruthy();
+      expect(capturedSettingsPatches).toEqual([]); // a transient tab: not stored as the preferred view
+
+      await userEvent.click(screen.getByRole("button", { name: "Summarize with AI" }));
       expect(await screen.findByText(/Alice says hello/)).toBeTruthy();
       const chips = within(screen.getByLabelText("Categories")).getAllByRole("listitem").map(li => li.textContent);
       expect(chips).toEqual(["greeting", "personal"]);
+      expect(screen.getByRole("button", { name: "Summarize again" })).toBeTruthy();
       expect(aiRequests.some(([m, p]) => m === "POST" && p === "/api/accounts/me%40example.com/emails/10/ai/summarize")).toBe(true);
+    });
+
+    test("the toolbar's Summarize button jumps to the Summary tab with the result", async () => {
+      installMockFetch({ aiSkillCategories: ["summarize"] });
+      await login();
+      await userEvent.click(await screen.findByText("Hello there"));
+      await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+      // (the toolbar button is the one with the sparkles and just "Summarize")
+      await userEvent.click(screen.getByRole("button", { name: /^summarize$/i }));
+
+      expect(await screen.findByText(/Alice says hello/)).toBeTruthy();
+      await waitFor(() => expect(screen.getByRole("tab", { name: "Summary" }).getAttribute("aria-selected")).toBe("true"));
     });
 
     test("Translate adds a Translation tab and shows it", async () => {
