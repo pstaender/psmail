@@ -277,6 +277,32 @@ describe("runSync", () => {
     expect(listDeletedUids(db, account.id, "INBOX")).toEqual([]);
   });
 
+  test("disabling the account while a sync runs stops it before anything more is stored", async () => {
+    const { db, user, account } = await setup();
+    const job = createDownloadJob(db, account.id, "INBOX");
+
+    await expect(
+      runSync({
+        db,
+        account,
+        username: user.username,
+        folder: "INBOX",
+        downloadJobId: job.id,
+        imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+        fetchMessages: async (creds, folder, sinceUid) => {
+          db.exec(`UPDATE accounts SET disabled = 1 WHERE id = ${account.id}`); // disabled while the download is in flight
+          return fakeFetchMessages(creds, folder, sinceUid);
+        },
+        fetchRemoteFlags: fakeFetchRemoteFlagsNoop,
+      })
+    ).rejects.toThrow(/disabled during the sync/);
+
+    expect(listEmails(db, account.id, { folder: "INBOX" })).toHaveLength(0);
+    const failed = getDownloadJob(db, job.id);
+    expect(failed.status).toBe("failed");
+    expect(failed.error).toContain("disabled");
+  });
+
   test("incremental sync only fetches messages newer than the highest stored uid", async () => {
     const { db, user, account } = await setup();
 

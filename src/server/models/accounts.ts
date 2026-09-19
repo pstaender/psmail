@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { decryptSecret, encryptSecret } from "../crypto/secrets";
-import { NotFoundError, type Account } from "../types";
+import { ConflictError, NotFoundError, type Account } from "../types";
 
 interface AccountRow {
   id: number;
@@ -18,6 +18,7 @@ interface AccountRow {
   smtp_username: string;
   smtp_password_encrypted: string;
   read_only: number;
+  disabled: number;
   skip_soft_delete: number;
   /** NULL = never checked; 0/1 = the server's UIDPLUS support as of the last check (see checkImapCapabilities in services/imap.ts). */
   imap_uidplus: number | null;
@@ -47,6 +48,8 @@ export interface CreateAccountInput {
   smtpPassword: string;
   /** When true, this account never has local changes (flags, moves, deletes, sent-mail copies) written back to the IMAP server. */
   readOnly?: boolean;
+  /** When true, the account is frozen: no sync, no IMAP/SMTP, no changes to its stored mail — only reading (see assertAccountEnabled). */
+  disabled?: boolean;
   /**
    * When true, Delete always permanently expunges instead of moving the message to Trash first —
    * even if the server supports the UIDPLUS extension (see the account's `supportsUidPlus` field,
@@ -79,6 +82,7 @@ function toAccount(row: AccountRow): Account {
     smtpSecure: !!row.smtp_secure,
     smtpUsername: row.smtp_username,
     readOnly: !!row.read_only,
+    disabled: !!row.disabled,
     skipSoftDelete: !!row.skip_soft_delete,
     supportsUidPlus: row.imap_uidplus === null ? null : !!row.imap_uidplus,
     senderName: row.sender_name,
@@ -180,6 +184,7 @@ export function updateAccount(db: Database, id: number, input: UpdateAccountInpu
     smtp_password_encrypted:
       input.smtpPassword !== undefined ? encryptSecret(input.smtpPassword, encryptionKey) : existing.smtp_password_encrypted,
     read_only: input.readOnly !== undefined ? (input.readOnly ? 1 : 0) : existing.read_only,
+    disabled: input.disabled !== undefined ? (input.disabled ? 1 : 0) : existing.disabled,
     skip_soft_delete: input.skipSoftDelete !== undefined ? (input.skipSoftDelete ? 1 : 0) : existing.skip_soft_delete,
     // A cached "does this server support UIDPLUS" answer is only valid for the server it was
     // checked against — if the connection details changed, forget it until checkImapCapabilities
@@ -194,14 +199,14 @@ export function updateAccount(db: Database, id: number, input: UpdateAccountInpu
       AccountRow,
       [
         string, string | null, string, number, number, string, string, string, number, number, string, string, number,
-        number, number | null, string | null, string | null, number,
+        number, number, number | null, string | null, string | null, number,
       ]
     >(
       `UPDATE accounts SET
         email = ?, display_name = ?,
         imap_host = ?, imap_port = ?, imap_secure = ?, imap_username = ?, imap_password_encrypted = ?,
         smtp_host = ?, smtp_port = ?, smtp_secure = ?, smtp_username = ?, smtp_password_encrypted = ?, read_only = ?,
-        skip_soft_delete = ?, imap_uidplus = ?, sender_name = ?, signature = ?,
+        disabled = ?, skip_soft_delete = ?, imap_uidplus = ?, sender_name = ?, signature = ?,
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       WHERE id = ?
       RETURNING *`
@@ -220,6 +225,7 @@ export function updateAccount(db: Database, id: number, input: UpdateAccountInpu
       merged.smtp_username,
       merged.smtp_password_encrypted,
       merged.read_only,
+      merged.disabled,
       merged.skip_soft_delete,
       merged.imap_uidplus,
       merged.sender_name,
@@ -339,4 +345,18 @@ export function learnSpecialFolders(db: Database, id: number, folders: { path: s
   } catch {}
   merged = { ...merged, ...found };
   db.query("UPDATE accounts SET special_folders = ? WHERE id = ?").run(JSON.stringify(merged), id);
+}
+
+/**
+ * Guards everything that would change a disabled account or its stored mail — sync, IMAP/SMTP, flags, moves,
+ * deletes, drafts, attachments, AI results — with a 409. A disabled account is frozen: it can still be read
+ * (lists, messages, attachments, search) and re-enabled or removed in the account settings.
+ */
+export function assertAccountEnabled(account: { email: string; disabled: number | boolean }): void {
+  if (account.disabled) throw new ConflictError(`Account "${account.email}" is disabled. Enable it in its account settings to change it.`);
+}
+
+/** Fresh check for long-running work (a sync) that must stop when the account gets disabled meanwhile. */
+export function isAccountDisabled(db: Database, id: number): boolean {
+  return !!db.query<{ disabled: number }, [number]>("SELECT disabled FROM accounts WHERE id = ?").get(id)?.disabled;
 }

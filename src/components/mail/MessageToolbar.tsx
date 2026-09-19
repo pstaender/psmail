@@ -24,6 +24,7 @@ export function MessageToolbar({
   onMove,
   onToggleRead,
   onEditDraft,
+  accountDisabled,
   aiSkills,
   aiBusy,
   onSummarize,
@@ -38,14 +39,16 @@ export function MessageToolbar({
   onMove: (folder: string) => void;
   onToggleRead: () => void;
   onEditDraft: () => void;
+  /** The account is disabled (frozen): everything that would change it — replying, forwarding, moving, deleting, marking, AI results — is off. Reading stays. */
+  accountDisabled: boolean;
   /** The user's AI skills: Summarize/Translate are only shown for categories that have one (set up in Settings → AI), and offer a choice when there are several. */
   aiSkills: AiSkillRecord[];
   aiBusy: "summarize" | "translate" | null;
   onSummarize: (skillId: number) => void;
   onTranslate: (skillId: number) => void;
 }) {
-  const summarizers = aiSkills.filter(skill => skill.category === "summarize");
   const translators = aiSkills.filter(skill => skill.category === "translate");
+  const frozen = accountDisabled ? "This account is disabled" : undefined;
   // "Reply all" only appears once the pointer or keyboard focus reaches "Reply", so it can't be hit by accident
   // (it messes up more people than a plain reply). It then stays for the rest of this message.
   const [replyAllShown, setReplyAllShown] = useState(false);
@@ -56,6 +59,8 @@ export function MessageToolbar({
       <Button
         variant="ghost"
         size="sm"
+        disabled={accountDisabled}
+        title={frozen}
         onClick={onReply}
         onMouseEnter={() => setReplyAllShown(true)}
         onFocus={() => setReplyAllShown(true)}
@@ -63,11 +68,11 @@ export function MessageToolbar({
         <Reply className="size-4" /> Reply
       </Button>
       {replyAllShown && (
-        <Button variant="ghost" size="sm" onClick={onReplyAll}>
+        <Button variant="ghost" size="sm" disabled={accountDisabled} title={frozen} onClick={onReplyAll}>
           <ReplyAll className="size-4" /> Reply all
         </Button>
       )}
-      <Button variant="ghost" size="sm" onClick={onForward}>
+      <Button variant="ghost" size="sm" disabled={accountDisabled} title={frozen} onClick={onForward}>
         <Forward className="size-4" /> Forward
       </Button>
 
@@ -78,9 +83,10 @@ export function MessageToolbar({
           <AiSkillButton
             skills={translators}
             busy={aiBusy === "translate"}
+            disabled={accountDisabled}
             icon={<Languages className="size-4" />}
             label="Translate"
-            title="Translate this message with AI"
+            title={frozen ?? "Translate this message with AI"}
             onRun={onTranslate}
           />
         </>
@@ -88,13 +94,13 @@ export function MessageToolbar({
 
       <Separator orientation="vertical" className="mx-1 h-5" />
 
-      <Button variant="ghost" size="sm" onClick={onToggleRead}>
+      <Button variant="ghost" size="sm" disabled={accountDisabled} title={frozen} onClick={onToggleRead}>
         <Mail className="size-4" /> Mark {email.isRead ? "unread" : "read"}
       </Button>
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm">
+          <Button variant="ghost" size="sm" disabled={accountDisabled} title={frozen}>
             <FolderInput className="size-4" /> Move
           </Button>
         </DropdownMenuTrigger>
@@ -109,12 +115,12 @@ export function MessageToolbar({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Button variant="ghost" size="sm" onClick={onDelete}>
+      <Button variant="ghost" size="sm" disabled={accountDisabled} title={frozen} onClick={onDelete}>
         <Trash2 className="size-4" /> Delete
       </Button>
 
       {email.isDraft && (
-        <Button variant="ghost" size="sm" className="ml-auto" onClick={onEditDraft}>
+        <Button variant="ghost" size="sm" className="ml-auto" disabled={accountDisabled} title={frozen} onClick={onEditDraft}>
           <PenSquare className="size-4" /> Edit draft
         </Button>
       )}

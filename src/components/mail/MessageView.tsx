@@ -19,6 +19,7 @@ export function MessageView({
   onMove,
   onToggleRead,
   onEditDraft,
+  accountDisabled,
   aiSkills,
   aiBusy,
   onSummarize,
@@ -36,6 +37,8 @@ export function MessageView({
   onMove: (folder: string) => void;
   onToggleRead: () => void;
   onEditDraft: () => void;
+  /** The message's account is disabled: read-only for good — every button that would change something is off. */
+  accountDisabled: boolean;
   aiSkills: AiSkillRecord[];
   aiBusy: "summarize" | "translate" | null;
   onSummarize: (skillId: number) => void;
@@ -53,6 +56,7 @@ export function MessageView({
         onMove={onMove}
         onToggleRead={onToggleRead}
         onEditDraft={onEditDraft}
+        accountDisabled={accountDisabled}
         aiSkills={aiSkills}
         aiBusy={aiBusy}
         onSummarize={onSummarize}
@@ -65,7 +69,7 @@ export function MessageView({
           email={email}
           preferredView={preferredView}
           onViewChange={onViewChange}
-          summarizeSkills={aiSkills.filter(skill => skill.category === "summarize")}
+          summarizeSkills={accountDisabled ? [] : aiSkills.filter(skill => skill.category === "summarize")}
           summarizing={aiBusy === "summarize"}
           onSummarize={onSummarize}
         />

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { getEmailAttachmentsDir, sanitizeSegment } from "../config/paths";
 import { addAttachment, createEmail, deleteEmail, findEmailByUid, listSyncedRefs, updateEmail } from "../models/emails";
 import { completeDownloadJob, failDownloadJob, startDownloadJob, updateDownloadProgress, updateDownloadTotal } from "../models/downloads";
-import { learnSpecialFolders, type AccountRow } from "../models/accounts";
+import { isAccountDisabled, learnSpecialFolders, type AccountRow } from "../models/accounts";
 import { isUidDeleted, listDeletedUids, maxDeletedUid, removeDeletedUids } from "../models/tombstones";
 import {
   fetchNewMessages,
@@ -178,6 +178,7 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
 
   async function syncFolder(folderPath: string): Promise<number> {
     const tag = `${jobTag}/${folderPath}`;
+    if (isAccountDisabled(db, account.id)) throw new Error("The account was disabled during the sync");
     stage = `${folderPath}: reconciling existing messages`;
     await reconcileExisting(db, account.id, folderPath, imapCredentials, fetchRemoteFlags);
 
@@ -210,6 +211,8 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
     let downloaded = 0;
     for (const message of messages) {
       stage = `${folderPath}: processing UID ${message.uid}`;
+      // Disabling the account stops a running sync: its stored mail must not change from then on.
+      if (isAccountDisabled(db, account.id)) throw new Error("The account was disabled during the sync");
       if (!findEmailByUid(db, account.id, folderPath, message.uid) && !isUidDeleted(db, account.id, folderPath, message.uid)) {
         const parsed = await parseMessage(message.source);
 

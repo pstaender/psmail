@@ -20,6 +20,8 @@ export interface Account {
   smtpSecure: boolean;
   smtpUsername: string;
   readOnly: boolean;
+  /** Disabled accounts aren't synced or written to; they stay readable (and always count as read-only). */
+  disabled: boolean;
   skipSoftDelete: boolean;
   /** Whether the IMAP server supports UIDPLUS, as of the last check — null if never checked. Soft-delete (move to Trash) is only offered when this is true. */
   supportsUidPlus: boolean | null;

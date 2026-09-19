@@ -15,6 +15,7 @@ export function AiSkillButton({
   label,
   title,
   variant = "ghost",
+  disabled = false,
   onRun,
 }: {
   skills: AiSkillRecord[];
@@ -23,12 +24,13 @@ export function AiSkillButton({
   label: string;
   title?: string;
   variant?: "ghost" | "outline";
+  disabled?: boolean;
   onRun: (skillId: number) => void;
 }) {
   if (skills.length === 0) return null;
 
   const button = (
-    <Button variant={variant} size="sm" disabled={busy} title={title} onClick={skills.length === 1 ? () => onRun(skills[0]!.id) : undefined}>
+    <Button variant={variant} size="sm" disabled={busy || disabled} title={title} onClick={skills.length === 1 ? () => onRun(skills[0]!.id) : undefined}>
       {busy ? <Loader2 className="size-4 animate-spin" /> : icon} {label}
       {skills.length > 1 && <ChevronDown className="size-3" />}
     </Button>

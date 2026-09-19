@@ -16,6 +16,7 @@ import {
   type AiSkillInput,
   type AiSkillRecord,
 } from "../models/ai";
+import { assertAccountEnabled } from "../models/accounts";
 import { getEmail, getEmailRow, setEmailAiFields } from "../models/emails";
 import { getUserSettings } from "../models/userSettings";
 import { complete, emailTextForAi, parseTaxonomy, runSkill } from "../services/ai";
@@ -51,6 +52,7 @@ export function aiRoutes(db: Database) {
   /** The message, checked to belong to one of the caller's accounts. */
   function ownedEmail(req: Bun.BunRequest, userId: number) {
     const account = getOwnedAccountByEmailParam(db, req.params.email, userId);
+    assertAccountEnabled(account); // the AI results are stored on the message, which a disabled account doesn't allow
     const emailId = parseIntParam(req.params.emailId, "emailId");
     const row = getEmailRow(db, emailId);
     if (row.account_id !== account.id) throw new NotFoundError(`Email ${emailId} not found`);

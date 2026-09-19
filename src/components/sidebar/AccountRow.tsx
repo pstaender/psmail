@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Archive,
+  Ban,
   ChevronRight,
   File,
   Folder,
@@ -103,8 +104,15 @@ export function AccountRow({
           <button className="flex flex-1 items-center gap-1.5 text-left min-w-0">
             <ChevronRight className={cn("size-3.5 shrink-0 transition-transform text-muted-foreground", expanded && "rotate-90")} />
             <MailIcon className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="truncate text-sm font-medium">{account.displayName || account.email}</span>
-            {account.readOnly && (
+            <span className={cn("truncate text-sm font-medium", account.disabled && "text-muted-foreground line-through decoration-muted-foreground/40")}>
+              {account.displayName || account.email}
+            </span>
+            {account.disabled && (
+              <span title="Disabled" className="shrink-0">
+                <Ban className="size-3 text-muted-foreground" />
+              </span>
+            )}
+            {account.readOnly && !account.disabled && (
               <span title="Read-only" className="shrink-0">
                 <Lock className="size-3 text-muted-foreground" />
               </span>
@@ -112,7 +120,8 @@ export function AccountRow({
           </button>
         </CollapsibleTrigger>
 
-        {/* While syncing, the progress is a tooltip on the spinner (title on a wrapper: a disabled button gets no hover events). */}
+        {/* While syncing, the progress is a tooltip on the spinner (title on a wrapper: a disabled button gets no hover events). A disabled account can't be synced: no button. */}
+        {!account.disabled && (
         <span title={isRunning ? syncLabel : undefined} className={cn("shrink-0", isRunning && "cursor-progress")}>
           <Button
             variant="ghost"
@@ -125,6 +134,7 @@ export function AccountRow({
             {isRunning ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
           </Button>
         </span>
+        )}
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

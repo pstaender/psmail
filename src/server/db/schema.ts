@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS accounts (
   smtp_username TEXT NOT NULL,
   smtp_password_encrypted TEXT NOT NULL,
   read_only INTEGER NOT NULL DEFAULT 0,
+  -- A disabled account is never synced or written to: it is read-only and its stored mail is frozen (see assertAccountEnabled).
+  disabled INTEGER NOT NULL DEFAULT 0,
   skip_soft_delete INTEGER NOT NULL DEFAULT 0,
   imap_uidplus INTEGER,
   sender_name TEXT,

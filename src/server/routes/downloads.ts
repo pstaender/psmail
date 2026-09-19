@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { decryptAccountCredentials } from "../models/accounts";
+import { assertAccountEnabled, decryptAccountCredentials } from "../models/accounts";
 import { createDownloadJob, getDownloadJob, listDownloadJobs } from "../models/downloads";
 import { getUserRowById } from "../models/users";
 import { json, parseIntParam, readJsonBody, requireAuth, withErrorHandling } from "../http";
@@ -22,6 +22,7 @@ export function downloadsRoutes(db: Database) {
       POST: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
         const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        assertAccountEnabled(account);
         const username = getUserRowById(db, session.userId)!.username;
 
         const body = req.headers.get("content-length") === "0" ? {} : await readJsonBody<CreateDownloadBody>(req);

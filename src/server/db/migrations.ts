@@ -9,6 +9,7 @@ import type { Database } from "bun:sqlite";
  */
 const MIGRATIONS = [
   "ALTER TABLE accounts ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE accounts ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE accounts ADD COLUMN skip_soft_delete INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE accounts ADD COLUMN imap_uidplus INTEGER",
   "ALTER TABLE accounts ADD COLUMN sender_name TEXT",

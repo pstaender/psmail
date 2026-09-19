@@ -59,6 +59,9 @@ export function foldersRoutes(db: Database) {
       GET: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
         const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        // A disabled account makes no connections: its folders are just the ones its stored mail is in.
+        if (account.disabled) return json(mergeFolderCounts([], getFolderCounts(db, account.id)));
+
         const { imapPassword } = decryptAccountCredentials(account, encryptionKey);
 
         const folders = await withImapClient(

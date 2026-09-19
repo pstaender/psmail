@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import {
+  assertAccountEnabled,
   createAccount,
   decryptAccountCredentials,
   deleteAccount,
@@ -100,6 +101,7 @@ export function accountsRoutes(db: Database) {
       POST: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
         const row = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        assertAccountEnabled(row); // no connection to a disabled account
 
         const { imapPassword } = decryptAccountCredentials(row, encryptionKey);
         const { uidPlus } = await checkImapCapabilities({

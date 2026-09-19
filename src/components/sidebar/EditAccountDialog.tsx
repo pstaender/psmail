@@ -25,6 +25,7 @@ interface EditForm {
   smtpUsername: string;
   smtpPassword: string; // blank = keep the existing password unchanged
   readOnly: boolean;
+  disabled: boolean;
   skipSoftDelete: boolean;
   senderName: string;
   signature: string;
@@ -44,6 +45,7 @@ const EMPTY: EditForm = {
   smtpUsername: "",
   smtpPassword: "",
   readOnly: false,
+  disabled: false,
   skipSoftDelete: false,
   senderName: "",
   signature: "",
@@ -64,6 +66,7 @@ function formFromAccount(account: Account): EditForm {
     smtpUsername: account.smtpUsername,
     smtpPassword: "",
     readOnly: account.readOnly,
+    disabled: account.disabled,
     skipSoftDelete: account.skipSoftDelete,
     senderName: account.senderName ?? "",
     signature: account.signature ?? "",
@@ -157,6 +160,7 @@ export function EditAccountDialog({
         smtpSecure: form.smtpSecure,
         smtpUsername: form.smtpUsername,
         readOnly: form.readOnly,
+        disabled: form.disabled,
         skipSoftDelete: form.skipSoftDelete,
         senderName: form.senderName,
         signature: form.signature,
@@ -300,15 +304,34 @@ export function EditAccountDialog({
             <TabsContent value="safety" className="space-y-4">
               <div className="flex items-start gap-2 rounded-md border p-3">
                 <Switch
+                  id="edit-disabled"
+                  className="mt-0.5"
+                  checked={form.disabled}
+                  onCheckedChange={v => set("disabled", v)}
+                />
+                <div className="space-y-0.5">
+                  <Label htmlFor="edit-disabled">Disabled</Label>
+                  <p className="text-xs text-muted-foreground">
+                    The account is frozen: it is never synced and never contacted, and its stored mail can't be changed
+                    at all — no flags, moves, deletes, drafts or AI results. You can still read it. It is read-only
+                    for as long as it is disabled.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2 rounded-md border p-3">
+                <Switch
                   id="edit-read-only"
                   className="mt-0.5"
-                  checked={form.readOnly}
+                  checked={form.readOnly || form.disabled}
+                  disabled={form.disabled}
                   onCheckedChange={v => set("readOnly", v)}
                 />
                 <div className="space-y-0.5">
                   <Label htmlFor="edit-read-only">Read-only</Label>
                   <p className="text-xs text-muted-foreground">
                     Local changes (flags, moves, deletes) are never uploaded to this account's IMAP server.
+                    {form.disabled && " Always on while the account is disabled."}
                   </p>
                 </div>
               </div>

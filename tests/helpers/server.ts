@@ -4,6 +4,7 @@ import { usersRoutes } from "../../src/server/routes/users";
 import { accountsRoutes } from "../../src/server/routes/accounts";
 import { emailsRoutes } from "../../src/server/routes/emails";
 import { downloadsRoutes } from "../../src/server/routes/downloads";
+import { foldersRoutes } from "../../src/server/routes/folders";
 import { searchRoutes } from "../../src/server/routes/search";
 import { settingsRoutes } from "../../src/server/routes/settings";
 import { aiRoutes } from "../../src/server/routes/ai";
@@ -16,6 +17,7 @@ export function startTestServer(db: Database) {
     ...accountsRoutes(db),
     ...emailsRoutes(db),
     ...downloadsRoutes(db),
+    ...foldersRoutes(db),
     ...searchRoutes(db),
     ...settingsRoutes(db),
     ...aiRoutes(db),

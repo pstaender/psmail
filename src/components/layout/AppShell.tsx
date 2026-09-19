@@ -78,6 +78,13 @@ export function AppShell() {
 
   const [selectedAccountEmail, setSelectedAccountEmail] = useState<string | null>(null);
   const selectedAccount = accounts.find(a => a.email === selectedAccountEmail) ?? null;
+  // A disabled account is frozen (the server refuses every change): the UI doesn't even try.
+  const isDisabledAccount = (email: string | null) => !!accounts.find(a => a.email === email)?.disabled;
+  function refuseIfDisabled(email: string | null): boolean {
+    if (!isDisabledAccount(email)) return false;
+    toast.error(`Account "${email}" is disabled — enable it in its account settings to change it.`);
+    return true;
+  }
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [selectedEmailId, setSelectedEmailId] = useState<number | null>(null);
   // Checked via Cmd/Ctrl+click, for bulk actions — independent of selectedEmailId (the reading pane).
@@ -136,6 +143,7 @@ export function AppShell() {
     else runAi(kind, skillId);
   }
   async function runAi(kind: "summarize" | "translate", skillId: number) {
+    if (refuseIfDisabled(selectedAccountEmail)) return;
     if (!token || !selectedAccountEmail || !selectedEmail) return;
     const id = selectedEmail.id;
     setAiBusy(kind);
@@ -269,7 +277,7 @@ export function AppShell() {
   useEffect(() => {
     if (!syncIntervalMinutes) return;
     const timer = setInterval(() => {
-      for (const account of accountsRef.current) startSync(account.email, { folder: "INBOX", silent: true });
+      for (const account of accountsRef.current) if (!account.disabled) startSync(account.email, { folder: "INBOX", silent: true });
     }, syncIntervalMinutes * 60_000);
     return () => clearInterval(timer);
   }, [syncIntervalMinutes, startSync]);
@@ -293,7 +301,7 @@ export function AppShell() {
   // failed IMAP push — flipping the message back to unread right after the user just opened
   // and read it would be a confusing flicker. It does still surface the failure via toast.
   useEffect(() => {
-    if (selectedEmail && !selectedEmail.isRead && selectedAccountEmail && token) {
+    if (selectedEmail && !selectedEmail.isRead && selectedAccountEmail && token && !isDisabledAccount(selectedAccountEmail)) {
       api.updateEmail(token, selectedAccountEmail, selectedEmail.id, { isRead: true }).catch(err => {
         toast.error(errorMessage(err, "Failed to sync read status to the mail server"));
       });
@@ -520,6 +528,7 @@ export function AppShell() {
   // couldn't when they only touched the local database. The optimistic local update is rolled
   // back on failure so the UI doesn't drift from what the server actually has.
   async function toggleFlag(email: EmailRecord) {
+    if (refuseIfDisabled(selectedAccountEmail)) return;
     if (!token || !selectedAccountEmail) return;
     const isFlagged = !email.isFlagged;
     patchLocal(email.id, { isFlagged });
@@ -535,6 +544,7 @@ export function AppShell() {
   // result can belong to any account, so its own accountEmail is used; the folder list's copy and an
   // open reading pane are kept in sync, and everything is rolled back if the server refuses.
   async function toggleResultFlag(result: SearchResult) {
+    if (refuseIfDisabled(result.accountEmail)) return;
     if (!token) return;
     const isFlagged = !result.isFlagged;
     const apply = (value: boolean) => {
@@ -552,6 +562,7 @@ export function AppShell() {
   }
 
   async function toggleRead() {
+    if (refuseIfDisabled(selectedAccountEmail)) return;
     if (!token || !selectedAccountEmail || !selectedEmail) return;
     const previousIsRead = selectedEmail.isRead;
     const isRead = !previousIsRead;
@@ -571,6 +582,7 @@ export function AppShell() {
   }
 
   async function handleDelete() {
+    if (refuseIfDisabled(selectedAccountEmail)) return;
     if (!token || !selectedAccountEmail || !selectedEmail) return;
     let result: { softDeleted: boolean };
     try {
@@ -593,6 +605,7 @@ export function AppShell() {
   }
 
   async function handleMove(folder: string) {
+    if (refuseIfDisabled(selectedAccountEmail)) return;
     if (!token || !selectedAccountEmail || !selectedEmail) return;
     try {
       await api.moveEmail(token, selectedAccountEmail, selectedEmail.id, folder);
@@ -652,8 +665,13 @@ export function AppShell() {
     verb: string
   ): Promise<{ result: BulkResult; item: SelectionItem }[]> {
     if (!token) return [];
-    const items = selectionItems;
+    const disabledItems = selectionItems.filter(item => isDisabledAccount(item.accountEmail));
+    const items = selectionItems.filter(item => !isDisabledAccount(item.accountEmail));
     setSelectedIds(new Set());
+    if (disabledItems.length > 0) {
+      toast.error(`${disabledItems.length} message${disabledItems.length === 1 ? "" : "s"} skipped: the account is disabled and can't be changed.`);
+    }
+    if (items.length === 0) return [];
 
     const byAccount = new Map<string, SelectionItem[]>();
     for (const item of items) byAccount.set(item.accountEmail, [...(byAccount.get(item.accountEmail) ?? []), item]);
@@ -766,6 +784,7 @@ export function AppShell() {
       return;
     }
     if (selectedEmail) {
+      if (refuseIfDisabled(selectedAccountEmail)) return;
       if (willSoftDelete(selectedAccount, selectedEmail, folders)) handleDelete();
       else setConfirmDelete({ mode: "single", count: 1 });
     }
@@ -781,6 +800,7 @@ export function AppShell() {
   // New/reply/forward get the account's signature appended; continuing an existing draft
   // (editDraft sets `id`) doesn't — its body is already the draft's own finalized content.
   function openCompose(initial: ComposeDraft | null) {
+    if (refuseIfDisabled(selectedAccountEmail)) return;
     setComposeInitial(initial?.id === undefined ? withSignature(initial, selectedAccount?.signature ?? null) : initial);
     setComposeOpen(true);
   }
@@ -913,7 +933,12 @@ export function AppShell() {
                     ? `${unifiedView === "inbox" ? "Inbox" : "Sent"} · all accounts`
                     : selectedFolder ?? "—"}
               </span>
-              <Button size="sm" disabled={!selectedAccountEmail} onClick={() => openCompose(null)}>
+              <Button
+                size="sm"
+                disabled={!selectedAccountEmail || isDisabledAccount(selectedAccountEmail)}
+                title={isDisabledAccount(selectedAccountEmail) ? "This account is disabled" : undefined}
+                onClick={() => openCompose(null)}
+              >
                 <PenSquare className="size-4" /> New
               </Button>
             </div>
@@ -969,6 +994,7 @@ export function AppShell() {
               onMove={handleMove}
               onToggleRead={toggleRead}
               onEditDraft={() => openCompose(editDraft(selectedEmail))}
+              accountDisabled={isDisabledAccount(selectedAccountEmail)}
               aiSkills={aiSkills}
               aiBusy={aiBusy}
               onSummarize={skillId => requestAi("summarize", skillId)}

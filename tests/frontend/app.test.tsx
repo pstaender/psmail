@@ -32,6 +32,7 @@ const ACCOUNT: Account = {
   smtpSecure: true,
   smtpUsername: "me@example.com",
   readOnly: false,
+  disabled: false,
   skipSoftDelete: false,
   supportsUidPlus: null,
   senderName: null,
@@ -162,6 +163,8 @@ const passwordChanges: Record<string, unknown>[] = [];
 const contactRequests: (string | null)[] = [];
 // Requests to the AI endpoints: [method, path, body].
 const aiRequests: [string, string, any][] = [];
+// Paths of every PATCH .../emails/:id (flags, read state, ...).
+const emailPatches: string[] = [];
 const bulkRequests: { account: string; method: string; move: string | null; body: Record<string, unknown> }[] = [];
 let folderRequests = 0;
 let unreadRequests = 0;
@@ -220,6 +223,7 @@ function installMockFetch(
   capturedResultPatches.length = 0;
   passwordChanges.length = 0;
   bulkRequests.length = 0;
+  emailPatches.length = 0;
   aiRequests.length = 0;
   let currentAiApis = [...(opts.aiApis ?? [])];
   // "summarize" or "summarize:Short" (a skill with a name of its own; unnamed ones are named after their category, like the server does).
@@ -414,6 +418,7 @@ function installMockFetch(
       capturedResultPatches.push(init?.body ? JSON.parse(init.body as string) : {});
       return jsonResponse({ ...EMAIL, id: 20, ...(init?.body ? JSON.parse(init.body as string) : {}) });
     }
+    if (method === "PATCH" && path.startsWith("/api/accounts/me%40example.com/emails/")) emailPatches.push(path);
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse({ ...EMAIL, isRead: true });
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse({ ...SECOND_EMAIL, isRead: true });
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/12") return jsonResponse({ ...THIRD_EMAIL, isRead: true });
@@ -2803,6 +2808,93 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
         await userEvent.click(screen.getByRole("menuitem", { name: "Phrase · Casual" }));
         await waitFor(() => expect(calls("POST", "/api/ai/run")).toEqual([{ category: "improve", text: "Getting there...", skillId: 2 }]));
       });
+    });
+  });
+
+  describe("disabled accounts", () => {
+    async function login() {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await waitFor(() => expect(screen.getAllByText("me@example.com").length).toBeGreaterThan(0), { timeout: 3000 });
+    }
+
+    test("the account settings have a Disabled switch (Safety tab) that makes Read-only permanent", async () => {
+      installMockFetch();
+      await login();
+      await userEvent.click(screen.getByTitle("More actions"));
+      await userEvent.click(screen.getByText("Account settings"));
+      await userEvent.click(await screen.findByRole("tab", { name: "Safety" }));
+
+      const disabled = screen.getByLabelText("Disabled");
+      const readOnly = screen.getByLabelText("Read-only");
+      expect(disabled.getAttribute("aria-checked")).toBe("false");
+      expect(readOnly.hasAttribute("disabled")).toBe(false);
+
+      await userEvent.click(disabled);
+      expect(readOnly.getAttribute("aria-checked")).toBe("true"); // implied
+      expect(readOnly.hasAttribute("disabled")).toBe(true); // and not separately changeable
+      expect(screen.getByText(/Always on while the account is disabled/)).toBeTruthy();
+
+      await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
+      await waitFor(() => expect(capturedAccountPatch?.disabled).toBe(true));
+    });
+
+    test("a disabled account is marked in the sidebar, has no Sync button, and can still be expanded and read", async () => {
+      installMockFetch({ accountOverrides: { disabled: true } });
+      await login();
+      expect(screen.getByTitle("Disabled")).toBeTruthy();
+      expect(screen.queryByTitle("Sync now")).toBeNull();
+
+      await userEvent.click(screen.getAllByText("me@example.com")[0]!);
+      expect(await screen.findByText("Entwürfe")).toBeTruthy(); // its folders are there
+    });
+
+    test("its messages open without being marked read, and every button that would change something is off", async () => {
+      installMockFetch({ accountOverrides: { disabled: true } });
+      await login();
+      await openAccountInbox();
+      await userEvent.click(await screen.findByText("Hello there")); // an unread message
+      await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+
+      for (const name of [/^reply$/i, /^forward$/i, /mark read/i, /^delete$/i, /^move$/i]) {
+        expect(screen.getByRole("button", { name }).hasAttribute("disabled")).toBe(true);
+      }
+      expect(screen.getByRole("button", { name: /^new$/i }).hasAttribute("disabled")).toBe(true);
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(emailPatches).toEqual([]); // no "mark as read" request
+    });
+
+    test("starring a message of a disabled account is refused up front, without a request", async () => {
+      installMockFetch({ accountOverrides: { disabled: true } });
+      await login();
+      await openAccountInbox();
+      await screen.findByText("Hello there");
+      const row = screen.getByText("Hello there").closest("li")!;
+      fireEvent.click(row.querySelector('[role="button"]')!); // the star
+      expect((await screen.findAllByText(/is disabled — enable it in its account settings/)).length).toBeGreaterThan(0);
+      expect(emailPatches).toEqual([]);
+    });
+
+    test("the automatic sync leaves disabled accounts alone", async () => {
+      const realSetInterval = globalThis.setInterval;
+      const ticks: (() => void)[] = [];
+      globalThis.setInterval = ((fn: () => void, ms?: number, ...rest: unknown[]) => {
+        if (ms !== undefined && ms >= 60_000) {
+          ticks.push(fn);
+          return 0 as unknown as ReturnType<typeof setInterval>;
+        }
+        return realSetInterval(fn, ms, ...rest);
+      }) as typeof setInterval;
+      try {
+        installMockFetch({ settings: { syncIntervalMinutes: 2 }, accountOverrides: { disabled: true } });
+        await login();
+        await waitFor(() => expect(ticks).toHaveLength(1));
+        await act(async () => ticks[0]!());
+        await new Promise(resolve => setTimeout(resolve, 50));
+        expect(downloadPosts).toEqual([]);
+      } finally {
+        globalThis.setInterval = realSetInterval;
+      }
     });
   });
 });

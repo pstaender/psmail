@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { join } from "node:path";
 import type { ImapFlow } from "imapflow";
-import { decryptAccountCredentials, learnSpecialFolders, type AccountRow } from "../models/accounts";
+import { assertAccountEnabled, decryptAccountCredentials, learnSpecialFolders, type AccountRow } from "../models/accounts";
 import { addDeletedUid } from "../models/tombstones";
 import {
   addAttachment,
@@ -51,7 +51,7 @@ function getOwnedEmail(db: Database, emailId: number, accountId: number) {
  * on the server to push to.
  */
 export function canPushToImap(account: AccountRow, uid: number | null): boolean {
-  return !account.read_only && uid !== null;
+  return !account.read_only && !account.disabled && uid !== null;
 }
 
 /**
@@ -235,6 +235,7 @@ export function emailsRoutes(db: Database) {
       POST: withErrorHandling(async req => {
         const { session } = requireAuth(req, db);
         const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        assertAccountEnabled(account);
 
         const body = await readJsonBody<EmailInput>(req);
         const email = createEmail(db, account.id, { ...body, folder: body.folder ?? "Drafts", isDraft: true });
@@ -245,6 +246,7 @@ export function emailsRoutes(db: Database) {
       PATCH: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
         const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        assertAccountEnabled(account);
         const body = await readJsonBody<Partial<BulkRequestBody> & EmailInput>(req);
         const ids = requireIds(body);
 
@@ -256,6 +258,7 @@ export function emailsRoutes(db: Database) {
       DELETE: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
         const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        assertAccountEnabled(account);
         const body = await readJsonBody<Partial<BulkRequestBody>>(req);
         const ids = requireIds(body);
 
@@ -269,6 +272,7 @@ export function emailsRoutes(db: Database) {
       PATCH: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
         const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        assertAccountEnabled(account);
         const folderName = decodeURIComponent(requiredParam(req.params.folderName, "folderName"));
         const body = await readJsonBody<Partial<BulkRequestBody>>(req);
         const ids = requireIds(body);
@@ -291,6 +295,7 @@ export function emailsRoutes(db: Database) {
       PATCH: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
         const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        assertAccountEnabled(account);
         const emailId = parseIntParam(req.params.emailId, "emailId");
         const existing = getOwnedEmail(db, emailId, account.id);
         const body = await readJsonBody<EmailInput>(req);
@@ -313,6 +318,7 @@ export function emailsRoutes(db: Database) {
       DELETE: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
         const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        assertAccountEnabled(account);
         const emailId = parseIntParam(req.params.emailId, "emailId");
         const existing = getOwnedEmail(db, emailId, account.id);
 
@@ -333,6 +339,7 @@ export function emailsRoutes(db: Database) {
       POST: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
         const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        assertAccountEnabled(account);
         const emailId = parseIntParam(req.params.emailId, "emailId");
         getOwnedEmail(db, emailId, account.id);
 
@@ -374,7 +381,7 @@ export function emailsRoutes(db: Database) {
         // before it gets that far.
         let sentUid: number | null = null;
         let sentFolder = SENT_FOLDER;
-        if (!account.read_only) {
+        if (!account.read_only && !account.disabled) {
           try {
             sentFolder = await withImapClient(imapCredentialsFor(account, imapPassword), async client => {
               const liveFolders = await listFolders(client);
@@ -404,6 +411,7 @@ export function emailsRoutes(db: Database) {
       PATCH: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
         const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        assertAccountEnabled(account);
         const emailId = parseIntParam(req.params.emailId, "emailId");
         const existing = getOwnedEmail(db, emailId, account.id);
         const folderName = decodeURIComponent(requiredParam(req.params.folderName, "folderName"));
@@ -425,6 +433,7 @@ export function emailsRoutes(db: Database) {
       POST: withErrorHandling(async req => {
         const { session } = requireAuth(req, db);
         const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        assertAccountEnabled(account);
         const emailId = parseIntParam(req.params.emailId, "emailId");
         getOwnedEmail(db, emailId, account.id);
 
@@ -473,6 +482,7 @@ export function emailsRoutes(db: Database) {
       DELETE: withErrorHandling(async req => {
         const { session } = requireAuth(req, db);
         const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        assertAccountEnabled(account);
         const emailId = parseIntParam(req.params.emailId, "emailId");
         getOwnedEmail(db, emailId, account.id);
 
