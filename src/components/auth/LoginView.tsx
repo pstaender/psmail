@@ -175,7 +175,7 @@ export function LoginView() {
                             onChange={e => setPassword(e.target.value)}
                           />
                           {!hasVault(user.username) && passkeysAvailable() && (
-                            <div className="flex items-center gap-2 text-sm">
+                            <div className="flex items-center gap-2 py-2 text-sm">
                               <Switch id="remember-with-passkey" checked={rememberWithPasskey} onCheckedChange={setRememberWithPasskey} />
                               <Label htmlFor="remember-with-passkey" className="font-normal">
                                 Remember on this device
