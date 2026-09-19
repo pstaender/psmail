@@ -128,6 +128,13 @@ export function AppShell() {
   // stored on the message by the server; here it is just put into the open message.
   const [aiBusy, setAiBusy] = useState<"summarize" | "translate" | null>(null);
   const openEmailId = useRef<number | null>(null);
+  // Summarizing/translating again replaces a stored result (and costs another AI call), so it asks first.
+  const [confirmAi, setConfirmAi] = useState<{ kind: "summarize" | "translate"; skillId: number } | null>(null);
+  function requestAi(kind: "summarize" | "translate", skillId: number) {
+    const alreadyDone = kind === "summarize" ? !!selectedEmail?.aiSummary : !!selectedEmail?.translatedText;
+    if (alreadyDone) setConfirmAi({ kind, skillId });
+    else runAi(kind, skillId);
+  }
   async function runAi(kind: "summarize" | "translate", skillId: number) {
     if (!token || !selectedAccountEmail || !selectedEmail) return;
     const id = selectedEmail.id;
@@ -311,7 +318,7 @@ export function AppShell() {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const dialogOpen =
-        composeOpen || settingsOpen || editingAccountEmail !== null || pendingDeleteAccount !== null || confirmDelete !== null;
+        composeOpen || settingsOpen || editingAccountEmail !== null || pendingDeleteAccount !== null || confirmDelete !== null || confirmAi !== null;
       if (dialogOpen) return;
 
       const target = e.target as HTMLElement | null;
@@ -964,8 +971,8 @@ export function AppShell() {
               onEditDraft={() => openCompose(editDraft(selectedEmail))}
               aiSkills={aiSkills}
               aiBusy={aiBusy}
-              onSummarize={skillId => runAi("summarize", skillId)}
-              onTranslate={skillId => runAi("translate", skillId)}
+              onSummarize={skillId => requestAi("summarize", skillId)}
+              onTranslate={skillId => requestAi("translate", skillId)}
             />
           ) : (
             <EmptyState title="Select a message" description="Choose a message from the list to read it here." />
@@ -1023,6 +1030,30 @@ export function AppShell() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={confirmDeleteAccount}>Remove</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmAi !== null} onOpenChange={open => !open && setConfirmAi(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmAi?.kind === "translate" ? "Translate again?" : "Summarize again?"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmAi?.kind === "translate"
+                ? "This message has already been translated. Translating it again asks the AI once more and replaces the stored translation."
+                : "This message has already been summarized. Summarizing it again asks the AI once more and replaces the stored summary (and categories)."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (confirmAi) runAi(confirmAi.kind, confirmAi.skillId);
+                setConfirmAi(null);
+              }}
+            >
+              {confirmAi?.kind === "translate" ? "Translate again" : "Summarize again"}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

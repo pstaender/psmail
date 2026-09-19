@@ -72,18 +72,9 @@ export function MessageToolbar({
       </Button>
 
       {/* The AI buttons only exist for skills the user has set up — nobody who doesn't want AI is nudged to. */}
-      {(summarizers.length > 0 || translators.length > 0) && (
+      {(translators.length > 0) && (
         <>
           <Separator orientation="vertical" className="mx-1 h-5" />
-
-          <AiSkillButton
-            skills={summarizers}
-            busy={aiBusy === "summarize"}
-            icon={<Sparkles className="size-4" />}
-            label="Summarize"
-            title="Summarize (and categorize) this message with AI"
-            onRun={onSummarize}
-          />
           <AiSkillButton
             skills={translators}
             busy={aiBusy === "translate"}

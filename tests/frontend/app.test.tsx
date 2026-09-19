@@ -2578,13 +2578,15 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(aiRequests.some(([m, p]) => m === "POST" && p === "/api/accounts/me%40example.com/emails/10/ai/summarize")).toBe(true);
     });
 
-    test("the toolbar's Summarize button jumps to the Summary tab with the result", async () => {
+    test("summarizing happens in the Summary tab (the toolbar has no Summarize button) and the result stays there", async () => {
       installMockFetch({ aiSkillCategories: ["summarize"] });
       await login();
       await userEvent.click(await screen.findByText("Hello there"));
       await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
-      // (the toolbar button is the one with the sparkles and just "Summarize")
-      await userEvent.click(screen.getByRole("button", { name: /^summarize$/i }));
+      expect(screen.queryByRole("button", { name: /^summarize$/i })).toBeNull();
+
+      await userEvent.click(await screen.findByRole("tab", { name: "Summary" }));
+      await userEvent.click(screen.getByRole("button", { name: "Summarize with AI" }));
 
       expect(await screen.findByText(/Alice says hello/)).toBeTruthy();
       await waitFor(() => expect(screen.getByRole("tab", { name: "Summary" }).getAttribute("aria-selected")).toBe("true"));
@@ -2659,10 +2661,87 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect((await screen.findAllByRole("menuitem")).map(i => i.textContent)).toEqual(["Spelling + Grammar"]);
     });
 
+    describe("running an AI skill again", () => {
+      const summarizePosts = () => aiRequests.filter(([m, p]) => m === "POST" && p.endsWith("/ai/summarize")).length;
+      const translatePosts = () => aiRequests.filter(([m, p]) => m === "POST" && p.endsWith("/ai/translate")).length;
+      async function openMessage() {
+        await userEvent.click(await screen.findByText("Hello there"));
+        await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+      }
+      const openSummaryTab = async () => {
+        await userEvent.click(await screen.findByRole("tab", { name: "Summary" }));
+      };
+
+      test("summarizing an already summarized message asks first; Cancel leaves it, confirming runs it again", async () => {
+        installMockFetch({ aiSkillCategories: ["summarize"] });
+        await login();
+        await openMessage();
+        await openSummaryTab();
+
+        await userEvent.click(screen.getByRole("button", { name: "Summarize with AI" })); // the first time: no question
+        expect(await screen.findByText(/Alice says hello/)).toBeTruthy();
+        expect(summarizePosts()).toBe(1);
+        expect(screen.queryByRole("alertdialog")).toBeNull();
+
+        // Again asks before spending another AI call.
+        await userEvent.click(screen.getByRole("button", { name: "Summarize again" }));
+        const dialog = await screen.findByRole("alertdialog");
+        expect(within(dialog).getByText("Summarize again?")).toBeTruthy();
+        expect(summarizePosts()).toBe(1);
+
+        await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+        await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+        expect(summarizePosts()).toBe(1);
+
+        await userEvent.click(screen.getByRole("button", { name: "Summarize again" }));
+        await userEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Summarize again" }));
+        await waitFor(() => expect(summarizePosts()).toBe(2));
+      });
+
+      test("the same for translating", async () => {
+        installMockFetch({ aiSkillCategories: ["translate"] });
+        await login();
+        await openMessage();
+
+        await userEvent.click(screen.getByRole("button", { name: /^translate/i }));
+        expect(await screen.findByText(/Hallo, Welt/)).toBeTruthy();
+        expect(translatePosts()).toBe(1);
+
+        await userEvent.click(screen.getByRole("button", { name: /^translate/i }));
+        const dialog = await screen.findByRole("alertdialog");
+        expect(within(dialog).getByText("Translate again?")).toBeTruthy();
+        expect(translatePosts()).toBe(1);
+
+        await userEvent.click(within(dialog).getByRole("button", { name: "Translate again" }));
+        await waitFor(() => expect(translatePosts()).toBe(2));
+      });
+
+      test("with several skills the question comes after choosing one, and the choice is kept", async () => {
+        installMockFetch({ aiSkillCategories: ["summarize:Short", "summarize:Detailed"] });
+        await login();
+        await openMessage();
+        await openSummaryTab();
+
+        await userEvent.click(screen.getByRole("button", { name: /^summarize with ai/i }));
+        await userEvent.click(await screen.findByRole("menuitem", { name: "Short" }));
+        await waitFor(() => expect(summarizePosts()).toBe(1));
+
+        await userEvent.click(await screen.findByRole("button", { name: /^summarize again/i }));
+        await userEvent.click(await screen.findByRole("menuitem", { name: "Detailed" }));
+        await userEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Summarize again" }));
+        await waitFor(() => expect(summarizePosts()).toBe(2));
+        expect(aiRequests.filter(([, p]) => p.endsWith("/ai/summarize")).map(([, , body]) => body)).toEqual([{ skillId: 1 }, { skillId: 2 }]);
+      });
+    });
+
     describe("several skills of one category", () => {
       async function openMessage() {
         await userEvent.click(await screen.findByText("Hello there"));
         await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+      }
+      /** Summarizing lives in the Summary tab: open it (the tab is there whenever a Summarize skill exists). */
+      async function openSummaryTab() {
+        await userEvent.click(await screen.findByRole("tab", { name: "Summary" }));
       }
       const posts = (suffix: string) => aiRequests.filter(([m, p]) => m === "POST" && p.endsWith(suffix)).map(([, , body]) => body);
 
@@ -2670,23 +2749,25 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
         installMockFetch({ aiSkillCategories: ["summarize"] });
         await login();
         await openMessage();
-        await userEvent.click(screen.getByRole("button", { name: /^summarize$/i }));
+        await openSummaryTab();
+        await userEvent.click(screen.getByRole("button", { name: "Summarize with AI" }));
         await waitFor(() => expect(posts("/ai/summarize")).toEqual([{ skillId: 1 }]));
         expect(screen.queryByRole("menuitem")).toBeNull();
       });
 
-      test("several summarizers: clicking Summarize shows one entry per skill, labelled with its name (or Vendor.model)", async () => {
+      test("several summarizers: the Summary tab's button shows one entry per skill, labelled with its name", async () => {
         installMockFetch({ aiSkillCategories: ["summarize:Short", "summarize", "summarize:Detailed"] });
         await login();
         await openMessage();
+        await openSummaryTab();
 
-        await userEvent.click(screen.getByRole("button", { name: /^summarize/i }));
+        await userEvent.click(screen.getByRole("button", { name: /^summarize with ai/i }));
         expect((await screen.findAllByRole("menuitem")).map(i => i.textContent)).toEqual(["Short", "summarize", "Detailed"]);
         expect(posts("/ai/summarize")).toEqual([]); // the click only opened the menu
 
         await userEvent.click(screen.getByRole("menuitem", { name: "Detailed" }));
         await waitFor(() => expect(posts("/ai/summarize")).toEqual([{ skillId: 3 }]));
-        // The Summary tab's own button is the same kind of menu.
+        // Once there is a summary, its button is the same kind of menu.
         await userEvent.click(await screen.findByRole("button", { name: "Summarize again" }));
         expect((await screen.findAllByRole("menuitem")).map(i => i.textContent)).toEqual(["Short", "summarize", "Detailed"]);
       });
