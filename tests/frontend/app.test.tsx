@@ -1989,18 +1989,26 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect((screen.getByLabelText("Current password") as HTMLInputElement).value).toBe("");
     });
 
-    test("a mismatched or empty new password is caught before anything is sent", async () => {
+    test("a mismatched confirmation is caught before anything is sent", async () => {
       await openSettings();
       await userEvent.click(screen.getByRole("tab", { name: "Credentials" }));
-
-      await userEvent.click(screen.getByRole("button", { name: "Change password" }));
-      expect(await screen.findByText("Enter a new password.")).toBeTruthy();
 
       await userEvent.type(screen.getByLabelText("New password"), "one");
       await userEvent.type(screen.getByLabelText("Confirm new password"), "two");
       await userEvent.click(screen.getByRole("button", { name: "Change password" }));
       expect(await screen.findByText(/don't match/)).toBeTruthy();
       expect(passwordChanges).toEqual([]);
+    });
+
+    test("an empty new password is allowed and removes the password", async () => {
+      await openSettings();
+      await userEvent.click(screen.getByRole("tab", { name: "Credentials" }));
+
+      await userEvent.type(screen.getByLabelText("Current password"), "old-pw");
+      await userEvent.click(screen.getByRole("button", { name: "Change password" })); // both new fields left empty
+
+      await waitFor(() => expect(passwordChanges).toEqual([{ currentPassword: "old-pw", newPassword: "" }]));
+      expect((await screen.findAllByText(/Password removed\./)).length).toBeGreaterThan(0);
     });
 
     test("the server's refusal (wrong current password) is shown and the fields are kept", async () => {

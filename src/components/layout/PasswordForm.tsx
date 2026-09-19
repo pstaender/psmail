@@ -11,6 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
  * Changing the login password. The server re-encrypts the saved IMAP/SMTP passwords of every account
  * under the new password's key in the same step, so nothing has to be re-entered afterwards. The
  * current password is required (also to prove it's really the user); other browsers' sessions are ended.
+ * An empty new password is allowed (it makes the profile passwordless, like the built-in default one).
  */
 export function PasswordForm() {
   const { token } = useAuth();
@@ -23,10 +24,6 @@ export function PasswordForm() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!token) return;
-    if (next === "") {
-      setError("Enter a new password.");
-      return;
-    }
     if (next !== confirm) {
       setError("The new password and its confirmation don't match.");
       return;
@@ -39,11 +36,9 @@ export function PasswordForm() {
       setCurrent("");
       setNext("");
       setConfirm("");
-      toast.success(
-        otherSessionsSignedOut > 0
-          ? `Password changed. ${otherSessionsSignedOut} other session${otherSessionsSignedOut === 1 ? " was" : "s were"} signed out.`
-          : "Password changed."
-      );
+      const others =
+        otherSessionsSignedOut > 0 ? ` ${otherSessionsSignedOut} other session${otherSessionsSignedOut === 1 ? " was" : "s were"} signed out.` : "";
+      toast.success(`${next === "" ? "Password removed." : "Password changed."}${others}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -70,6 +65,7 @@ export function PasswordForm() {
       <div className="space-y-1.5">
         <Label htmlFor="settings-new-password">New password</Label>
         <Input id="settings-new-password" type="password" autoComplete="new-password" value={next} onChange={e => setNext(e.target.value)} />
+        <p className="text-xs text-muted-foreground">Leave both new-password fields empty to remove the password (anyone who can reach this app can then sign in to your profile).</p>
       </div>
 
       <div className="space-y-1.5">

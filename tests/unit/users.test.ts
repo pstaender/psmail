@@ -112,6 +112,17 @@ describe("users model", () => {
     expect(second.id).toBeGreaterThan(0);
   });
 
+  test("an empty new password is allowed: the profile becomes passwordless and the accounts stay readable", async () => {
+    const { db, user, key, account } = await userWithAccount("old-pw");
+    const newKey = await changeUserPassword(db, user.id, "old-pw", "", key);
+
+    await expect(verifyUserPassword(db, "carol", "old-pw")).rejects.toThrow();
+    await expect(verifyUserPassword(db, "carol", "")).resolves.toBeTruthy();
+    const salt = db.query<{ password_salt: string }, [number]>("SELECT password_salt FROM users WHERE id = ?").get(user.id)!.password_salt;
+    expect(newKey.equals(deriveEncryptionKey("", salt))).toBe(true); // what a passwordless login derives
+    expect(decryptSecret(getAccountRow(db, account.id).imap_password_encrypted, newKey)).toBe("imap-secret");
+  });
+
   test("the passwordless default user can set a password", async () => {
     const { db, user, key } = await userWithAccount("");
     await changeUserPassword(db, user.id, "", "brand-new", key);
