@@ -7,6 +7,14 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Star toggle in search and combined lists (8fb5517)
+------------------------------------------------------------
+The star in search results and the combined Inbox/Sent lists is now clickable: it appears on hover
+(or stays filled when starred) and flags/unflags that message on its own account, without also
+opening the message. The folder list's copy and an open reading pane follow, and the change is
+rolled back with an error toast if the server refuses it. Tests added for toggling and rollback.
+
+
 2026-09-19 - Compose autofocus on reply (564bcf3)
 ----------------------------------------------
 When the compose dialog opens with the To field already filled in (a reply), the cursor now goes
