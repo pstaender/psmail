@@ -136,6 +136,8 @@ const capturedSettingsPatches: Record<string, unknown>[] = [];
 let capturedAccountPatch: Record<string, unknown> | null = null;
 // Bodies of POST .../downloads (sync) calls, and how often the folder list / unread count were fetched.
 const downloadPosts: Record<string, unknown>[] = [];
+// Bodies of PATCH .../emails/20 (the combined Sent list's message).
+const capturedResultPatches: Record<string, unknown>[] = [];
 let folderRequests = 0;
 let unreadRequests = 0;
 // Artificial latency for GET .../folders — lets a test look at the tree *while* a refresh is in flight.
@@ -164,6 +166,7 @@ function installMockFetch(
   capturedSettingsPatches.length = 0;
   capturedAccountPatch = null;
   downloadPosts.length = 0;
+  capturedResultPatches.length = 0;
   folderRequests = 0;
   unreadRequests = 0;
   folderDelayMs = 0;
@@ -280,6 +283,10 @@ function installMockFetch(
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse(SECOND_EMAIL);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/12") return jsonResponse(THIRD_EMAIL);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/13") return jsonResponse(DRAFT_EMAIL);
+    if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/20") {
+      capturedResultPatches.push(init?.body ? JSON.parse(init.body as string) : {});
+      return jsonResponse({ ...EMAIL, id: 20, ...(init?.body ? JSON.parse(init.body as string) : {}) });
+    }
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse({ ...EMAIL, isRead: true });
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse({ ...SECOND_EMAIL, isRead: true });
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/12") return jsonResponse({ ...THIRD_EMAIL, isRead: true });
@@ -1475,5 +1482,40 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.click(screen.getByRole("button", { name: /new/i }));
     const fresh = await screen.findByLabelText("To");
     await waitFor(() => expect(document.activeElement).toBe(fresh));
+  });
+
+  test("the star in search/combined lists can be toggled, and is rolled back when the server refuses", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(screen.getByTitle("Sent of all accounts"));
+    const sentRow = (await screen.findByText("Unified outgoing")).closest("li")!;
+    expect(sentRow.querySelector('[aria-label="Starred"]')).toBeNull();
+
+    await userEvent.click(within(sentRow).getByTitle("Add star"));
+    await waitFor(() => expect(capturedResultPatches).toEqual([{ isFlagged: true }]));
+    expect(sentRow.querySelector('[aria-label="Starred"]')).toBeTruthy();
+    // Clicking the star doesn't also open the message.
+    expect(screen.getByText("Select a message")).toBeTruthy();
+
+    await userEvent.click(within(sentRow).getByTitle("Remove star"));
+    await waitFor(() => expect(capturedResultPatches.at(-1)).toEqual({ isFlagged: false }));
+    expect(sentRow.querySelector('[aria-label="Starred"]')).toBeNull();
+  });
+
+  test("a refused star toggle in the combined Inbox reverts the star", async () => {
+    installMockFetch({ failEmailPatch: 10 });
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(screen.getByTitle("Inbox of all accounts"));
+    const row = (await screen.findByText("Unified hello")).closest("li")!; // starred in the mock
+    expect(row.querySelector('[aria-label="Starred"]')).toBeTruthy();
+
+    await userEvent.click(within(row).getByTitle("Remove star"));
+    expect((await screen.findAllByText("simulated IMAP failure")).length).toBeGreaterThan(0); // the error toast
+    await waitFor(() => expect(row.querySelector('[aria-label="Starred"]')).toBeTruthy());
   });
 });

@@ -21,6 +21,7 @@ export function SearchResultList({
   loadingMore = false,
   onLoadMore,
   showRecipient = false,
+  onToggleFlag,
   selectedId,
   onSelect,
 }: {
@@ -32,6 +33,8 @@ export function SearchResultList({
   onLoadMore?: () => void;
   /** Label each row with who it was sent to (the unified Sent list) instead of who it's from. */
   showRecipient?: boolean;
+  /** Clicking a row's star flags/unflags that message. */
+  onToggleFlag?: (result: SearchResult) => void;
   selectedId: number | null;
   onSelect: (result: SearchResult) => void;
 }) {
@@ -71,7 +74,7 @@ export function SearchResultList({
             <button
               onClick={() => onSelect(result)}
               className={cn(
-                "flex w-full flex-col gap-0.5 px-3 py-2.5 text-left hover:bg-accent/60 transition-colors",
+                "group flex w-full flex-col gap-0.5 px-3 py-2.5 text-left hover:bg-accent/60 transition-colors",
                 selectedId === result.id && "bg-accent"
               )}
             >
@@ -79,7 +82,31 @@ export function SearchResultList({
                 {!result.isRead && <span className="size-1.5 shrink-0 rounded-full bg-primary" />}
                 <span className={cn("flex-1 truncate text-sm", !result.isRead && "font-semibold")}>{participantLabel(result, showRecipient)}</span>
                 <span className="shrink-0 text-xs text-muted-foreground">{formatListDate(result.date)}</span>
-                {result.isFlagged && <Star aria-label="Starred" className="size-3.5 shrink-0 fill-yellow-400 text-yellow-500" />}
+                <span
+                  role="button"
+                  tabIndex={0}
+                  title={result.isFlagged ? "Remove star" : "Add star"}
+                  onClick={e => {
+                    e.stopPropagation();
+                    onToggleFlag?.(result);
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onToggleFlag?.(result);
+                    }
+                  }}
+                  className="shrink-0"
+                >
+                  <Star
+                    aria-label={result.isFlagged ? "Starred" : undefined}
+                    className={cn(
+                      "size-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-yellow-500",
+                      result.isFlagged && "fill-yellow-400 text-yellow-500 opacity-100"
+                    )}
+                  />
+                </span>
               </div>
               <div className={cn("flex items-center gap-1.5 text-sm", !result.isRead && "font-medium")}>
                 <span className="flex-1 truncate">{result.subject || "(no subject)"}</span>

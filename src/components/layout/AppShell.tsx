@@ -364,6 +364,26 @@ export function AppShell() {
     }
   }
 
+  // Star toggle for a row of the search / combined-Inbox lists. Unlike the folder list's toggleFlag, the
+  // result can belong to any account, so its own accountEmail is used; the folder list's copy and an
+  // open reading pane are kept in sync, and everything is rolled back if the server refuses.
+  async function toggleResultFlag(result: SearchResult) {
+    if (!token) return;
+    const isFlagged = !result.isFlagged;
+    const apply = (value: boolean) => {
+      patchSearchResult(result.id, { isFlagged: value });
+      patchLocal(result.id, { isFlagged: value });
+      if (selectedEmail?.id === result.id) setSelectedEmailDetail({ ...selectedEmail, isFlagged: value });
+    };
+    apply(isFlagged);
+    try {
+      await api.updateEmail(token, result.accountEmail, result.id, { isFlagged });
+    } catch (err) {
+      apply(result.isFlagged);
+      toast.error(errorMessage(err, "Failed to update flag"));
+    }
+  }
+
   async function toggleRead() {
     if (!token || !selectedAccountEmail || !selectedEmail) return;
     const previousIsRead = selectedEmail.isRead;
@@ -687,6 +707,7 @@ export function AppShell() {
                 hasMore={searchHasMore}
                 loadingMore={searchLoadingMore}
                 onLoadMore={loadMoreSearchResults}
+                onToggleFlag={toggleResultFlag}
                 showRecipient={unifiedView === "sent" && !isSearching}
                 selectedId={selectedEmailId}
                 onSelect={selectSearchResult}
