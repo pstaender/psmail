@@ -7,6 +7,30 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Sync tooltip, Reply all, combined Inbox on load, arrow keys (018f0eb)
+------------------------------------------------------------------------------
+- Sync progress: the extra "Syncing n/m..." block under an account is gone. While a sync runs the
+  refresh button turns into a spinner (visible without hovering the row) and the progress is its
+  tooltip: "Syncing 12/340...".
+- Reply all: a "Reply all" button appears right after "Reply" only once the mouse enters or keyboard
+  focus reaches Reply (and hides again when you open another message), so it can't be clicked by
+  accident. It addresses the sender (or Reply-To) and the other To recipients in To and the Cc
+  recipients in Cc, without your own address (case-insensitive) and without duplicates; subject,
+  quote and threading are as for Reply. Cmd/Ctrl+R still replies to the sender only.
+- The app now opens on the combined Inbox instead of the first account's Inbox. Picking a folder in
+  the sidebar leaves it. (About 60 existing frontend tests started from the account's folder list,
+  so they now click into it first via a small helper.)
+- Arrow keys: with a mouse-type pointer (pointer: fine), Up/Down show the previous/next message in
+  the active list - a folder list, search results or the combined lists - scrolling the row into
+  view; with nothing open, Down opens the first message and Up the last. In a folder list,
+  Shift+Up/Down extends the bulk selection from the anchor like Shift+click (results have no bulk
+  selection, so Shift does nothing there). Not active while typing in a field, with a dialog open,
+  inside an open menu, or on touch devices.
+- Tests: reply-all addressing (unit), the tooltip, reveal-on-hover/focus, opening on the combined
+  Inbox, and arrow navigation (moving, range selection, results, and the cases where it must stay
+  quiet).
+
+
 2026-09-19 - Logo in the login window (880c64e)
 ------------------------------------------------
 The login window now shows logo/psmail_logo.svg, centered above the "P.S.Mail" title, in place of
