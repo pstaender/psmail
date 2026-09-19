@@ -49,6 +49,34 @@ describe("RenderPureMarkdown", () => {
     expect(root.textContent).toContain("](https://example.com)");
   });
 
+  test("a link whose text is its own URL shows just the URL, without the [ ](url) marks", () => {
+    const cases = [
+      "https://example.com",
+      "<https://example.com>",
+      "[https://example.com](https://example.com)",
+    ];
+    for (const markdown of cases) {
+      const { container, unmount } = render(<RenderPureMarkdown markdown={markdown} />);
+      const root = container.querySelector(".psmail-markdown-render")!;
+      expect(root.querySelector("a")).toBeTruthy();
+      expect(root.querySelector(".md-mark")).toBeNull();
+      expect(root.textContent).not.toContain("](");
+      unmount();
+    }
+
+    const { container } = render(<RenderPureMarkdown markdown="see https://example.com/a?b=1 ok" />);
+    expect(container.querySelector(".psmail-markdown-render")!.textContent!.trim()).toBe("see https://example.com/a?b=1 ok");
+  });
+
+  test("a link with its own text keeps the brackets and url marks", () => {
+    const { container } = render(<RenderPureMarkdown markdown="[Example](https://example.com) and https://other.org" />);
+    const root = container.querySelector(".psmail-markdown-render")!;
+    expect(root.textContent).toContain("[Example](https://example.com)");
+    // Exactly one link has marks (its `[` and `](…)`); the bare one has none.
+    expect(root.querySelectorAll(".md-mark")).toHaveLength(2);
+    expect(root.querySelectorAll("a")).toHaveLength(2);
+  });
+
   test("sanitizes the rendered HTML: no script tags, remote images blocked by default", () => {
     const { container } = render(
       <RenderPureMarkdown markdown={"<script>alert(1)</script>\n\n![pic](https://example.com/a.png)"} />

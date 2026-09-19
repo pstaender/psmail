@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { App } from "../../src/App";
+import { MessageHeader } from "../../src/components/mail/MessageHeader";
 import type { Account } from "../../src/server/types";
 
 /**
@@ -245,7 +246,7 @@ function installMockFetch(
     if (method === "GET" && path === "/api/unified/inbox") {
       return jsonResponse([
         {
-          id: 10, accountEmail: "me@example.com", folder: "INBOX", uid: 1, isRead: true, isFlagged: false,
+          id: 10, accountEmail: "me@example.com", folder: "INBOX", uid: 1, isRead: true, isFlagged: true,
           subject: "Unified hello", from: [{ name: "Alice", address: "alice@example.com" }], date: NOW,
         },
       ]);
@@ -1274,5 +1275,25 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // The combined Inbox's count is re-read too, and the open list keeps showing its messages.
     await waitFor(() => expect(unreadRequests).toBeGreaterThan(unreadBefore));
     expect(screen.getByText("Hello there")).toBeTruthy();
+  });
+
+  test("starred messages show a star in result lists, and the reading pane shows a star instead of a 'Flagged' badge", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    // The combined Inbox's mock row is starred.
+    await userEvent.click(screen.getByTitle("Inbox of all accounts"));
+    const row = (await screen.findByText("Unified hello")).closest("li")!;
+    expect(row.querySelector('[aria-label="Starred"]')).toBeTruthy();
+
+    // The reading pane's header: a star, not a text "Flagged" badge (and nothing when not starred).
+    cleanup();
+    const flagged = render(<MessageHeader email={{ ...EMAIL, isFlagged: true } as never} />);
+    expect(flagged.container.querySelector('[aria-label="Starred"]')).toBeTruthy();
+    expect(screen.queryByText("Flagged")).toBeNull();
+    flagged.unmount();
+    const plain = render(<MessageHeader email={{ ...EMAIL, isFlagged: false } as never} />);
+    expect(plain.container.querySelector('[aria-label="Starred"]')).toBeNull();
   });
 });

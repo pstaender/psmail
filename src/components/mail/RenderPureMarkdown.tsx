@@ -50,16 +50,28 @@ function createRenderer(): InstanceType<typeof MarkdownIt> {
   };
 
   // link_open and link_close are separate renderer calls, but a link's text can never contain
-  // another link, so stashing the href in between them (rather than threading it through some
+  // another link, so stashing state in between them (rather than threading it through some
   // other way) is safe — by the time link_close for THIS link runs, no other link_open could
   // have overwritten it.
+  //
+  // The `[`/`](url)` syntax marks are only worth showing when the link has text of its own: a
+  // bare URL (linkify, `<https://…>`, or `[https://x](https://x)`) already *is* its address, so
+  // it renders as just the URL instead of repeating it inside brackets.
   let linkHref = "";
+  let linkIsBareUrl = false;
   rules.link_open = (tokens: Token[], idx: number) => {
-    const href = tokens[idx]!.attrGet("href");
+    const token = tokens[idx]!;
+    const href = token.attrGet("href");
     linkHref = href === null ? "" : String(href);
-    return `${mark("[")}<a href="${esc(linkHref)}">`;
+
+    const next = tokens[idx + 1];
+    const textIsUrl =
+      next?.type === "text" && tokens[idx + 2]?.type === "link_close" && (next.content === linkHref || `mailto:${next.content}` === linkHref);
+    linkIsBareUrl = token.markup === "linkify" || token.markup === "autolink" || textIsUrl;
+
+    return `${linkIsBareUrl ? "" : mark("[")}<a href="${esc(linkHref)}">`;
   };
-  rules.link_close = () => `</a>${mark(`](${linkHref})`)}`;
+  rules.link_close = () => `</a>${linkIsBareUrl ? "" : mark(`](${linkHref})`)}`;
 
   return instance;
 }

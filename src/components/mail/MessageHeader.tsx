@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Star } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { formatFullDate } from "@/lib/time";
 import type { EmailAddress, EmailRecord } from "../../server/types";
 
@@ -27,7 +26,7 @@ export function MessageHeader({ email }: { email: EmailRecord }) {
     <div className="space-y-3 border-b p-4">
       <div className="flex items-start justify-between gap-4">
         <h2 className="text-lg font-semibold leading-tight">{email.subject || "(no subject)"}</h2>
-        {email.isFlagged && <Badge variant="secondary">Flagged</Badge>}
+        {email.isFlagged && <Star aria-label="Starred" className="mt-1 size-4 shrink-0 fill-yellow-400 text-yellow-500" />}
       </div>
 
       <div className="flex items-start gap-3">
