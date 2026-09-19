@@ -7,6 +7,20 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Confirm before running AI again (90b7a1a)
+-------------------------------------------------------
+If a message already has a summary, pressing Summarize (the Summary tab's "Summarize again" button) now
+asks first: "Summarize again? ... asks the AI once more and replaces the stored summary (and
+categories)" with Cancel / Summarize again. The same for Translate when a translation is stored ("Translate
+again?"). Nothing is asked the first time. With several skills the question comes after choosing one, and
+the chosen skill is the one that runs. Keyboard shortcuts are paused while the question is open.
+- Note: while I was working, MessageToolbar.tsx had been edited on disk to drop the Summarize button from the
+  toolbar (summarizing is done from the Summary tab). I kept that change (it is included in this commit),
+  updated the tests that clicked the toolbar button to use the Summary tab, and adjusted the README. The
+  now-unused Summarize plumbing in the toolbar component is still there.
+- Tests: the question for summarize and translate, Cancel vs. confirm, and the several-skills case.
+
+
 2026-09-19 - Vendor.model default moved from skills to providers (afc0416)
 -------------------------------------------------------------------------
 Correction to the previous entry: the optional name that is shown as Vendor.model when empty is for the AI
