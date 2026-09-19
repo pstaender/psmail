@@ -7,6 +7,22 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Vendor.model default moved from skills to providers (afc0416)
+-------------------------------------------------------------------------
+Correction to the previous entry: the optional name that is shown as Vendor.model when empty is for the AI
+providers (ai_apis), not for the skills.
+- Providers: the name is optional. The form no longer fills it in; the placeholder and a hint show what it
+  will be called as you pick vendor and model. An empty name is shown as Vendor.model, e.g.
+  "Anthropic.claude-opus-5" (Anthropic, OpenAI, Google, Ollama), in the provider list, the provider choice
+  of the skill form, the Test toast and the delete confirmation; it follows the model if that changes. The
+  API returns a label for every provider. Providers that already have a name (created earlier, when the name
+  defaulted to "Anthropic claude-opus-5") keep it.
+- Skills: back to how they were - the name defaults to the category (and follows category changes in the
+  form until you edit it), a blank name keeps the old one, and the name is what a menu entry says. The
+  several-skills-per-category menus from the previous entry stay.
+- Tests updated accordingly, plus one for the provider form's placeholder/hint and the provider labels.
+
+
 2026-09-19 - Several skills per category, optional names (f70c08b)
 ------------------------------------------------------------------
 - You can now have more than one skill of a category (the settings form already let you create them; now
