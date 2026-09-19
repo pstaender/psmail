@@ -7,6 +7,13 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Compose autofocus on reply (564bcf3)
+----------------------------------------------
+When the compose dialog opens with the To field already filled in (a reply), the cursor now goes
+straight into the message editor instead of the To field. Forwards and new messages have no
+recipient yet, so they still start in To. Frontend test added.
+
+
 2026-09-19 - Signature above the quoted message (342fbff)
 ---------------------------------------------------------
 In replies and forwards the signature is now inserted before the quoted original instead of after
