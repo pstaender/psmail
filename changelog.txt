@@ -7,6 +7,13 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - New-mail toast text color (76441a0)
+------------------------------------------------
+The text in the new-mail toast (subject, message preview, date/recipients line, and the sender list
+of a "20 new mails" toast) is now shown in the regular text color instead of sonner's muted grey
+description color. Test updated.
+
+
 2026-09-19 - New-mail notifications (08250c8)
 ----------------------------------------------
 - Two opt-in settings in the Settings dialog ("New mail notifications"), stored on the server:
