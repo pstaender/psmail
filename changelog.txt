@@ -7,6 +7,15 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Signature above the quoted message (342fbff)
+---------------------------------------------------------
+In replies and forwards the signature is now inserted before the quoted original instead of after
+it: blank space to type in, then "-- " and the signature, then the quote. New messages are
+unchanged (signature at the end), and without a signature replies and forwards are exactly as
+before. Drafts you re-open still don't get a signature added. Test added for the placement in
+replies, forwards, new messages and the no-signature case; README updated.
+
+
 2026-09-19 - Keyboard shortcuts (48ef5d3)
 ------------------------------------------
 - Esc closes the search, like its x button, and takes focus out of the search box. With no search
