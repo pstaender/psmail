@@ -1753,4 +1753,13 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.click(screen.getByRole("tab", { name: "Plain" }));
     await waitFor(() => expect(capturedSettingsPatches).toEqual([{ bodyView: "plain" }]));
   });
+
+  test("the login window shows the P.S.Mail logo instead of the round mail icon", async () => {
+    render(<App />);
+    const logo = (await screen.findByAltText("P.S.Mail logo")) as HTMLImageElement;
+    expect(logo.getAttribute("src")).toContain("psmail_logo.svg");
+    expect(document.querySelector(".bg-primary\\/10")).toBeNull();
+    // Centered above the title, in the card header.
+    expect(logo.closest('[data-slot="card-header"]')!.textContent).toContain("P.S.Mail");
+  });
 });

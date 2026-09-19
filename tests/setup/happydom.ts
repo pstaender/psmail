@@ -5,15 +5,15 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 // binds to `globalThis.document` at module-evaluation time.
 GlobalRegistrator.register();
 
-// The app imports audio files (src/sounds/*.mp3); the bundler turns those into URLs, but Bun's test
+// The app imports audio files (src/sounds/*.mp3) and the logo (logo/*.svg); the bundler turns those into URLs, but Bun's test
 // runtime has no loader for them and would try to parse the bytes as JavaScript. Stand in with the
 // same shape: a module whose default export is the file's path.
 import { plugin } from "bun";
 
 plugin({
-  name: "audio-as-url",
+  name: "assets-as-url",
   setup(build) {
-    build.onLoad({ filter: /\.mp3$/ }, args => ({
+    build.onLoad({ filter: /\.(mp3|svg)$/ }, args => ({
       contents: `export default ${JSON.stringify(args.path)};`,
       loader: "js",
     }));

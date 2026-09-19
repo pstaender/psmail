@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Mail, Loader2, UserPlus } from "lucide-react";
+import { Loader2, UserPlus } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import type { User } from "../../server/types";
+import logoUrl from "../../../logo/psmail_logo.svg";
 
 export function LoginView() {
   const { login } = useAuth();
@@ -84,9 +85,7 @@ export function LoginView() {
     <div className="h-full w-full flex items-center justify-center bg-muted/30 p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center text-center gap-2">
-          <div className="rounded-full bg-primary/10 p-3">
-            <Mail className="size-6 text-primary" />
-          </div>
+          <img src={logoUrl} alt="P.S.Mail logo" className="size-20" />
           <CardTitle className="text-2xl">P.S.Mail</CardTitle>
           <CardDescription>Sign in to your profile to continue</CardDescription>
         </CardHeader>
