@@ -7,6 +7,13 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Left-aligned recipient line (f9a0cfd)
+--------------------------------------------------
+The "to ..." summary line below the sender in the message header is now left-aligned. It is a button,
+and browsers center a button's text by default, which showed as soon as the recipient list wrapped onto
+several lines. Test added for the alignment classes.
+
+
 2026-09-19 - Message header details (54e612d)
 ---------------------------------------------
 In the details box that opens from the "to ..." line of the reading pane header:
