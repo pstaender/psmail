@@ -7,6 +7,32 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Disabled mail accounts (047798c)
+----------------------------------------------
+Account settings > Safety has a new "Disabled" switch (new accounts.disabled column, migrated; also
+`disabled` in the account PATCH body). A disabled account is frozen:
+- Not synced: the sync route answers 409, the sidebar shows no Sync button (the account is struck through with
+  a "Disabled" mark), the automatic sync skips it, and a sync that is already running stops before storing
+  anything more (the job fails with "The account was disabled during the sync").
+- No connections at all: its folder list is built from the stored mail alone (no IMAP), the capability check
+  is refused, and it can't send.
+- Automatically read-only: the Read-only switch shows as on and can't be changed while disabled; nothing is
+  pushed to its IMAP server.
+- Its stored mail is immutable, not just "local-only": every route that would change it answers 409 with
+  "Account ... is disabled" - creating/editing/sending drafts, flags and read state, moves, deletes, the bulk
+  versions, attachments upload/delete, and AI summaries/translations/categories (they are stored on the
+  message). The web client greys out Reply, Reply all, Forward, Mark read, Move, Delete, Edit draft, New and
+  Translate for such messages (tooltip: "This account is disabled"), refuses stars/bulk actions up front with
+  a message instead of a request, and doesn't mark messages read when you open them.
+- Still possible: reading (lists, messages, attachments, search, the combined lists, an existing summary),
+  re-enabling, editing the settings, and removing the account.
+- Decision: removing a disabled account is allowed (it is an explicit administrative act, not an edit of the
+  mail), and AI results count as changes, so they are refused too.
+- Tests: the whole HTTP surface (15 refused mutations, the DB unchanged, no sync job, folders without a
+  connection, re-enable), a sync stopping when the account is disabled mid-run, and the UI (switch, row,
+  toolbar, star, no mark-as-read, automatic sync).
+
+
 2026-09-19 - Confirm before running AI again (90b7a1a)
 -------------------------------------------------------
 If a message already has a summary, pressing Summarize (the Summary tab's "Summarize again" button) now
