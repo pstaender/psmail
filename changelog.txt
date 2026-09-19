@@ -7,6 +7,16 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Blockquote marks in RenderPureMarkdown (7fe3870)
+-------------------------------------------------------------
+Quoted text in the Text/MD reading views now keeps its mail syntax: every line inside a blockquote
+starts with a de-emphasized "> " (one per nesting level, so "> > " for a quote in a quote), like the
+quoted lines of a reply in the source, instead of showing only the shaded quote box. The marks are
+added at the start of each quoted paragraph, after each line break inside it, before a heading, and
+on every line of a fenced code block inside a quote. Text outside the quote is untouched, and the
+quote depth is reset for every render. Tests added for plain, nested and mixed quotes.
+
+
 2026-09-19 - Collapsed accounts and running syncs on load (3a3a00e)
 ------------------------------------------------------------------
 - After the page loads, every account in the sidebar is collapsed: with the combined Inbox showing,
