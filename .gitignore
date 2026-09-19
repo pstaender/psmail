@@ -38,6 +38,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 *.swo
 
 /.claude_session
+/features_todo.md
 
 # personal test mail fixtures (real emails, not for version control)
 /testmails
