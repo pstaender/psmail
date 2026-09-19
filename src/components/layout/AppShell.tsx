@@ -224,7 +224,7 @@ export function AppShell() {
 
   function patchFolderCounts(folder: string, deltas: { total?: number; unread?: number }) {
     patchRawFolderCounts(folder, deltas);
-    if (folder === "INBOX" && deltas.unread) setUnifiedInboxUnread(count => Math.max(0, count + deltas.unread!));
+    if (folder.toLowerCase() === "inbox" && deltas.unread) setUnifiedInboxUnread(count => Math.max(0, count + deltas.unread!));
   }
 
   // A sync finished for some account: pick up its new mail without disturbing anything else

@@ -98,13 +98,34 @@ export interface ImapFolder {
 
 export async function listFolders(client: ImapFlow): Promise<ImapFolder[]> {
   const list = await client.list();
-  return list.map(entry => ({
-    path: entry.path,
-    name: entry.name,
-    delimiter: entry.delimiter,
-    specialUse: entry.specialUse ?? null,
-    flags: Array.from(entry.flags ?? []),
-  }));
+  return applySpecialUseFallback(
+    list.map(entry => ({
+      path: entry.path,
+      name: entry.name,
+      delimiter: entry.delimiter,
+      specialUse: entry.specialUse ?? null,
+      flags: Array.from(entry.flags ?? []),
+    }))
+  );
+}
+
+/**
+ * Servers that don't flag their Inbox/Sent folders (no \Inbox / \Sent special-use) usually still name them that way:
+ * when no folder carries the flag, a folder called "inbox" / "sent" (any case) is taken for it. A real flag always wins.
+ */
+export function applySpecialUseFallback<T extends { name: string; specialUse: string | null }>(folders: T[]): T[] {
+  let result = folders;
+  for (const [use, name] of [["\\Inbox", "inbox"], ["\\Sent", "sent"]] as const) {
+    if (result.some(folder => folder.specialUse === use)) continue;
+    const match = result.find(folder => folder.specialUse === null && folder.name.toLowerCase() === name);
+    if (match) result = result.map(folder => (folder === match ? { ...folder, specialUse: use } : folder));
+  }
+  return result;
+}
+
+/** The Inbox always comes first; everything else keeps its order. */
+export function inboxFirst<T extends { specialUse: string | null }>(folders: T[]): T[] {
+  return [...folders.filter(folder => folder.specialUse === "\\Inbox"), ...folders.filter(folder => folder.specialUse !== "\\Inbox")];
 }
 
 export interface FetchedMessage {

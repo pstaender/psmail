@@ -61,12 +61,18 @@ function isNonInboxFolder(folder: string, account: AccountFolders): boolean {
   return NON_INBOX_FOLDER_NAMES.has(lower) || NON_INBOX_FOLDER_NAMES.has(lastSegment);
 }
 
-/** The folders of an account that the combined Inbox covers: just INBOX, or — opt-in — every folder that isn't Sent/Drafts/Trash/Junk/Archive. */
+/**
+ * The folders of an account that the combined Inbox covers: its Inbox — INBOX, or a folder named "inbox" in any case
+ * on servers that spell it differently — or, opt-in, every folder that isn't Sent/Drafts/Trash/Junk/Archive.
+ */
 function inboxFolders(db: Database, account: AccountFolders, includeFolders: boolean): string[] {
-  if (!includeFolders) return ["INBOX"];
-  const folders = db.query<{ folder: string }, [number]>("SELECT DISTINCT folder FROM emails WHERE account_id = ?").all(account.id);
-  const included = folders.map(f => f.folder).filter(folder => folder === "INBOX" || !isNonInboxFolder(folder, account));
-  return included.length > 0 ? included : ["INBOX"];
+  const folders = db.query<{ folder: string }, [number]>("SELECT DISTINCT folder FROM emails WHERE account_id = ?").all(account.id).map(f => f.folder);
+  const inboxes = folders.filter(folder => folder.toLowerCase() === "inbox");
+  const base = inboxes.length > 0 ? inboxes : ["INBOX"];
+  if (!includeFolders) return base;
+
+  const included = folders.filter(folder => folder.toLowerCase() === "inbox" || !isNonInboxFolder(folder, account));
+  return included.length > 0 ? included : base;
 }
 
 function sentFolderFor(db: Database, accountId: number, learned: string | null): string {

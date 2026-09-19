@@ -2957,6 +2957,17 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(note.getAttribute("title")).toContain("Unexpected close"); // the reason on hover
     });
 
+    test("a folder named inbox in any case is labelled Inbox in the tree", async () => {
+      const lower = [
+        { path: "inbox", name: "inbox", delimiter: "/", specialUse: "\\Inbox", flags: [], total: 3, unread: 2 },
+        { path: "Entwürfe", name: "Entwürfe", delimiter: "/", specialUse: "\\Drafts", flags: [], total: 0, unread: 0 },
+      ];
+      installMockFetch({ liveFolders: lower });
+      await openTree();
+      await waitFor(() => expect(screen.getAllByText("Inbox").length).toBeGreaterThan(1)); // the combined row and this account's
+      expect(screen.queryByText("inbox")).toBeNull();
+    });
+
     test("no note when the server answered", async () => {
       installMockFetch();
       await openTree();

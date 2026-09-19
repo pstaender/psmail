@@ -187,7 +187,7 @@ export function AccountRow({
                 )}
               >
                 <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate">{folder.name === 'INBOX' ? 'Inbox' : folder.name}</span>
+                <span className="flex-1 truncate">{folder.name.toLowerCase() === 'inbox' ? 'Inbox' : folder.name}</span>
                 {folder.unread > 0 && (
                   <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
                     {folder.unread}

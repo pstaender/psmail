@@ -340,3 +340,19 @@ describe("user settings: notifications", () => {
     expect(() => updateUserSettings(db, user.id, { notificationSound: "airhorn" })).toThrow(/notificationSound/);
   });
 });
+
+describe("an Inbox that isn't spelled INBOX", () => {
+  test("the combined Inbox, its unread count and new-mail detection find a folder named Inbox / inbox", async () => {
+    const { db, user, accounts } = await setup(["a@x.com", "b@x.com"]);
+    mail(db, accounts[0]!.id, "Inbox", "mixed case", "2026-01-02T00:00:00.000Z");
+    mail(db, accounts[1]!.id, "INBOX", "upper case", "2026-01-01T00:00:00.000Z");
+    mail(db, accounts[0]!.id, "Archive", "elsewhere", "2026-01-03T00:00:00.000Z");
+
+    expect(listUnifiedEmails(db, user.id, "inbox").map(r => r.subject)).toEqual(["mixed case", "upper case"]);
+    expect(countUnifiedInboxUnread(db, user.id)).toBe(2);
+
+    const { latestId } = listNewInboxMail(db, user.id, null, { now: Date.parse("2026-01-04T00:00:00.000Z") });
+    mail(db, accounts[0]!.id, "inbox", "lowercase arrives", new Date("2026-01-03T23:00:00.000Z").toISOString());
+    expect(listNewInboxMail(db, user.id, latestId, { now: Date.parse("2026-01-04T00:00:00.000Z") }).messages.map(m => m.subject)).toEqual(["lowercase arrives"]);
+  });
+});

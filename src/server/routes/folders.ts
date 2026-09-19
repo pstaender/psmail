@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { decryptAccountCredentials, getFoldersCache, learnSpecialFolders, setFoldersCache, type AccountRow } from "../models/accounts";
 import { getFolderCounts, type FolderCount } from "../models/emails";
 import { json, requireAuth, withErrorHandling } from "../http";
-import { describeImapError, listFolders, withImapClient, type ImapFolder } from "../services/imap";
+import { applySpecialUseFallback, describeImapError, inboxFirst, listFolders, withImapClient, type ImapFolder } from "../services/imap";
 import { ApiError } from "../types";
 import { getOwnedAccountByEmailParam } from "./accounts";
 
@@ -32,21 +32,22 @@ export function mergeFolderCounts(liveFolders: ImapFolder[], localCounts: Folder
   }));
 
   const livePaths = new Set(liveFolders.map(f => f.path));
-  const guessedSpecialUse: Record<string, string> = { Drafts: "\\Drafts", Sent: "\\Sent", Trash: "\\Trash" };
+  const guessedSpecialUse: Record<string, string> = { drafts: "\\Drafts", sent: "\\Sent", trash: "\\Trash" };
   for (const [folderName, count] of counts) {
     if (livePaths.has(folderName)) continue;
     merged.push({
       path: folderName,
       name: folderName,
       delimiter: "/",
-      specialUse: guessedSpecialUse[folderName] ?? null,
+      specialUse: guessedSpecialUse[folderName.toLowerCase()] ?? null,
       flags: [],
       total: count.total,
       unread: count.unread,
     });
   }
 
-  return merged;
+  // Lists remembered before the name fallback existed lack it, so it is applied here too; and the Inbox is always first.
+  return inboxFirst(applySpecialUseFallback(merged));
 }
 
 const LIVE_TIMEOUT_MS = 90_000;

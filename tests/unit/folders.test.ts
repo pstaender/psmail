@@ -56,3 +56,40 @@ describe("mergeFolderCounts", () => {
     expect(result).toEqual([{ ...folder("INBOX", "\\Inbox"), total: 0, unread: 0 }]);
   });
 });
+
+describe("special-use fallback by name, and the Inbox first", () => {
+  test("without an \\Inbox / \\Sent flag, a folder named inbox / sent (any case) is taken for it", async () => {
+    const { applySpecialUseFallback } = await import("../../src/server/services/imap");
+    const result = applySpecialUseFallback([folder("Archive"), folder("Inbox"), folder("SENT"), folder("Drafts", "\\Drafts")]);
+    expect(result.map(f => [f.path, f.specialUse])).toEqual([["Archive", null], ["Inbox", "\\Inbox"], ["SENT", "\\Sent"], ["Drafts", "\\Drafts"]]);
+  });
+
+  test("a real flag wins: when some folder carries it, name lookalikes stay unflagged", async () => {
+    const { applySpecialUseFallback } = await import("../../src/server/services/imap");
+    const result = applySpecialUseFallback([folder("Sent Items", "\\Sent"), folder("Sent"), folder("INBOX", "\\Inbox"), folder("Inbox")]);
+    expect(result.map(f => f.specialUse)).toEqual(["\\Sent", null, "\\Inbox", null]);
+  });
+
+  test("uses the folder's own name, so INBOX.Sent-style paths work; other names aren't touched", async () => {
+    const { applySpecialUseFallback } = await import("../../src/server/services/imap");
+    const nested: ImapFolder = { path: "INBOX.Sent", name: "Sent", delimiter: ".", specialUse: null, flags: [] };
+    expect(applySpecialUseFallback([nested, folder("Sent Messages"), folder("Inbox2")]).map(f => f.specialUse)).toEqual(["\\Sent", null, null]);
+  });
+
+  test("mergeFolderCounts puts the Inbox first, whatever the server's order, and applies the fallback to remembered lists too", () => {
+    const result = mergeFolderCounts([folder("Archive"), folder("Sent"), folder("inbox"), folder("Zeta")], [{ folder: "inbox", total: 4, unread: 1 }]);
+    expect(result.map(f => f.path)).toEqual(["inbox", "Archive", "Sent", "Zeta"]);
+    expect(result.map(f => f.specialUse)).toEqual(["\\Inbox", null, "\\Sent", null]);
+    expect(result[0]).toMatchObject({ total: 4, unread: 1 });
+  });
+
+  test("folders that exist only locally are recognized case-insensitively too, and the Inbox is still first", () => {
+    const result = mergeFolderCounts([], [
+      { folder: "Archive", total: 1, unread: 0 },
+      { folder: "sent", total: 2, unread: 0 },
+      { folder: "drafts", total: 1, unread: 0 },
+      { folder: "Inbox", total: 5, unread: 3 },
+    ]);
+    expect(result.map(f => [f.path, f.specialUse])).toEqual([["Inbox", "\\Inbox"], ["Archive", null], ["sent", "\\Sent"], ["drafts", "\\Drafts"]]);
+  });
+});
