@@ -11,35 +11,62 @@ function recipients(label: string, addresses: EmailAddress[]): string | null {
 
 const TOAST_MS = 12_000;
 
+/** A toast that is one big click target: clicking (or Enter/Space) runs `onOpen` and dismisses it. */
+function ClickableToast({ id, onOpen, children }: { id: string | number; onOpen: () => void; children: React.ReactNode }) {
+  const open = () => {
+    toast.dismiss(id);
+    onOpen();
+  };
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={open}
+      onKeyDown={e => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          open();
+        }
+      }}
+      className="w-[356px] max-w-full cursor-pointer space-y-1 rounded-lg border bg-popover p-4 text-left text-foreground shadow-lg transition-colors hover:bg-accent"
+    >
+      {children}
+    </div>
+  );
+}
+
 /**
- * The in-app toast for new mail. For one message: sender as the title, then the subject, the start
- * of the text, and a details line (date, To, Cc) with an "Open" button. For several: a count and who
- * they're from, with a button that shows the combined Inbox.
+ * The in-app toast for new mail. For one message: sender, subject, the start of the text (monospace,
+ * like the message views) and a details line (date, To, Cc). For several: a count and who they're
+ * from. Clicking the toast opens that message, or the combined Inbox for several.
  */
 export function showNewMailToast(result: NewMailResult, handlers: NewMailHandlers): void {
   if (result.total === 0) return;
 
   const single = result.total === 1 ? result.messages[0] : undefined;
   if (!single) {
-    toast(newMailsTitle(result.total), {
-      description: <div className="text-foreground">From {sendersSummary(result)}</div>,
-      duration: TOAST_MS,
-      action: { label: "Show inbox", onClick: handlers.openInbox },
-    });
+    toast.custom(
+      id => (
+        <ClickableToast id={id} onOpen={handlers.openInbox}>
+          <div className="text-sm font-semibold">{newMailsTitle(result.total)}</div>
+          <div className="text-sm">From {sendersSummary(result)}</div>
+        </ClickableToast>
+      ),
+      { duration: TOAST_MS }
+    );
     return;
   }
 
   const details = [formatFullDate(single.date), recipients("To", single.to), recipients("Cc", single.cc)].filter(Boolean).join(" · ");
-  toast(senderLabel(single.from), {
-    description: (
-      // sonner shows a toast's description in a muted grey; the mail's text should read as normal text.
-      <div className="space-y-1 text-foreground">
-        <div className="font-medium">{single.subject || "(no subject)"}</div>
-        {single.snippet && <div className="line-clamp-3 text-xs">{single.snippet}</div>}
+  toast.custom(
+    id => (
+      <ClickableToast id={id} onOpen={() => handlers.openMail(single)}>
+        <div className="text-sm font-semibold">{senderLabel(single.from)}</div>
+        <div className="text-sm font-medium">{single.subject || "(no subject)"}</div>
+        {single.snippet && <div className="line-clamp-3 break-words font-mono text-xs">{single.snippet}</div>}
         <div className="text-[11px]">{details}</div>
-      </div>
+      </ClickableToast>
     ),
-    duration: TOAST_MS,
-    action: { label: "Open", onClick: () => handlers.openMail(single) },
-  });
+    { duration: TOAST_MS }
+  );
 }

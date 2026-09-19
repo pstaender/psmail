@@ -1607,17 +1607,19 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(await screen.findByText("Alice Anderson")).toBeTruthy();
       expect(screen.getByText("Lunch on Friday?")).toBeTruthy();
       const snippet = screen.getByText(/Are you free on Friday for lunch/);
-      // The preview reads as normal text, not sonner's muted description grey.
-      expect(snippet.closest(".text-foreground")).toBeTruthy();
+      expect(snippet.className).toContain("font-mono"); // the message text is monospace, like the message views
+      expect(screen.queryByRole("button", { name: "Open" })).toBeNull(); // no separate button
       expect(screen.getByText(/To: me@example.com/).textContent).toContain("Cc: Bob");
       expect(newMailRequests.at(-1)).toBe("100"); // asked for everything after the starting point
       expect(played).toHaveLength(1);
       expect(played[0]).toContain("crystal_clear");
       expect(FakeNotification.created).toEqual([]); // browser notification wasn't opted into
 
-      // The toast's Open button shows that message.
-      await userEvent.click(screen.getByRole("button", { name: "Open" }));
+      // Clicking the toast itself shows that message, and the toast goes away.
+      await userEvent.click(snippet);
       await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+      // …and the toast is dismissed (sonner flags it as removed, then drops it after its exit animation).
+      await waitFor(() => expect(snippet.closest("li")?.getAttribute("data-removed")).toBe("true"));
     });
 
     test("the chosen sound is played, and 'none' plays nothing", async () => {
