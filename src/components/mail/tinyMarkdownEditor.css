@@ -127,6 +127,9 @@
   padding-right: var(--tmde-space);
   padding-bottom: 0;
   padding-top: 0;
+  > p {
+    margin-bottom: 0;
+  }
 }
 .psmail-markdown-editor .TinyMDE .TMBlockquote:not(.TMBlockquote + .TMBlockquote) {
   padding-top: 1rem;

@@ -2265,4 +2265,55 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(screen.queryByTitle(/^Syncing/)).toBeNull();
     });
   });
+
+  describe("message header details", () => {
+    const many = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => ({ name: `${prefix} Person ${i}`, address: `${prefix.toLowerCase()}${i}@example.com` }));
+    const email = { ...EMAIL, to: many("To", 40), cc: many("Cc", 40), bcc: many("Bcc", 5), messageId: "<abc123@mail.example.com>" } as never;
+
+    async function openDetails() {
+      render(<MessageHeader email={email} />);
+      await userEvent.click(screen.getByRole("button", { name: /^to /i })); // the summary line opens the details box
+    }
+    const line = (label: string) => screen.getByText(label).nextElementSibling as HTMLElement;
+
+    test("the Message-ID is hidden by default", async () => {
+      await openDetails();
+      expect(screen.queryByText("Message-ID")).toBeNull();
+      expect(screen.queryByText("<abc123@mail.example.com>")).toBeNull();
+    });
+
+    test("To, Cc and Bcc are clamped to a few lines with an ellipsis by default", async () => {
+      await openDetails();
+      for (const label of ["To", "Cc", "Bcc"]) {
+        const value = line(label);
+        expect(value.className).toContain("line-clamp-3"); // ellipsis after three lines
+        expect(value.className).toContain("max-h-16"); // ≈ 4rem
+        expect(value.className).toContain("overflow-hidden");
+      }
+    });
+
+    test("'Expand all details' shows everything, including the Message-ID, and collapses again", async () => {
+      await openDetails();
+      await userEvent.click(screen.getByRole("button", { name: "Expand all details" }));
+
+      expect(screen.getByText("Message-ID")).toBeTruthy();
+      expect(screen.getByText("<abc123@mail.example.com>")).toBeTruthy();
+      for (const label of ["To", "Cc", "Bcc"]) expect(line(label).className).not.toContain("line-clamp");
+      expect(line("Cc").textContent).toContain("Cc Person 39"); // the whole list is in there
+
+      await userEvent.click(screen.getByRole("button", { name: "Collapse details" }));
+      expect(screen.queryByText("<abc123@mail.example.com>")).toBeNull();
+      expect(line("Cc").className).toContain("line-clamp-3");
+    });
+
+    test("the expanded state doesn't carry over to the next message", async () => {
+      const { rerender } = render(<MessageHeader email={email} />);
+      await userEvent.click(screen.getByRole("button", { name: /^to /i }));
+      await userEvent.click(screen.getByRole("button", { name: "Expand all details" }));
+      expect(screen.getByText("<abc123@mail.example.com>")).toBeTruthy();
+
+      rerender(<MessageHeader email={{ ...(email as object), id: 999 } as never} />);
+      await waitFor(() => expect(screen.queryByText("<abc123@mail.example.com>")).toBeNull());
+    });
+  });
 });

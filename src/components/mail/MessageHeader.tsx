@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, ChevronUp, Star } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { cn } from "@/lib/utils";
 import { formatFullDate } from "@/lib/time";
 import type { EmailAddress, EmailRecord } from "../../server/types";
 
@@ -8,18 +9,28 @@ function formatAddress(addr: EmailAddress): string {
   return addr.name ? `${addr.name} <${addr.address}>` : addr.address;
 }
 
-function AddressLine({ label, addresses }: { label: string; addresses: EmailAddress[] }) {
+/**
+ * One header line (From, To, Cc, ...). Long recipient lists wrap onto several lines but stop after three
+ * (about 4rem) with an ellipsis, so a mail sent to a whole mailing list doesn't push the message off screen;
+ * `full` shows all of it.
+ */
+function AddressLine({ label, addresses, full }: { label: string; addresses: EmailAddress[]; full: boolean }) {
   if (addresses.length === 0) return null;
   return (
     <div className="flex gap-2 text-sm">
       <span className="w-14 shrink-0 text-muted-foreground">{label}</span>
-      <span className="min-w-0 flex-1 truncate">{addresses.map(formatAddress).join(", ")}</span>
+      <span className={cn("min-w-0 flex-1 break-words", !full && "line-clamp-3 max-h-16 overflow-hidden")}>
+        {addresses.map(formatAddress).join(", ")}
+      </span>
     </div>
   );
 }
 
 export function MessageHeader({ email }: { email: EmailRecord }) {
   const [expanded, setExpanded] = useState(false);
+  // "Expand all details": Cc/Bcc (and To) unclamped, plus the Message-ID, which is hidden otherwise.
+  const [allDetails, setAllDetails] = useState(false);
+  useEffect(() => setAllDetails(false), [email.id]);
   const from = email.from[0];
 
   return (
@@ -50,17 +61,23 @@ export function MessageHeader({ email }: { email: EmailRecord }) {
 
           {expanded && (
             <div className="space-y-1 rounded-md bg-muted/40 p-2">
-              <AddressLine label="From" addresses={email.from} />
-              <AddressLine label="To" addresses={email.to} />
-              <AddressLine label="Cc" addresses={email.cc} />
-              <AddressLine label="Bcc" addresses={email.bcc} />
-              <AddressLine label="Reply-To" addresses={email.replyTo} />
-              {email.messageId && (
+              <AddressLine label="From" addresses={email.from} full={allDetails} />
+              <AddressLine label="To" addresses={email.to} full={allDetails} />
+              <AddressLine label="Cc" addresses={email.cc} full={allDetails} />
+              <AddressLine label="Bcc" addresses={email.bcc} full={allDetails} />
+              <AddressLine label="Reply-To" addresses={email.replyTo} full={allDetails} />
+              {allDetails && email.messageId && (
                 <div className="flex gap-2 text-sm">
                   <span className="w-14 shrink-0 text-muted-foreground">Message-ID</span>
-                  <span className="min-w-0 flex-1 truncate font-mono text-xs">{email.messageId}</span>
+                  <span className="min-w-0 flex-1 break-all font-mono text-xs">{email.messageId}</span>
                 </div>
               )}
+              <button
+                onClick={() => setAllDetails(v => !v)}
+                className="text-xs text-muted-foreground/80 underline-offset-2 hover:text-foreground hover:underline"
+              >
+                {allDetails ? "Collapse details" : "Expand all details"}
+              </button>
             </div>
           )}
         </div>
