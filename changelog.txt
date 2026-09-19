@@ -7,6 +7,19 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - AI buttons only with skills (c6f4a36)
+--------------------------------------------------
+The AI buttons no longer show as disabled hints: they are simply not there unless the matching skill
+exists, so users who don't want AI aren't nudged to set it up (Settings > AI is the only place it shows).
+- Reading pane toolbar: Summarize and Translate each appear only with their skill (and the separator only
+  if at least one does). The Summary tab appears only with a Summarize skill or an already stored summary;
+  its "Summarize with AI" button only with the skill.
+- Compose: no Refine button without any of the Phrase / Spelling + Grammar / Translate skills, and the menu
+  lists only the ones that exist.
+- Tests: no AI element anywhere without skills, each button only for its own skill, and the Refine menu
+  content. (The old tests for the disabled state were replaced.)
+
+
 2026-09-19 - Summary as a reading tab (c67a377)
 -----------------------------------------------
 The AI summary is now a view of its own next to Text, MD, Plain, Safe HTML and HTML instead of a panel
