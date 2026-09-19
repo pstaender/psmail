@@ -3015,6 +3015,29 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(downloadPosts).toEqual([{ folder: "INBOX" }, { folder: "INBOX" }, { folder: "INBOX" }]); // just the Inboxes, not every folder
     });
 
+    test("in the row the sync button comes before the unread count, and the whole row still opens the combined Inbox", async () => {
+      installMockFetch({ inboxUnread: 3 });
+      await login();
+      const row = screen.getByTitle("Inbox of all accounts");
+      await waitFor(() => expect(row.textContent).toContain("3"));
+
+      const sync = screen.getByTitle("Sync the Inboxes of all accounts");
+      const badge = row.querySelector('[data-slot="badge"]')!;
+      expect(sync.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // sync icon, then the count
+
+      // Clicking the count opens the Inbox (from the Sent list); clicking the sync icon syncs without changing the view.
+      await userEvent.click(screen.getByTitle("Sent of all accounts"));
+      await screen.findByText("Unified outgoing");
+      await userEvent.click(badge);
+      expect(await screen.findByText("Unified hello")).toBeTruthy();
+
+      await userEvent.click(screen.getByTitle("Sent of all accounts"));
+      await screen.findByText("Unified outgoing");
+      await userEvent.click(sync);
+      await waitFor(() => expect(downloadAccounts).toEqual(["me@example.com"]));
+      expect(screen.getByText("Unified outgoing")).toBeTruthy(); // still the Sent list
+    });
+
     test("disabled accounts are left out", async () => {
       installMockFetch({ extraAccounts: [{ email: "off@example.com", disabled: true }] });
       await login();
