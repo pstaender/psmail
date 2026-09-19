@@ -68,7 +68,13 @@ export function AccountRow({
   syncJob: DownloadJob | undefined;
   onSync: (accountEmail: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  // Collapsed until something in the account is selected (no account is, when the app has just loaded and
+  // shows the combined Inbox) — which also means a collapsed account's folders aren't even fetched.
+  const [expanded, setExpanded] = useState(false);
+  const isSelectedAccount = selected?.accountEmail === account.email;
+  useEffect(() => {
+    if (isSelectedAccount) setExpanded(true);
+  }, [isSelectedAccount]);
   const usingShared = sharedFolders.accountEmail === account.email;
   // When AppShell already has this account's folders loaded (it fetches them anyway, for the
   // move-to-folder menus, and keeps unread counts patched on read/flag/delete/move), reuse that

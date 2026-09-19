@@ -214,7 +214,7 @@ export function AppShell() {
     }
   }
 
-  const { jobs: syncJobs, start: startSync } = useSyncJobs(handleSyncComplete);
+  const { jobs: syncJobs, start: startSync } = useSyncJobs(accounts, handleSyncComplete);
 
   // Automatic sync: while the app is open, every `syncIntervalMinutes` each account's Inbox is synced
   // (an account that's still busy with the previous run is skipped by startSync). Only the Inbox, to

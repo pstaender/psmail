@@ -122,9 +122,12 @@ const SYNC_JOB = (status: string) => ({
   id: 1, accountId: 1, folder: null, status, progressCurrent: 0, progressTotal: 0, error: null, startedAt: NOW, finishedAt: null, createdAt: NOW,
 });
 
-// The app opens on the combined Inbox; most tests exercise one account's own folder list, so go there first
-// (the sidebar has two "Inbox" rows: the combined one on top, then the account's folder).
+// The app opens on the combined Inbox with every account collapsed; most tests exercise one account's own
+// folder list, so expand the account and go there first (the sidebar then has two "Inbox" rows: the
+// combined one on top, then the account's folder).
 async function openAccountInbox() {
+  await waitFor(() => expect(screen.getAllByText("me@example.com").length).toBeGreaterThan(0), { timeout: 3000 });
+  if (screen.getAllByText("Inbox").length < 2) await userEvent.click(screen.getAllByText("me@example.com")[0]!);
   await waitFor(() => expect(screen.getAllByText("Inbox").length).toBeGreaterThan(1), { timeout: 3000 });
   await userEvent.click(screen.getAllByText("Inbox")[1]!);
   await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
@@ -186,6 +189,8 @@ function installMockFetch(
     inboxUnread?: number;
     /** The sync job never finishes (GET job stays running at 12/340) — to look at the in-progress UI. */
     syncStaysRunning?: boolean;
+    /** What GET .../downloads (the account's job history) lists: a sync already underway when the page loads. */
+    earlierSyncJob?: "running" | "completed";
     /** Adds a contact from another account to the recipient suggestions. */
     otherAccountContacts?: boolean;
     /** Replaces the combined Inbox's rows (default: one starred message). */
@@ -259,6 +264,10 @@ function installMockFetch(
     if (method === "POST" && path === "/api/accounts/me%40example.com/downloads") {
       downloadPosts.push(init?.body ? JSON.parse(init.body as string) : {});
       return jsonResponse(SYNC_JOB("running"), 202);
+    }
+    if (method === "GET" && path === "/api/accounts/me%40example.com/downloads") {
+      if (!opts.earlierSyncJob) return jsonResponse([]);
+      return jsonResponse([{ ...SYNC_JOB(opts.earlierSyncJob), progressCurrent: 5, progressTotal: 10 }]);
     }
     if (method === "GET" && path === "/api/accounts/me%40example.com/downloads/1") {
       return jsonResponse(opts.syncStaysRunning ? { ...SYNC_JOB("running"), progressCurrent: 12, progressTotal: 340 } : SYNC_JOB("completed"));
@@ -2207,6 +2216,53 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await userEvent.type(await screen.findByLabelText("To"), "al");
       await screen.findAllByRole("option");
       expect(screen.queryByText("From your other accounts")).toBeNull();
+    });
+  });
+
+  describe("initial load", () => {
+    test("accounts start collapsed (nothing is selected yet) and expand when clicked", async () => {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await waitFor(() => expect(screen.getAllByText("me@example.com").length).toBeGreaterThan(0), { timeout: 3000 });
+      await screen.findByText("Unified hello"); // the combined Inbox is showing: no account is selected
+
+      expect(screen.queryByText("Entwürfe")).toBeNull(); // none of the account's folders are shown
+      expect(screen.getAllByText("Inbox")).toHaveLength(1); // only the combined Inbox row
+
+      await userEvent.click(screen.getAllByText("me@example.com")[0]!);
+      expect(await screen.findByText("Entwürfe")).toBeTruthy();
+
+      // And collapse again.
+      await userEvent.click(screen.getAllByText("me@example.com")[0]!);
+      await waitFor(() => expect(screen.queryByText("Entwürfe")).toBeNull());
+    });
+
+    test("a sync that was already running when the page loaded shows its spinner and progress, and is followed to the end", async () => {
+      installMockFetch({ earlierSyncJob: "running", syncStaysRunning: true });
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+
+      // No click on "Sync now": the running job is found in the account's job history.
+      const spinner = await screen.findByTitle("Syncing 12/340…"); // 5/10 at first, then the poll's 12/340
+      expect(spinner.querySelector(".animate-spin")).toBeTruthy();
+    });
+
+    test("when that sync then finishes, the app refreshes like after any sync", async () => {
+      installMockFetch({ earlierSyncJob: "running" }); // GET job answers "completed"
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await waitFor(() => expect(newMailRequests.length).toBeGreaterThan(1), { timeout: 3000 }); // announceNewMail ran: the sync ended
+      await waitFor(() => expect(screen.queryByTitle(/^Syncing/)).toBeNull());
+      expect(screen.getByTitle("Sync now")).toBeTruthy(); // usable again
+    });
+
+    test("a finished earlier job (or none) shows no spinner", async () => {
+      installMockFetch({ earlierSyncJob: "completed" });
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await screen.findByTitle("Sync now");
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(screen.queryByTitle(/^Syncing/)).toBeNull();
     });
   });
 });

@@ -48,7 +48,7 @@ export function AccountTree({
   onSync: (accountEmail: string) => void;
 }) {
   return (
-    <div className="flex h-full flex-col border-r bg-muted/20">
+    <div className="flex h-full flex-col border-r bg-muted/20 overflow-y-auto">
       <div className="flex items-center justify-between gap-2 px-3 py-3">
         <span className="text-sm font-semibold">Accounts</span>
         <Button variant="ghost" size="icon" className="size-6" onClick={onCollapse} title="Collapse accounts">

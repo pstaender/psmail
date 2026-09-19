@@ -12,7 +12,7 @@ const POLL_INTERVAL_MS = 700;
  * click during an automatic run — or two ticks in a row — never launches a second job for an account,
  * and both show the same progress. `onAccountComplete` fires when a job finishes, successfully or not.
  */
-export function useSyncJobs(onAccountComplete: (accountEmail: string) => void) {
+export function useSyncJobs(accounts: { email: string }[], onAccountComplete: (accountEmail: string) => void) {
   const { token } = useAuth();
   const [jobs, setJobs] = useState<Record<string, DownloadJob>>({});
   const running = useRef(new Set<string>());
@@ -56,6 +56,30 @@ export function useSyncJobs(onAccountComplete: (accountEmail: string) => void) {
     },
     [token, finish]
   );
+
+  // A sync started before this page was loaded (an earlier visit, another tab, or the automatic sync of
+  // another browser) may still be running: pick it up so its spinner shows and its end is noticed. Each
+  // account is checked once. (Jobs orphaned by a server restart were already marked failed at startup.)
+  const checkedForRunning = useRef(new Set<string>());
+  const accountKey = accounts.map(a => a.email).join("\n");
+  useEffect(() => {
+    if (!token) return;
+    for (const { email } of accounts) {
+      if (checkedForRunning.current.has(email)) continue;
+      checkedForRunning.current.add(email);
+      api
+        .listDownloadJobs(token, email)
+        .then(list => {
+          const active = list.find(job => job.status === "pending" || job.status === "running");
+          if (!active || running.current.has(email)) return;
+          running.current.add(email);
+          setJobs(prev => ({ ...prev, [email]: active }));
+          poll(email, active.id);
+        })
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, accountKey, poll]);
 
   /** Starts syncing an account (every folder, or just `folder`); a no-op while one is already running for it. `silent` skips the error toast when the job couldn't even be started (used by the automatic sync). */
   const start = useCallback(
