@@ -28,3 +28,25 @@
   display: block !important;
   min-width: 0 !important;
 }
+img[alt="P.S.Mail logo"] {
+  margin: 0 auto;
+}
+
+@media print {
+  #root > div {
+    > section, > header {
+      display: none;
+    }
+    > div.flex {
+      > .shrink-0 {
+        display: none;
+      }
+      > .flex-1 > div {
+        > div:not(.flex-1), [role="tablist"] {
+          display: none;
+        }
+
+      }
+    }
+  }
+}

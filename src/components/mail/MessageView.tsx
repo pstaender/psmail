@@ -12,6 +12,7 @@ export function MessageView({
   preferredView,
   onViewChange,
   onReply,
+  onReplyAll,
   onForward,
   onDelete,
   onMove,
@@ -24,6 +25,7 @@ export function MessageView({
   preferredView: BodyView | null;
   onViewChange: (view: BodyView) => void;
   onReply: () => void;
+  onReplyAll: () => void;
   onForward: () => void;
   onDelete: () => void;
   onMove: (folder: string) => void;
@@ -36,6 +38,7 @@ export function MessageView({
         email={email}
         folders={folders}
         onReply={onReply}
+        onReplyAll={onReplyAll}
         onForward={onForward}
         onDelete={onDelete}
         onMove={onMove}

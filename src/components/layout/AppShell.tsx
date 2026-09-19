@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { AccountTree } from "@/components/sidebar/AccountTree";
 import { SettingsDialog, type SettingsPatch } from "@/components/layout/SettingsDialog";
 import { showNewMailToast } from "@/components/mail/newMailToast";
+import { hasFinePointer } from "@/lib/pointer";
 import { DEFAULT_NOTIFICATION_SOUND, playNotificationSound, showBrowserNotification, type NewMailPreview } from "@/lib/notifications";
 import { EditAccountDialog } from "@/components/sidebar/EditAccountDialog";
 import { ResizeHandle } from "@/components/layout/ResizeHandle";
@@ -37,7 +38,7 @@ import { useResizableWidth } from "@/hooks/useResizableWidth";
 import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import { useAuth } from "@/contexts/AuthContext";
 import { api, type BulkResult, type FolderInfo, type UnifiedKind, type UserSettings } from "@/lib/api";
-import { editDraft, forwardDraft, replyDraft, withSignature } from "@/lib/compose";
+import { editDraft, forwardDraft, replyAllDraft, replyDraft, withSignature } from "@/lib/compose";
 import { resolveSpecialFolder } from "@/lib/folders";
 import type { Account, EmailRecord } from "../../server/types";
 import type { SearchResult } from "../../server/models/search";
@@ -74,6 +75,8 @@ export function AppShell() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   // The reference point a Shift+click range is measured from — the last plain- or Cmd/Ctrl-clicked message.
   const [selectionAnchorId, setSelectionAnchorId] = useState<number | null>(null);
+  // Where the keyboard is in the list (arrow keys move it; with Shift it's the moving end of the selection range).
+  const [cursorId, setCursorId] = useState<number | null>(null);
   const [pendingDeleteAccount, setPendingDeleteAccount] = useState<string | null>(null);
   // Set only when the pending delete is NOT a soft-delete (i.e. it would be permanent) — see
   // requestDelete/willSoftDelete. `count` is just for the confirmation dialog's copy.
@@ -104,9 +107,10 @@ export function AppShell() {
     setPreferredBodyView(view);
     if (token) api.updateSettings(token, { bodyView: view }).then(setSettings).catch(() => {});
   }
-  // A cross-account mailbox (all Inboxes / all Sents) shown instead of one account's folder. Set from
-  // the top of the sidebar, cleared by picking a real folder; a running search takes precedence over it.
-  const [unifiedView, setUnifiedView] = useState<UnifiedKind | null>(null);
+  // A cross-account mailbox (all Inboxes / all Sents) shown instead of one account's folder. The app
+  // opens on the combined Inbox; picking a real folder in the sidebar leaves it, and a running search
+  // takes precedence over it.
+  const [unifiedView, setUnifiedView] = useState<UnifiedKind | null>("inbox");
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
   const {
@@ -299,6 +303,13 @@ export function AppShell() {
         return;
       }
 
+      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        // Only with a mouse-type pointer, outside text fields and open menus/lists (which use the arrows themselves).
+        if (typing || !hasFinePointer() || target?.closest('[role="menu"], [role="listbox"], [role="combobox"]')) return;
+        if (moveListCursor(e.key === "ArrowDown" ? 1 : -1, e.shiftKey)) e.preventDefault();
+        return;
+      }
+
       if (e.key !== "Backspace" && e.key !== "Delete") return;
 
       if (typing) return;
@@ -312,8 +323,54 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", onKeyDown);
   });
 
+  /**
+   * Arrow up/down through the active list: shows the next/previous message (in a folder list, or in
+   * search/combined results). In a folder list, Shift+arrow instead extends the bulk selection from
+   * the anchor to the new position, like Shift+click. Returns whether the key did something.
+   */
+  function moveListCursor(direction: 1 | -1, extend: boolean): boolean {
+    if (showingResults) {
+      if (extend || searchResults.length === 0) return false; // results have no bulk selection
+      const index = searchResults.findIndex(r => r.id === selectedEmailId);
+      const next = index === -1 ? (direction > 0 ? 0 : searchResults.length - 1) : Math.min(Math.max(index + direction, 0), searchResults.length - 1);
+      const result = searchResults[next]!;
+      if (result.id !== selectedEmailId) {
+        selectSearchResult(result);
+        setCursorId(result.id);
+      }
+      return true;
+    }
+
+    if (emails.length === 0) return false;
+    const ids = emails.map(e => e.id);
+    const from = ids.indexOf(cursorId ?? selectionAnchorId ?? selectedEmailId ?? -1);
+    const next = from === -1 ? (direction > 0 ? 0 : ids.length - 1) : Math.min(Math.max(from + direction, 0), ids.length - 1);
+    const nextId = ids[next]!;
+
+    if (extend) {
+      const anchorId = selectionAnchorId ?? selectedEmailId ?? nextId;
+      const anchor = ids.indexOf(anchorId);
+      const [start, end] = anchor <= next ? [anchor, next] : [next, anchor];
+      setSelectedIds(new Set(ids.slice(start, end + 1)));
+      setSelectionAnchorId(anchorId);
+    } else {
+      setSelectedIds(new Set());
+      setSelectedEmailId(nextId);
+      setSelectionAnchorId(nextId);
+    }
+    setCursorId(nextId);
+    return true;
+  }
+
+  // Keep the keyboard cursor's row in view as it moves.
+  useEffect(() => {
+    const id = cursorId ?? selectedEmailId;
+    if (id !== null) document.querySelector(`[data-row-id="${id}"]`)?.scrollIntoView?.({ block: "nearest" });
+  }, [cursorId, selectedEmailId]);
+
   function selectUnified(kind: UnifiedKind) {
     setUnifiedView(kind);
+    setCursorId(null);
     setSearchQuery("");
     setSelectedEmailId(null);
     setSelectedIds(new Set());
@@ -322,6 +379,7 @@ export function AppShell() {
 
   function selectFolder(accountEmail: string, folder: string) {
     setUnifiedView(null);
+    setCursorId(null);
     setSelectedAccountEmail(accountEmail);
     setSelectedFolder(folder);
     setSelectedEmailId(null);
@@ -360,12 +418,14 @@ export function AppShell() {
         return next;
       });
       setSelectionAnchorId(email.id);
+      setCursorId(email.id);
       return;
     }
 
     setSelectedIds(new Set());
     setSelectedEmailId(email.id);
     setSelectionAnchorId(email.id);
+    setCursorId(email.id);
   }
 
   // A search result can belong to a different account/folder than the one currently
@@ -778,6 +838,7 @@ export function AppShell() {
               preferredView={preferredBodyView}
               onViewChange={pickBodyView}
               onReply={() => openCompose(replyDraft(selectedEmail))}
+              onReplyAll={() => openCompose(replyAllDraft(selectedEmail, selectedAccountEmail))}
               onForward={() => openCompose(forwardDraft(selectedEmail))}
               onDelete={requestDelete}
               onMove={handleMove}

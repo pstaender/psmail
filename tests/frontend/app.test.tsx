@@ -87,6 +87,8 @@ const SECOND_EMAIL = {
   from: [{ name: "Bob", address: "bob@example.com" }],
   plainText: "Hi from Bob",
   htmlText: "<p>Hi <b>from</b> Bob</p>",
+  to: [{ address: "me@example.com" }, { name: "Dora", address: "dora@example.com" }],
+  cc: [{ name: "Carl", address: "carl@example.com" }],
   attachmentCount: 1,
 };
 
@@ -119,6 +121,14 @@ const DEFAULT_PATCH = { syncIntervalMinutes: null, combinedInboxIncludesFolders:
 const SYNC_JOB = (status: string) => ({
   id: 1, accountId: 1, folder: null, status, progressCurrent: 0, progressTotal: 0, error: null, startedAt: NOW, finishedAt: null, createdAt: NOW,
 });
+
+// The app opens on the combined Inbox; most tests exercise one account's own folder list, so go there first
+// (the sidebar has two "Inbox" rows: the combined one on top, then the account's folder).
+async function openAccountInbox() {
+  await waitFor(() => expect(screen.getAllByText("Inbox").length).toBeGreaterThan(1), { timeout: 3000 });
+  await userEvent.click(screen.getAllByText("Inbox")[1]!);
+  await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+}
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -168,6 +178,8 @@ function installMockFetch(
     };
     /** What GET /api/unified/inbox/unread reports (the combined Inbox's badge). */
     inboxUnread?: number;
+    /** The sync job never finishes (GET job stays running at 12/340) — to look at the in-progress UI. */
+    syncStaysRunning?: boolean;
     /** What GET /api/unified/inbox/new answers when asked with an afterId (without one it just reports latestId: 100). */
     newMail?: { total: number; messages: Record<string, unknown>[] };
   } = {}
@@ -233,7 +245,9 @@ function installMockFetch(
       downloadPosts.push(init?.body ? JSON.parse(init.body as string) : {});
       return jsonResponse(SYNC_JOB("running"), 202);
     }
-    if (method === "GET" && path === "/api/accounts/me%40example.com/downloads/1") return jsonResponse(SYNC_JOB("completed"));
+    if (method === "GET" && path === "/api/accounts/me%40example.com/downloads/1") {
+      return jsonResponse(opts.syncStaysRunning ? { ...SYNC_JOB("running"), progressCurrent: 12, progressTotal: 340 } : SYNC_JOB("completed"));
+    }
     if (method === "GET" && path === "/api/unified/inbox/new") {
       const afterId = new URL(url, "http://localhost").searchParams.get("afterId");
       newMailRequests.push(afterId);
@@ -379,7 +393,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
     // Main app shell + account tree
     await waitFor(() => expect(screen.getByText("me@example.com")).toBeTruthy(), { timeout: 3000 });
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0));
+    await openAccountInbox();
 
     // Message list
     const messageRow = await screen.findByText("Hello there");
@@ -434,7 +448,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
     // No password prompt ever appeared — went straight to the app shell.
     expect(screen.queryByPlaceholderText("Password")).toBeNull();
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
   });
 
   test("clicking a profile that needs a real password falls through to the password prompt", async () => {
@@ -450,14 +464,14 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.type(passwordField, "secret123");
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
 
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
   });
 
   test("the header hides the username when it's \"default\"", async () => {
     render(<App />);
 
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     // The login screen (the only other place "default" appeared) is gone now, so if this text
     // is still absent, the header itself isn't showing the username either.
@@ -471,7 +485,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.click(await screen.findByText("secure"));
     await userEvent.type(await screen.findByPlaceholderText("Password"), "secret123");
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     expect(screen.getByText("secure")).toBeTruthy();
   });
@@ -482,7 +496,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(await screen.findByText("Hello there"));
     await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(0));
@@ -504,7 +518,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(screen.getByRole("button", { name: /new/i }));
     expect(await screen.findByText("New message")).toBeTruthy();
@@ -522,7 +536,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(screen.getByRole("button", { name: /new/i }));
     const composeDialog = (await screen.findByText("New message")).closest('[role="dialog"]') as HTMLElement;
@@ -537,7 +551,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(screen.getByRole("button", { name: /new/i }));
     expect(await screen.findByText("New message")).toBeTruthy();
@@ -552,7 +566,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     render(<App />);
 
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(screen.getByRole("button", { name: /new/i }));
     expect(await screen.findByText("New message")).toBeTruthy();
@@ -565,7 +579,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     render(<App />);
 
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(screen.getByRole("button", { name: /new/i }));
     expect(await screen.findByText("New message")).toBeTruthy();
@@ -583,7 +597,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(await screen.findByText("Unfinished draft"));
     await waitFor(() => expect(screen.getAllByText("Unfinished draft").length).toBeGreaterThan(0));
@@ -613,7 +627,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     const draftRow = await screen.findByText("Unfinished draft");
     await userEvent.dblClick(draftRow);
@@ -628,7 +642,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     const row = await screen.findByText("Hello there");
     await userEvent.dblClick(row);
@@ -647,7 +661,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     // Open the first message and switch it to HTML.
     await userEvent.click(await screen.findByText("Hello there"));
@@ -674,7 +688,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     render(<App />);
 
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     const searchBox = screen.getByPlaceholderText(/search all mail/i);
     // Focus something else first, so the shortcut moving focus is actually observable.
@@ -691,7 +705,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     const searchBox = screen.getByPlaceholderText(/search all mail/i);
     await userEvent.type(searchBox, "second");
@@ -727,7 +741,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     const firstRow = await screen.findByText("Hello there");
     const secondRow = await screen.findByText("Second message");
@@ -772,7 +786,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     fireEvent.click(await screen.findByText("Third message"), { ctrlKey: true });
     await waitFor(() => expect(screen.getByText("1 selected")).toBeTruthy());
@@ -791,7 +805,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     fireEvent.click(await screen.findByText("Third message"), { ctrlKey: true });
     await waitFor(() => expect(screen.getByText("1 selected")).toBeTruthy());
@@ -811,7 +825,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(await screen.findByText("Third message"));
     await waitFor(() => expect(screen.getAllByText("Third message").length).toBeGreaterThan(0));
@@ -829,7 +843,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(await screen.findByText("Third message"));
     await waitFor(() => expect(screen.getAllByText("Third message").length).toBeGreaterThan(0));
@@ -851,7 +865,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     // Toggle the star directly from the message list, without opening the message — opening
     // it would fire its own (non-rolling-back) mark-as-read PATCH first and muddy the test.
@@ -876,7 +890,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     const firstRow = await screen.findByText("Hello there");
     const secondRow = await screen.findByText("Second message");
@@ -905,7 +919,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     expect(screen.getByText("Accounts")).toBeTruthy();
 
@@ -925,9 +939,8 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
     // The session token was persisted too, so the fresh mount logs back in on its own — no login step here.
     render(<App />);
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    expect(await screen.findByTitle("Show accounts")).toBeTruthy();
     expect(screen.queryByText("Accounts")).toBeNull();
-    expect(screen.getByTitle("Show accounts")).toBeTruthy();
   });
 
   test("resizing the message list column persists across a reload", async () => {
@@ -936,7 +949,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     const handles = document.querySelectorAll('[role="separator"][aria-orientation="vertical"]');
     expect(handles.length).toBe(2); // sidebar|list and list|reading-pane
@@ -952,7 +965,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
     // The session token was persisted too, so the fresh mount logs back in on its own — no login step here.
     render(<App />);
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
     expect(localStorage.getItem("psmail.messageListWidth")).toBe("380");
   });
 
@@ -962,7 +975,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     // No lock icon before the change.
     expect(screen.queryByTitle("Read-only")).toBeNull();
@@ -997,7 +1010,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(screen.getByTitle("More actions"));
     await userEvent.click(screen.getByText("Account settings"));
@@ -1030,7 +1043,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(screen.getByTitle("More actions"));
     await userEvent.click(screen.getByText("Account settings"));
@@ -1067,7 +1080,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(screen.getByTitle("More actions"));
     await userEvent.click(screen.getByText("Account settings"));
@@ -1087,7 +1100,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     // Clicking the profile logs straight in now (an empty password works, so LoginView skips
     // the password prompt entirely) — no separate "Sign in" click needed.
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     // FOLDERS starts with unread: 1, rendered as a badge next to the INBOX row in the sidebar.
     await waitFor(() => expect(document.querySelector('[data-slot="badge"]')?.textContent).toBe("1"));
@@ -1106,7 +1119,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("recipient fields suggest contacts while typing, and accepting one fills in the address", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(screen.getByRole("button", { name: /new/i }));
     const to = (await screen.findByLabelText("To")) as HTMLInputElement;
@@ -1146,6 +1159,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     try {
       render(<App />);
       await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
       await waitFor(() => expect(screen.getAllByText("Generated 0").length).toBeGreaterThan(0), { timeout: 3000 });
       expect(screen.queryByText("Generated 100")).toBeNull();
       expect(pagedRequests[0]).toEqual({ limit: 100, offset: 0 });
@@ -1177,7 +1191,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     installMockFetch({ settings: { bodyView: "md" } });
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     // The stored preference wins over the built-in default (Safe HTML)…
     await userEvent.click(await screen.findByText("Hello there"));
@@ -1192,7 +1206,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("account settings have a Misc tab that saves the account's position", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(screen.getByTitle("More actions"));
     await userEvent.click(screen.getByText("Account settings"));
@@ -1210,7 +1224,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("an unchanged position isn't sent when saving other account settings", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(screen.getByTitle("More actions"));
     await userEvent.click(screen.getByText("Account settings"));
@@ -1223,7 +1237,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("the sidebar starts with a combined Inbox and Sent that list all accounts' mail", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(screen.getByTitle("Inbox of all accounts"));
     expect(await screen.findByText("Unified hello")).toBeTruthy();
@@ -1249,7 +1263,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("message rows with attachments show a paperclip, in folder lists and in the combined Inbox", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     // Only SECOND_EMAIL has attachmentCount: 1.
     await screen.findByText("Second message");
@@ -1262,7 +1276,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     installMockFetch({ inboxUnread: 3 });
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     const combined = () => screen.getByTitle("Inbox of all accounts");
     await waitFor(() => expect(combined().textContent).toContain("3"));
@@ -1277,7 +1291,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("no badge on the combined Inbox when nothing is unread", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
     await waitFor(() => expect(unreadRequests).toBeGreaterThan(0));
     expect(screen.getByTitle("Inbox of all accounts").textContent).toBe("Inbox");
   });
@@ -1285,7 +1299,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("Sync now syncs the whole account (no folder), and the tree refreshes in place instead of reloading", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
     await screen.findByText("Hello there");
     const foldersBefore = folderRequests;
     const unreadBefore = unreadRequests;
@@ -1309,7 +1323,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("starred messages show a star in result lists, and the reading pane shows a star instead of a 'Flagged' badge", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     // The combined Inbox's mock row is starred.
     await userEvent.click(screen.getByTitle("Inbox of all accounts"));
@@ -1330,7 +1344,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     installMockFetch({ settings: { syncIntervalMinutes: 15 } });
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(screen.getByTitle("Settings"));
     const interval = (await screen.findByLabelText("Sync interval (minutes)")) as HTMLInputElement;
@@ -1360,7 +1374,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("an invalid sync interval is rejected in the dialog without saving", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(screen.getByTitle("Settings"));
     const interval = await screen.findByLabelText("Sync interval (minutes)");
@@ -1374,7 +1388,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("toggling the combined-Inbox folders option re-reads the combined Inbox's unread count", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
     await waitFor(() => expect(unreadRequests).toBeGreaterThan(0));
     const before = unreadRequests;
 
@@ -1400,7 +1414,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       installMockFetch({ settings: { syncIntervalMinutes: 3 } });
       render(<App />);
       await userEvent.click(await screen.findByText("default"));
-      await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+      await openAccountInbox();
       await waitFor(() => expect(minuteTimers).toHaveLength(1));
       expect(downloadPosts).toEqual([]); // nothing until the first tick
 
@@ -1411,7 +1425,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       cleanup();
       installMockFetch();
       render(<App />); // still signed in from above
-      await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+      await openAccountInbox();
       expect(minuteTimers).toHaveLength(1); // still just the first render's
     } finally {
       globalThis.setInterval = realSetInterval;
@@ -1421,7 +1435,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("Esc closes the search, like its x button", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     const searchBox = screen.getByPlaceholderText(/search all mail/i) as HTMLInputElement;
     await userEvent.type(searchBox, "second");
@@ -1441,7 +1455,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("Cmd/Ctrl+A selects every message in the list, except while typing in a text field", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
     await screen.findByText("Second message");
 
     // In the search box, select-all keeps its normal meaning (select the text).
@@ -1465,7 +1479,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("Cmd/Ctrl+R replies to the open message; without one it doesn't interfere with the browser", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     // Nothing open: the key isn't handled (the browser would reload).
     (document.body as HTMLElement).focus();
@@ -1484,7 +1498,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("the compose dialog focuses the message editor when To is already filled in (reply), else the To field", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(await screen.findByText("Hello there"));
     await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
@@ -1509,7 +1523,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   test("the star in search/combined lists can be toggled, and is rolled back when the server refuses", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(screen.getByTitle("Sent of all accounts"));
     const sentRow = (await screen.findByText("Unified outgoing")).closest("li")!;
@@ -1530,7 +1544,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     installMockFetch({ failEmailPatch: 10 });
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
 
     await userEvent.click(screen.getByTitle("Inbox of all accounts"));
     const row = (await screen.findByText("Unified hello")).closest("li")!; // starred in the mock
@@ -1594,7 +1608,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     async function loginAndSync(alreadySignedIn = false) {
       render(<App />);
       if (!alreadySignedIn) await userEvent.click(await screen.findByText("default"));
-      await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+      await openAccountInbox();
       await waitFor(() => expect(newMailRequests).toEqual([null])); // the starting point is read on load
       await userEvent.click(screen.getByTitle("Sync now"));
       await waitFor(() => expect(newMailRequests.length).toBeGreaterThan(1));
@@ -1695,7 +1709,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       };
       render(<App />);
       await userEvent.click(await screen.findByText("default"));
-      await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+      await openAccountInbox();
 
       await userEvent.click(screen.getByTitle("Settings"));
       expect((await screen.findByLabelText("Toast sound") as HTMLSelectElement).value).toBe("crystal_clear"); // the default
@@ -1717,7 +1731,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       FakeNotification.permission = "denied";
       render(<App />);
       await userEvent.click(await screen.findByText("default"));
-      await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+      await openAccountInbox();
 
       await userEvent.click(screen.getByTitle("Settings"));
       await userEvent.click(await screen.findByLabelText("Browser notification"));
@@ -1732,7 +1746,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     installMockFetch({ settings: { bodyView: "md" } });
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
-    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await openAccountInbox();
     const isTabSelected = (name: string) => screen.getByRole("tab", { name }).getAttribute("aria-selected") === "true";
 
     await userEvent.click(await screen.findByText("Hello there"));
@@ -1761,5 +1775,146 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(document.querySelector(".bg-primary\\/10")).toBeNull();
     // Centered above the title, in the card header.
     expect(logo.closest('[data-slot="card-header"]')!.textContent).toContain("P.S.Mail");
+  });
+
+  test("sync progress is a tooltip on the spinner, not a block under the account", async () => {
+    installMockFetch({ syncStaysRunning: true });
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+
+    await userEvent.click(screen.getByTitle("Sync now"));
+    const spinner = await screen.findByTitle("Syncing 12/340…");
+    expect(spinner.querySelector(".animate-spin")).toBeTruthy();
+    expect(screen.queryByTitle("Sync now")).toBeNull(); // it's the progress tooltip now, not the button hint
+    expect(screen.queryByText(/^Syncing/)).toBeNull(); // no extra text block
+  });
+
+  test("Reply all appears only after the pointer or focus reaches Reply, and replies to everyone", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+
+    await userEvent.click(await screen.findByText("Second message"));
+    await waitFor(() => expect(screen.getAllByText("Second message").length).toBeGreaterThan(1));
+    expect(screen.queryByRole("button", { name: /reply all/i })).toBeNull(); // not shown up front
+
+    await userEvent.hover(screen.getByRole("button", { name: /^reply$/i }));
+    const replyAll = await screen.findByRole("button", { name: /reply all/i });
+    await userEvent.click(replyAll);
+
+    const dialog = (await screen.findByText("New message")).closest('[role="dialog"]') as HTMLElement;
+    expect((within(dialog).getByLabelText("To") as HTMLInputElement).value).toBe("Bob <bob@example.com>, Dora <dora@example.com>");
+    expect((within(dialog).getByLabelText("Cc") as HTMLInputElement).value).toBe("Carl <carl@example.com>");
+    expect((within(dialog).getByLabelText("Subject") as HTMLInputElement).value).toBe("Re: Second message");
+  });
+
+  test("keyboard focus on Reply reveals Reply all too, and it hides again for the next message", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+
+    await userEvent.click(await screen.findByText("Second message"));
+    await waitFor(() => expect(screen.getAllByText("Second message").length).toBeGreaterThan(1));
+    act(() => screen.getByRole("button", { name: /^reply$/i }).focus());
+    expect(await screen.findByRole("button", { name: /reply all/i })).toBeTruthy();
+
+    await userEvent.click(screen.getByText("Third message"));
+    await waitFor(() => expect(screen.getAllByText("Third message").length).toBeGreaterThan(1));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /reply all/i })).toBeNull());
+  });
+
+  test("the app opens on the combined Inbox", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+
+    expect(await screen.findByText("Inbox · all accounts")).toBeTruthy();
+    expect(await screen.findByText("Unified hello")).toBeTruthy(); // the combined list, no click needed
+  });
+
+  describe("arrow keys in the message list", () => {
+    const originalMatchMedia = window.matchMedia;
+    function setPointer(fine: boolean) {
+      window.matchMedia = ((query: string) => ({ matches: fine && query.includes("fine"), media: query, addEventListener() {}, removeEventListener() {} })) as never;
+    }
+    afterEach(() => {
+      window.matchMedia = originalMatchMedia;
+    });
+
+    async function openList() {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+      await screen.findByText("Second message");
+      (document.body as HTMLElement).focus();
+    }
+    const isOpen = (subject: string) => screen.getAllByText(subject).length > 1; // in the list and in the reading pane
+
+    test("Down/Up show the next/previous message", async () => {
+      setPointer(true);
+      await openList();
+
+      await userEvent.keyboard("{ArrowDown}");
+      await waitFor(() => expect(isOpen("Hello there")).toBe(true)); // nothing was open: the first one
+      await userEvent.keyboard("{ArrowDown}");
+      await waitFor(() => expect(isOpen("Second message")).toBe(true));
+      await userEvent.keyboard("{ArrowDown}");
+      await waitFor(() => expect(isOpen("Third message")).toBe(true));
+      await userEvent.keyboard("{ArrowUp}");
+      await waitFor(() => expect(isOpen("Second message")).toBe(true));
+      expect(isOpen("Third message")).toBe(false);
+    });
+
+    test("Shift+arrows select a range for the bulk actions, and a plain arrow collapses it again", async () => {
+      setPointer(true);
+      await openList();
+      await userEvent.click(screen.getByText("Hello there"));
+      await waitFor(() => expect(isOpen("Hello there")).toBe(true));
+
+      await userEvent.keyboard("{Shift>}{ArrowDown}{/Shift}");
+      await waitFor(() => expect(screen.getByText("2 selected")).toBeTruthy());
+      await userEvent.keyboard("{Shift>}{ArrowDown}{/Shift}");
+      await waitFor(() => expect(screen.getByText("3 selected")).toBeTruthy());
+      await userEvent.keyboard("{Shift>}{ArrowUp}{/Shift}");
+      await waitFor(() => expect(screen.getByText("2 selected")).toBeTruthy());
+
+      await userEvent.keyboard("{ArrowDown}");
+      await waitFor(() => expect(screen.queryByText(/\d+ selected/)).toBeNull());
+      await waitFor(() => expect(isOpen("Third message")).toBe(true)); // from the cursor (2nd) one further
+    });
+
+    test("in search/combined results the arrows move through the results", async () => {
+      setPointer(true);
+      await openList();
+      await userEvent.click(screen.getByTitle("Sent of all accounts"));
+      await screen.findByText("Unified outgoing");
+      await userEvent.click(screen.getByTitle("Inbox of all accounts"));
+      await screen.findByText("Unified hello");
+
+      await userEvent.keyboard("{ArrowDown}");
+      await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(0)); // message 10 opened
+      expect(screen.getByText("Inbox · all accounts")).toBeTruthy(); // still in the combined list
+    });
+
+    test("nothing happens while typing, in a dialog, or without a mouse-type pointer", async () => {
+      setPointer(true);
+      await openList();
+
+      await userEvent.click(screen.getByPlaceholderText(/search all mail/i));
+      await userEvent.keyboard("{ArrowDown}");
+      expect(isOpen("Hello there")).toBe(false);
+
+      (document.body as HTMLElement).focus();
+      setPointer(false);
+      await userEvent.keyboard("{ArrowDown}");
+      expect(isOpen("Hello there")).toBe(false);
+
+      setPointer(true);
+      await userEvent.click(screen.getByRole("button", { name: /new/i }));
+      await screen.findByText("New message");
+      (document.body as HTMLElement).focus();
+      await userEvent.keyboard("{ArrowDown}");
+      expect(isOpen("Hello there")).toBe(false);
+    });
   });
 });

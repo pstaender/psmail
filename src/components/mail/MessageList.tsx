@@ -77,7 +77,7 @@ export function MessageList({
     <ScrollArea className="h-full">
       <ul className="divide-y">
         {emails.map(email => (
-          <li key={email.id}>
+          <li key={email.id} data-row-id={email.id}>
             <button
               onClick={e => onSelect(email, e)}
               onDoubleClick={() => email.isDraft && onEditDraft(email)}

@@ -77,6 +77,9 @@ export function AccountRow({
   const { folders, loading, error, refresh } = usingShared ? sharedFolders : own;
   const job = syncJob;
   const isRunning = job?.status === "pending" || job?.status === "running";
+  const syncLabel = job
+    ? `Syncing${job.progressTotal > 0 ? ` ${job.progressCurrent}/${job.progressTotal}` : job.progressCurrent > 0 ? ` #${job.progressCurrent}` : ""}…`
+    : "Syncing…";
 
   // When a sync ends, re-read this account's folder counts (in place — see useFolders). Keyed on the
   // job reaching a finished state rather than on "was running" so a sync too quick to ever render as
@@ -103,16 +106,19 @@ export function AccountRow({
           </button>
         </CollapsibleTrigger>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-6 shrink-0 opacity-0 group-hover:opacity-100"
-          disabled={isRunning}
-          title="Sync now"
-          onClick={() => onSync(account.email)}
-        >
-          {isRunning ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
-        </Button>
+        {/* While syncing, the progress is a tooltip on the spinner (title on a wrapper: a disabled button gets no hover events). */}
+        <span title={isRunning ? syncLabel : undefined} className={cn("shrink-0", isRunning && "cursor-progress")}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("size-6", isRunning ? "pointer-events-none opacity-100" : "opacity-0 group-hover:opacity-100")}
+            disabled={isRunning}
+            title={isRunning ? undefined : "Sync now"}
+            onClick={() => onSync(account.email)}
+          >
+            {isRunning ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+          </Button>
+        </span>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -135,12 +141,6 @@ export function AccountRow({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-
-      {isRunning && job && (
-        <p className="pl-8 text-xs text-muted-foreground">
-          Syncing{(job.progressTotal > 0 ? ` ${job.progressCurrent}/${job.progressTotal}` : (job.progressCurrent > 0 ? ` #${job.progressCurrent}` : ''))}…
-        </p>
-      )}
 
       <CollapsibleContent className="pl-4">
         {/* Only the first load blanks the tree; a refresh (e.g. after a sync) keeps the folders on screen. */}

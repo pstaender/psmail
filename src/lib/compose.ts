@@ -1,7 +1,17 @@
 import { formatAddressList } from "./addresses";
 import { formatFullDate } from "./time";
-import type { EmailRecord } from "../server/types";
+import type { EmailAddress, EmailRecord } from "../server/types";
 import type { ComposeDraft } from "@/components/mail/ComposeDialog";
+
+function dedupeAddresses(addresses: EmailAddress[], exclude: Set<string>): EmailAddress[] {
+  const seen = new Set(exclude);
+  return addresses.filter(a => {
+    const key = a.address.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 export function replyDraft(email: EmailRecord): ComposeDraft {
   const replyTo = email.replyTo.length > 0 ? email.replyTo : email.from;
@@ -20,6 +30,18 @@ export function replyDraft(email: EmailRecord): ComposeDraft {
     quoted,
     inReplyTo: email.messageId,
   };
+}
+
+/**
+ * Reply to everyone: the sender (or Reply-To) and the original To recipients go in To, the original Cc
+ * recipients in Cc — minus the account's own address and any duplicates (an address already in To isn't
+ * repeated in Cc). Subject, quote and threading are the same as a plain reply.
+ */
+export function replyAllDraft(email: EmailRecord, ownAddress: string): ComposeDraft {
+  const own = new Set([ownAddress.toLowerCase()]);
+  const to = dedupeAddresses([...(email.replyTo.length > 0 ? email.replyTo : email.from), ...email.to], own);
+  const cc = dedupeAddresses(email.cc, new Set([...own, ...to.map(a => a.address.toLowerCase())]));
+  return { ...replyDraft(email), to: formatAddressList(to), cc: formatAddressList(cc) };
 }
 
 export function forwardDraft(email: EmailRecord): ComposeDraft {

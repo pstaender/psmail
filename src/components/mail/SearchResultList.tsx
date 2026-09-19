@@ -70,7 +70,7 @@ export function SearchResultList({
     <ScrollArea className="h-full">
       <ul className="divide-y">
         {results.map(result => (
-          <li key={`${result.accountEmail}:${result.id}`}>
+          <li key={`${result.accountEmail}:${result.id}`} data-row-id={result.id}>
             <button
               onClick={() => onSelect(result)}
               className={cn(
