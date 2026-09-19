@@ -7,6 +7,22 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Summary as a reading tab (c67a377)
+-----------------------------------------------
+The AI summary is now a view of its own next to Text, MD, Plain, Safe HTML and HTML instead of a panel
+above the message: a "Summary" tab, last in the row (after HTML and, when present, Translation), with the
+sparkles icon that marks it as an AI feature. The Translation tab got the translate icon for the same
+reason.
+- The tab shows the summary and the category chips, and a button "Summarize with AI" (or "Summarize
+  again" once there is one). Before a summary exists it says so.
+- It is offered whenever a Summarize skill exists (so it can make the summary itself) or a summary/labels
+  are already stored; without either it isn't there. The toolbar's Summarize button still works and now
+  switches to the Summary tab with the result. Like Translation, opening it is transient and never stored
+  as your preferred view.
+- Tests: position and icon, offered only with a skill, making the summary from the tab and from the
+  toolbar, and no stored setting.
+
+
 2026-09-19 - AI: summarize, categorize, translate, refine (acd1c9d)
 -----------------------------------------------------------------
 Settings has a new "AI" tab (between Notifications and Credentials).
