@@ -132,7 +132,17 @@ export function ComposeDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-xl lg:max-w-[50rem]">
+      <DialogContent
+        className="flex max-h-[85vh] flex-col sm:max-w-xl lg:max-w-[50rem]"
+        // A reply arrives with the recipient already filled in, so the cursor belongs in the message,
+        // not in the To field Radix would focus by default.
+        onOpenAutoFocus={e => {
+          if (initial?.to) {
+            e.preventDefault();
+            editorRef.current?.focus();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit draft" : "New message"}</DialogTitle>
         </DialogHeader>

@@ -1451,4 +1451,29 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     const composeDialog = (await screen.findByText("New message")).closest('[role="dialog"]') as HTMLElement;
     expect((within(composeDialog).getByLabelText("Subject") as HTMLInputElement).value).toBe("Re: Hello there");
   });
+
+  test("the compose dialog focuses the message editor when To is already filled in (reply), else the To field", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(await screen.findByText("Hello there"));
+    await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+    await userEvent.click(screen.getByRole("button", { name: /reply/i }));
+
+    const dialog = (await screen.findByText("New message")).closest('[role="dialog"]') as HTMLElement;
+    await waitFor(() => {
+      const editor = dialog.querySelector(".psmail-markdown-editor .TinyMDE");
+      expect(editor).toBeTruthy();
+      expect(document.activeElement).toBe(editor);
+    });
+    expect((within(dialog).getByLabelText("To") as HTMLInputElement).value).toContain("alice@example.com");
+
+    // A brand-new message has no recipient yet, so the cursor starts in To.
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByText("New message")).toBeNull());
+    await userEvent.click(screen.getByRole("button", { name: /new/i }));
+    const fresh = await screen.findByLabelText("To");
+    await waitFor(() => expect(document.activeElement).toBe(fresh));
+  });
 });
