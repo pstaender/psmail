@@ -44,6 +44,12 @@ function getOwnedEmail(db: Database, emailId: number, accountId: number) {
   return row;
 }
 
+function contentDisposition(filename: string): string {
+  const fallback = filename.replace(/[^\x20-\x7e]|["\\%]/g, "_");
+  const encoded = encodeURIComponent(filename).replace(/['()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
 /**
  * A local change (flag/move/delete) is only pushed to the IMAP server when the account isn't
  * read-only AND the message actually came from that server in the first place — a draft, or a
@@ -475,7 +481,7 @@ export function emailsRoutes(db: Database) {
         return new Response(file, {
           headers: {
             "Content-Type": attachment.content_type ?? "application/octet-stream",
-            "Content-Disposition": `attachment; filename="${attachment.filename.replace(/"/g, "")}"`,
+            "Content-Disposition": contentDisposition(attachment.filename),
           },
         });
       }),
