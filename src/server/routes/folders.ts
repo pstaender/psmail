@@ -1,8 +1,9 @@
 import type { Database } from "bun:sqlite";
-import { decryptAccountCredentials, learnSpecialFolders } from "../models/accounts";
+import { decryptAccountCredentials, getFoldersCache, learnSpecialFolders, setFoldersCache, type AccountRow } from "../models/accounts";
 import { getFolderCounts, type FolderCount } from "../models/emails";
 import { json, requireAuth, withErrorHandling } from "../http";
-import { listFolders, withImapClient, type ImapFolder } from "../services/imap";
+import { describeImapError, listFolders, withImapClient, type ImapFolder } from "../services/imap";
+import { ApiError } from "../types";
 import { getOwnedAccountByEmailParam } from "./accounts";
 
 export interface FolderWithCounts extends ImapFolder {
@@ -48,10 +49,58 @@ export function mergeFolderCounts(liveFolders: ImapFolder[], localCounts: Folder
   return merged;
 }
 
+const LIVE_TIMEOUT_MS = 90_000;
+
+/** Listings currently running, per account: concurrent requests share one IMAP connection instead of opening one each. */
+const inflight = new Map<number, Promise<ImapFolder[]>>();
+
+/** Reads the account's folder list from its IMAP server and remembers it (see the cache in GET below). */
+function listLive(db: Database, account: AccountRow, encryptionKey: Buffer): Promise<ImapFolder[]> {
+  const running = inflight.get(account.id);
+  if (running) return running;
+
+  const attempt = (async () => {
+    const { imapPassword } = decryptAccountCredentials(account, encryptionKey);
+    const started = Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const folders = await Promise.race([
+        withImapClient(
+          {
+            host: account.imap_host,
+            port: account.imap_port,
+            secure: !!account.imap_secure,
+            username: account.imap_username,
+            password: imapPassword,
+          },
+          client => listFolders(client)
+        ),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`no answer within ${LIVE_TIMEOUT_MS / 1000} s`)), LIVE_TIMEOUT_MS);
+        }),
+      ]);
+      if (process.env.NODE_ENV !== "test") console.log(`[folders] ${account.email}: ${folders.length} folders from ${account.imap_host} in ${Date.now() - started} ms`);
+      learnSpecialFolders(db, account.id, folders);
+      setFoldersCache(db, account.id, folders);
+      return folders;
+    } catch (error) {
+      if (process.env.NODE_ENV !== "test") console.error(`[folders] ${account.email}: listing failed after ${Date.now() - started} ms:`, error);
+      throw new ApiError(502, `Couldn't read the folders of ${account.email} from ${account.imap_host}: ${describeImapError(error)}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  })().finally(() => inflight.delete(account.id));
+
+  inflight.set(account.id, attempt);
+  return attempt;
+}
+
 /**
- * Folder structure is read live from IMAP (so newly-created remote folders
- * show up even before a sync), merged with local message counts from
- * whatever has already been downloaded.
+ * The account's folders with local message counts. The folder structure comes from IMAP, which can be slow (Gmail
+ * sometimes needs many seconds), so the last live listing is kept: a plain request is answered from that at once
+ * — with counts read fresh from the local database — and only `?live=1` (what the web client asks for in the
+ * background after showing the cached tree) talks to the server. With no cache yet, even a plain request has to
+ * go live. A failing live listing is a 502 with the server's reason, never a hang.
  */
 export function foldersRoutes(db: Database) {
   return {
@@ -62,22 +111,11 @@ export function foldersRoutes(db: Database) {
         // A disabled account makes no connections: its folders are just the ones its stored mail is in.
         if (account.disabled) return json(mergeFolderCounts([], getFolderCounts(db, account.id)));
 
-        const { imapPassword } = decryptAccountCredentials(account, encryptionKey);
+        const live = new URL(req.url).searchParams.get("live") === "1";
+        const cached = getFoldersCache<ImapFolder>(db, account.id);
+        const folders = !live && cached ? cached : await listLive(db, account, encryptionKey);
 
-        const folders = await withImapClient(
-          {
-            host: account.imap_host,
-            port: account.imap_port,
-            secure: !!account.imap_secure,
-            username: account.imap_username,
-            password: imapPassword,
-          },
-          client => listFolders(client)
-        );
-
-        learnSpecialFolders(db, account.id, folders);
-
-        return json(mergeFolderCounts(folders, getFolderCounts(db, account.id)));
+        return json(mergeFolderCounts(folders, getFolderCounts(db, account.id)), { headers: { "x-folders-source": !live && cached ? "cache" : "live" } });
       }),
     },
   };

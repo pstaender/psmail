@@ -434,3 +434,17 @@ describe("canPushToImap", () => {
     expect(canPushToImap(baseAccount, null)).toBe(false);
   });
 });
+
+describe("describeImapError", () => {
+  test("includes what the server said before hanging up, with a hint when it is throttling the account", async () => {
+    const { describeImapError } = await import("../../src/server/services/imap");
+    const closed = Object.assign(new Error("Unexpected close"), { code: "ClosedAfterConnectTLS", reason: "Account exceeded command or bandwidth limits." });
+    const text = describeImapError(closed);
+    expect(text).toContain("Unexpected close");
+    expect(text).toContain('server said: "Account exceeded command or bandwidth limits."');
+    expect(text).toContain("throttling this account");
+
+    expect(describeImapError(Object.assign(new Error("Command failed"), { responseText: "NO nope" }))).toBe('Command failed (response="NO nope")');
+    expect(describeImapError("plain")).toBe("plain");
+  });
+});

@@ -167,6 +167,7 @@ const aiRequests: [string, string, any][] = [];
 const emailPatches: string[] = [];
 const bulkRequests: { account: string; method: string; move: string | null; body: Record<string, unknown> }[] = [];
 let folderRequests = 0;
+let liveFolderRequests = 0;
 let unreadRequests = 0;
 // The afterId (or null) of every GET /api/unified/inbox/new call.
 const newMailRequests: (string | null)[] = [];
@@ -195,6 +196,8 @@ function installMockFetch(
     inboxUnread?: number;
     /** The sync job never finishes (GET job stays running at 12/340) — to look at the in-progress UI. */
     syncStaysRunning?: boolean;
+    /** What GET .../folders?live=1 (the slow IMAP read) answers: a folder list, or "fail" for a 502. Default: the same as the cached list. */
+    liveFolders?: Record<string, unknown>[] | "fail";
     /** Categories the user has AI skills for (all on one provider); they show up in GET /api/ai/skills. */
     aiSkillCategories?: string[];
     /** Provider records GET /api/ai/apis starts with. */
@@ -238,6 +241,7 @@ function installMockFetch(
   });
   contactRequests.length = 0;
   folderRequests = 0;
+  liveFolderRequests = 0;
   unreadRequests = 0;
   newMailRequests.length = 0;
   folderDelayMs = 0;
@@ -278,6 +282,15 @@ function installMockFetch(
     if (method === "POST" && path === "/api/accounts/me%40example.com/imap-capabilities") {
       currentAccount = { ...currentAccount, supportsUidPlus: opts.uidPlusSupported ?? true };
       return jsonResponse(currentAccount);
+    }
+    if (method === "GET" && path === "/api/accounts/me%40example.com/folders" && url.includes("live=1")) {
+      liveFolderRequests += 1;
+      if (opts.liveFolders === "fail") return jsonResponse({ error: "Couldn't read the folders of me@example.com from imap.example.com: slow" }, 502);
+      if (opts.liveFolders) {
+        await new Promise(resolve => setTimeout(resolve, 150)); // IMAP takes its time
+        return jsonResponse(opts.liveFolders);
+      }
+      return jsonResponse(FOLDERS);
     }
     if (method === "GET" && path === "/api/accounts/me%40example.com/folders") {
       folderRequests += 1;
@@ -2895,6 +2908,50 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       } finally {
         globalThis.setInterval = realSetInterval;
       }
+    });
+  });
+
+  describe("folder tree loading", () => {
+    async function openTree() {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await waitFor(() => expect(screen.getAllByText("me@example.com").length).toBeGreaterThan(0), { timeout: 3000 });
+      await userEvent.click(screen.getAllByText("me@example.com")[0]!);
+    }
+
+    test("the remembered folder list shows at once; the slow live read then adds what changed", async () => {
+      const withNew = [...FOLDERS, { path: "Neu", name: "Neu", delimiter: "/", specialUse: null, flags: [], total: 0, unread: 0 }];
+      installMockFetch({ liveFolders: withNew });
+      await openTree();
+
+      expect(await screen.findByText("Entwürfe")).toBeTruthy(); // from the cache, not waiting for IMAP
+      expect(screen.queryByText("Neu")).toBeNull();
+      expect(await screen.findByText("Neu")).toBeTruthy(); // the live result arrives afterwards
+      expect(liveFolderRequests).toBeGreaterThan(0);
+    });
+
+    test("when the live read fails, the tree that is showing stays and no error replaces it", async () => {
+      installMockFetch({ liveFolders: "fail" });
+      await openTree();
+
+      expect(await screen.findByText("Entwürfe")).toBeTruthy();
+      await waitFor(() => expect(liveFolderRequests).toBeGreaterThan(0));
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(screen.getByText("Entwürfe")).toBeTruthy();
+      expect(screen.queryByText(/Couldn't read the folders/)).toBeNull();
+    });
+
+    test("refreshing counts (after a sync, say) doesn't ask IMAP again", async () => {
+      installMockFetch();
+      await openTree();
+      await screen.findByText("Entwürfe");
+      await waitFor(() => expect(liveFolderRequests).toBe(1)); // the one background read on load
+      const before = liveFolderRequests;
+
+      await userEvent.click(screen.getByTitle("Sync now"));
+      await waitFor(() => expect(folderRequests).toBeGreaterThan(1)); // the post-sync refresh…
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(liveFolderRequests).toBe(before); // …used the cache, not another live read
     });
   });
 });

@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS accounts (
   position INTEGER NOT NULL DEFAULT 0,
   sent_folder TEXT,
   special_folders TEXT,
+  -- The last live folder listing (JSON), so the folder tree can be shown at once without an IMAP connection.
+  folders_cache TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   UNIQUE(user_id, email)

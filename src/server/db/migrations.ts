@@ -17,6 +17,7 @@ const MIGRATIONS = [
   "ALTER TABLE accounts ADD COLUMN position INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE accounts ADD COLUMN sent_folder TEXT",
   "ALTER TABLE accounts ADD COLUMN special_folders TEXT",
+  "ALTER TABLE accounts ADD COLUMN folders_cache TEXT",
   "ALTER TABLE emails ADD COLUMN taxonomy_list TEXT",
   "ALTER TABLE emails ADD COLUMN ai_summary TEXT",
   "ALTER TABLE emails ADD COLUMN translated_text TEXT",

@@ -114,8 +114,9 @@ export const api = {
   checkImapCapabilities: (token: string, email: string) =>
     request<Account>("POST", `/api/accounts/${enc(email)}/imap-capabilities`, { token }),
 
-  listFolders: (token: string, accountEmail: string) =>
-    request<FolderInfo[]>("GET", `/api/accounts/${enc(accountEmail)}/folders`, { token }),
+  /** Without `live`: the server's last known folder list (instant; counts are always fresh). With it: re-read from IMAP, which can be slow. */
+  listFolders: (token: string, accountEmail: string, opts: { live?: boolean } = {}) =>
+    request<FolderInfo[]>("GET", `/api/accounts/${enc(accountEmail)}/folders${opts.live ? "?live=1" : ""}`, { token }),
 
   listEmails: (token: string, accountEmail: string, folder: string, opts: { limit?: number; offset?: number } = {}) => {
     const params = new URLSearchParams({ folder });

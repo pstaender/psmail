@@ -37,9 +37,27 @@ export function useFolders(accountEmail: string | null) {
     }
   }, [token, accountEmail]);
 
+  // Showing an account's folders is two steps: the server's remembered list (instant) and then, in the background,
+  // a live read from IMAP that picks up folders created or renamed elsewhere. IMAP can be very slow (Gmail took
+  // 50 s), so nothing waits for it; if it fails, what's on screen stays — the error only matters when there is
+  // nothing to show at all.
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    let cancelled = false;
+    refresh().then(() => {
+      if (cancelled || !token || !accountEmail) return;
+      api
+        .listFolders(token, accountEmail, { live: true })
+        .then(live => {
+          if (!cancelled && loadedFor.current === accountEmail) setFolders(live);
+        })
+        .catch(err => {
+          if (!cancelled && loadedFor.current === accountEmail) setError(prev => prev ?? (err instanceof Error ? err.message : String(err)));
+        });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [refresh, token, accountEmail]);
 
   /**
    * Optimistically nudges a folder's total/unread counts by a known delta, instead of waiting

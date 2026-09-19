@@ -43,6 +43,10 @@ export async function startServer() {
   const server = Bun.serve({
     port: settings.port,
     routes,
+    // Bun closes a connection whose response hasn't started after 10 s — silently, so the client just sees an
+    // empty reply. Requests that talk to IMAP (folder lists, capability checks, bulk actions on a big mailbox) can
+    // take longer than that, so allow much more; the IMAP calls have their own, shorter timeouts.
+    idleTimeout: 120,
     development: process.env.NODE_ENV !== "production" && {
       hmr: true,
       console: true,

@@ -29,6 +29,7 @@ interface AccountRow {
   sent_folder: string | null;
   /** JSON `{drafts?, trash?, junk?, archive?}` of the other special folders' real paths, learned the same way — used to keep them out of the combined Inbox. */
   special_folders: string | null;
+  folders_cache: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -359,4 +360,20 @@ export function assertAccountEnabled(account: { email: string; disabled: number 
 /** Fresh check for long-running work (a sync) that must stop when the account gets disabled meanwhile. */
 export function isAccountDisabled(db: Database, id: number): boolean {
   return !!db.query<{ disabled: number }, [number]>("SELECT disabled FROM accounts WHERE id = ?").get(id)?.disabled;
+}
+
+/** The last live folder listing stored for the account (see setFoldersCache), or null if there was none yet. */
+export function getFoldersCache<T>(db: Database, id: number): T[] | null {
+  const row = db.query<{ folders_cache: string | null }, [number]>("SELECT folders_cache FROM accounts WHERE id = ?").get(id);
+  if (!row?.folders_cache) return null;
+  try {
+    const parsed = JSON.parse(row.folders_cache);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setFoldersCache(db: Database, id: number, folders: unknown[]): void {
+  db.query("UPDATE accounts SET folders_cache = ? WHERE id = ?").run(JSON.stringify(folders), id);
 }

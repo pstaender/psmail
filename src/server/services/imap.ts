@@ -9,13 +9,41 @@ export interface ImapCredentials {
 }
 
 export function createImapClient(creds: ImapCredentials): ImapFlow {
-  return new ImapFlow({
+  const client = new ImapFlow({
     host: creds.host,
     port: creds.port,
     secure: creds.secure,
     auth: { user: creds.username, pass: creds.password },
     logger: false,
+    // Fail with an error instead of waiting for imapflow's defaults (90 s to connect); a slow-but-working server
+    // still has the socket timeout (5 min) between commands.
+    connectionTimeout: 30_000,
+    greetingTimeout: 20_000,
   });
+  // imapflow emits "error" for a connection that breaks between commands; an EventEmitter without a listener turns
+  // that into an uncaught exception that can take a whole request down with it. The pending command's own promise
+  // already rejects with the same error, which is what callers handle.
+  client.on("error", () => {});
+  return client;
+}
+
+/** imapflow errors carry the server's actual complaint in fields beyond `message` (which is often just "Command failed"). */
+export function describeImapError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const extra = error as Error & { code?: string; reason?: string; responseStatus?: string; responseText?: string; serverResponseCode?: string; authenticationFailed?: boolean };
+  const details = [
+    extra.code && `code=${extra.code}`,
+    // What the server said just before hanging up ("Account exceeded command or bandwidth limits."): with a bare
+    // "Unexpected close" as the message, this is the only place the actual reason is.
+    extra.reason && `server said: "${extra.reason}"`,
+    extra.responseStatus && `status=${extra.responseStatus}`,
+    extra.serverResponseCode && `serverCode=${extra.serverResponseCode}`,
+    extra.responseText && `response="${extra.responseText}"`,
+    extra.authenticationFailed && "authenticationFailed",
+  ].filter(Boolean);
+  const text = details.length > 0 ? `${error.message} (${details.join(", ")})` : error.message;
+  // Gmail and others throttle accounts that download a lot; it clears by itself after a while.
+  return /exceeded .*limit/i.test(extra.reason ?? "") ? `${text} — the mail server is throttling this account; it usually lifts after some hours without heavy use` : text;
 }
 
 /**

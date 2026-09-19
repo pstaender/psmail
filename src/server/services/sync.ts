@@ -7,6 +7,7 @@ import { isAccountDisabled, learnSpecialFolders, type AccountRow } from "../mode
 import { isUidDeleted, listDeletedUids, maxDeletedUid, removeDeletedUids } from "../models/tombstones";
 import {
   fetchNewMessages,
+  describeImapError,
   listFolders,
   type ImapFolder,
   type FetchHooks,
@@ -24,19 +25,7 @@ function syncLog(message: string, ...rest: unknown[]) {
   console.log(`[sync ${new Date().toISOString()}] ${message}`, ...rest);
 }
 
-/** imapflow errors carry the server's actual complaint in fields beyond `message` (which is often just "Command failed"). */
-function describeError(error: unknown): string {
-  if (!(error instanceof Error)) return String(error);
-  const extra = error as Error & { code?: string; responseStatus?: string; responseText?: string; serverResponseCode?: string; authenticationFailed?: boolean };
-  const details = [
-    extra.code && `code=${extra.code}`,
-    extra.responseStatus && `status=${extra.responseStatus}`,
-    extra.serverResponseCode && `serverCode=${extra.serverResponseCode}`,
-    extra.responseText && `response="${extra.responseText}"`,
-    extra.authenticationFailed && "authenticationFailed",
-  ].filter(Boolean);
-  return details.length > 0 ? `${error.message} (${details.join(", ")})` : error.message;
-}
+const describeError = describeImapError;
 
 export interface SyncProgress {
   current: number;
