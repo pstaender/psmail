@@ -3,7 +3,7 @@
 
 Uses react/shadcn UI + Bun API server (IMAP/SMTP sync, sqlite storage, CLI).
 
-<img width="2700" height="2058" alt="desktop-frame-export" src="https://github.com/user-attachments/assets/4d790bd2-04dd-4808-85f6-0ff9994fe261" />
+<img width="2700" height="2130" alt="desktop-frame-export (2)" src="https://github.com/user-attachments/assets/9f2ea863-71c9-4e35-ab28-9be7fe8e816b" />
 
 
 ## Install
