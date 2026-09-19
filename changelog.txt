@@ -7,6 +7,20 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Keyboard shortcuts (48ef5d3)
+------------------------------------------
+- Esc closes the search, like its x button, and takes focus out of the search box. With no search
+  open, Esc is left alone.
+- Cmd/Ctrl+A selects every loaded message in the folder list (for the bulk actions). Not while
+  typing in a text field, where it keeps its normal meaning, and not in search or combined lists,
+  which have no bulk selection.
+- Cmd/Ctrl+R replies to the open message instead of reloading the page. With no message open the
+  browser's reload is untouched.
+- All shortcuts are now skipped while any dialog is open, including the Settings dialog (Backspace
+  and Delete previously ignored that one).
+- Tests and README updated.
+
+
 2026-09-19 - Interval sync only syncs Inboxes (34c5d90)
 --------------------------------------------------------
 The interval sync now syncs only each account's Inbox. Clicking "Sync now" still syncs every
