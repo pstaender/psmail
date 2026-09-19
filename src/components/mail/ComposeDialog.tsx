@@ -271,7 +271,7 @@ export function ComposeDialog({
                   ).flatMap(([category, title]) =>
                     skillsOf(category).map((skill, _, all) => (
                       <DropdownMenuItem key={skill.id} onSelect={() => refine(category, undefined, skill.id)}>
-                        {all.length > 1 ? `${title} · ${skill.label}` : title}
+                        {all.length > 1 ? `${title} · ${skill.name}` : title}
                       </DropdownMenuItem>
                     ))
                   )}
@@ -283,7 +283,7 @@ export function ComposeDialog({
                         setTranslateTo(aiLanguage);
                       }}
                     >
-                      {all.length > 1 ? `Translate… · ${skill.label}` : "Translate…"}
+                      {all.length > 1 ? `Translate… · ${skill.name}` : "Translate…"}
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>

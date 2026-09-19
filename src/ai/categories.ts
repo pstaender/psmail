@@ -39,7 +39,7 @@ export const VENDOR_SHORT_NAMES: Record<AiVendor, string> = {
   ollama: "Ollama",
 };
 
-/** What a skill without a name of its own is called: its provider's vendor and model, `Anthropic.claude-opus-5`. */
-export function defaultSkillLabel(vendor: AiVendor, model: string): string {
+/** What an AI provider without a name of its own is called: its vendor and model, `Anthropic.claude-opus-5`. */
+export function defaultApiLabel(vendor: AiVendor, model: string): string {
   return `${VENDOR_SHORT_NAMES[vendor]}.${model}`;
 }

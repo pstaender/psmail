@@ -69,7 +69,7 @@ describe("AI endpoints", () => {
 
     const made = await api("POST", "/api/ai/apis", { token, body: { vendor: "anthropic", model: "claude-opus-5", apiKey: "sk-ant-secret" } });
     expect(made.status).toBe(201);
-    expect(made.json).toMatchObject({ vendor: "anthropic", hasKey: true });
+    expect(made.json).toMatchObject({ vendor: "anthropic", hasKey: true, name: "", label: "Anthropic.claude-opus-5" });
     expect(JSON.stringify(made.json)).not.toContain("sk-ant-secret");
     apiId = made.json.id;
 
@@ -150,9 +150,9 @@ describe("AI endpoints", () => {
 
   test("with several skills of a category the request can choose one; without a choice the first is used", async () => {
     const second = await api("POST", "/api/ai/skills", { token, body: { aiApiId: apiId, category: "translate", name: "Formal", prompt: "Translate formally into {{language}}." } });
-    expect(second.json).toMatchObject({ name: "Formal", label: "Formal" });
-    const list = (await api("GET", "/api/ai/skills", { token })).json as { id: number; category: string; label: string }[];
-    expect(list.find(s => s.category === "summarize")!.label).toBe("Anthropic.claude-opus-5"); // created without a name
+    expect(second.json).toMatchObject({ name: "Formal" });
+    const list = (await api("GET", "/api/ai/skills", { token })).json as { id: number; category: string; name: string }[];
+    expect(list.find(s => s.category === "summarize")!.name).toBe("summarize"); // created without a name: the category
 
     const sent = fakeAi(() => "ok");
     await api("POST", `${emailPath()}/${emailId}/ai/translate`, { token, body: { language: "German", skillId: second.json.id } });

@@ -5,7 +5,7 @@ import type { AiSkillRecord } from "../../server/models/ai";
 
 /**
  * A button that runs an AI skill of one category. With a single skill, clicking it runs that skill; with several,
- * clicking opens a menu with one entry per skill — labelled with the skill's name (or `Vendor.model`) — to choose
+ * clicking opens a menu with one entry per skill — labelled with the skill's name — to choose
  * from. Renders nothing without a skill: no skill, no button.
  */
 export function AiSkillButton({
@@ -41,7 +41,7 @@ export function AiSkillButton({
       <DropdownMenuContent align="start">
         {skills.map(skill => (
           <DropdownMenuItem key={skill.id} onSelect={() => onRun(skill.id)}>
-            {skill.label}
+            {skill.name}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

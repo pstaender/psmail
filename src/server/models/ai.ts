@@ -1,12 +1,14 @@
 import { Database } from "bun:sqlite";
-import { AI_VENDORS, VENDOR_LABELS, defaultSkillLabel, isAiCategory, isAiVendor, type AiCategory, type AiVendor } from "../../ai/categories";
+import { AI_VENDORS, VENDOR_LABELS, defaultApiLabel, isAiCategory, isAiVendor, type AiCategory, type AiVendor } from "../../ai/categories";
 import { decryptSecret, encryptSecret } from "../crypto/secrets";
 import { ApiError, NotFoundError } from "../types";
 
 export interface AiApiRecord {
   id: number;
-  /** What the user calls it ("Work Claude"); defaults to "<Vendor> <model>". */
+  /** What the user calls it ("Work Claude"); may be empty. */
   name: string;
+  /** What to show for it: the name, or — when there is none — `Vendor.model`, e.g. `Anthropic.claude-opus-5`. */
+  label: string;
   vendor: AiVendor;
   model: string;
   /** Overrides the vendor's default address — needed for Ollama (the local server) and OpenAI-compatible services. */
@@ -42,6 +44,7 @@ function toApi(row: AiApiRow): AiApiRecord {
   return {
     id: row.id,
     name: row.name,
+    label: row.name || defaultApiLabel(row.vendor as AiVendor, row.model),
     vendor: row.vendor as AiVendor,
     model: row.model,
     baseUrl: row.base_url,
@@ -85,7 +88,7 @@ export function createAiApi(db: Database, userId: number, input: AiApiInput, enc
   if (!model) throw new ApiError(400, "model is required");
   const apiKey = input.apiKey?.trim() || null;
   if (vendor !== "ollama" && !apiKey) throw new ApiError(400, `${VENDOR_LABELS[vendor]} needs an API key`);
-  const name = input.name?.trim() || `${VENDOR_LABELS[vendor]} ${model}`;
+  const name = input.name?.trim() ?? "";
 
   const row = db
     .query<AiApiRow, [number, string, string, string, string | null, string | null]>(
@@ -112,7 +115,8 @@ export function updateAiApi(db: Database, userId: number, id: number, input: AiA
          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *`
     )
     .get(
-      input.name !== undefined ? input.name.trim() || existing.name : existing.name,
+      // An empty name is allowed: the provider is then shown as `Vendor.model`.
+      input.name !== undefined ? input.name.trim() : existing.name,
       vendor,
       model,
       input.baseUrl !== undefined ? cleanBaseUrl(input.baseUrl) : existing.base_url,
@@ -150,10 +154,7 @@ export interface AiSkillRecord {
   id: number;
   aiApiId: number;
   category: AiCategory;
-  /** The name the user gave it; may be empty. */
   name: string;
-  /** What to show for it: the name, or — when there is none — `Vendor.model` of its provider. */
-  label: string;
   prompt: string;
   createdAt: string;
   updatedAt: string;
@@ -168,13 +169,9 @@ interface AiSkillRow {
   prompt: string;
   created_at: string;
   updated_at: string;
-  api_vendor: string;
-  api_model: string;
 }
 
-/** A skill row joined with its provider (for the label). */
-const SKILL_SELECT = `SELECT s.*, a.vendor AS api_vendor, a.model AS api_model
-  FROM ai_skills s JOIN ai_apis a ON a.id = s.ai_api_id`;
+const SKILL_SELECT = "SELECT s.* FROM ai_skills s";
 
 export interface AiSkillInput {
   aiApiId?: number;
@@ -191,7 +188,6 @@ function toSkill(row: AiSkillRow): AiSkillRecord {
     aiApiId: row.ai_api_id,
     category: row.category as AiCategory,
     name: row.name,
-    label: row.name || defaultSkillLabel(row.api_vendor as AiVendor, row.api_model),
     prompt: row.prompt,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -224,7 +220,7 @@ export function createAiSkill(db: Database, userId: number, input: AiSkillInput)
     .query<{ id: number }, [number, number, string, string, string]>(
       `INSERT INTO ai_skills (user_id, ai_api_id, category, name, prompt) VALUES (?, ?, ?, ?, ?) RETURNING id`
     )
-    .get(userId, input.aiApiId, input.category, input.name?.trim() ?? "", cleanPrompt(input.prompt));
+    .get(userId, input.aiApiId, input.category, input.name?.trim() || input.category, cleanPrompt(input.prompt));
   return toSkill(getSkillRow(db, userId, created!.id));
 }
 
@@ -238,8 +234,7 @@ export function updateAiSkill(db: Database, userId: number, id: number, input: A
   ).run(
     input.aiApiId ?? existing.ai_api_id,
     input.category ?? existing.category,
-    // An empty name is allowed: the skill is then shown as `Vendor.model`.
-    input.name !== undefined ? input.name.trim() : existing.name,
+    input.name !== undefined ? input.name.trim() || existing.name : existing.name,
     input.prompt !== undefined ? cleanPrompt(input.prompt) : existing.prompt,
     id
   );

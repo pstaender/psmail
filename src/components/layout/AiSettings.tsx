@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { api, type UserSettings } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { AI_CATEGORIES, AI_VENDORS, SKILL_DEFAULTS, VENDOR_LABELS, defaultSkillLabel, type AiCategory, type AiVendor } from "../../ai/categories";
+import { AI_CATEGORIES, AI_VENDORS, SKILL_DEFAULTS, VENDOR_LABELS, defaultApiLabel, type AiCategory, type AiVendor } from "../../ai/categories";
 import type { AiApiRecord, AiSkillRecord } from "../../server/models/ai";
 
 const MODEL_EXAMPLES: Record<AiVendor, string> = {
@@ -108,7 +108,7 @@ export function AiSettings({
     if (!token) return;
     const affected = skills.filter(s => s.aiApiId === record.id).length;
     const warning = affected > 0 ? `\n\nThe ${affected} skill${affected === 1 ? "" : "s"} using it will be deleted too.` : "";
-    if (!window.confirm(`Delete the AI provider "${record.name}"?${warning}`)) return;
+    if (!window.confirm(`Delete the AI provider "${record.label}"?${warning}`)) return;
     try {
       await api.deleteAiApi(token, record.id);
       await load();
@@ -123,7 +123,7 @@ export function AiSettings({
     setTesting(record.id);
     try {
       const result = await api.testAiApi(token, record.id);
-      toast.success(`${record.name} works — it answered "${result.answer}".`);
+      toast.success(`${record.label} works — it answered "${result.answer}".`);
     } catch (err) {
       toast.error(message(err));
     } finally {
@@ -151,7 +151,7 @@ export function AiSettings({
   }
 
   async function removeSkill(skill: AiSkillRecord) {
-    if (!token || !window.confirm(`Delete the skill "${skill.label}"?`)) return;
+    if (!token || !window.confirm(`Delete the skill "${skill.name}"?`)) return;
     try {
       await api.deleteAiSkill(token, skill.id);
       await load();
@@ -163,10 +163,10 @@ export function AiSettings({
 
   function newSkillForm(): SkillForm {
     const category: AiCategory = AI_CATEGORIES.find(c => !skills.some(s => s.category === c)) ?? "summarize";
-    return { id: null, category, name: "", aiApiId: apis![0]!.id, prompt: SKILL_DEFAULTS[category].prompt };
+    return { id: null, category, name: SKILL_DEFAULTS[category].label, aiApiId: apis![0]!.id, prompt: SKILL_DEFAULTS[category].prompt };
   }
 
-  /** Picking a category suggests its prompt — unless the user already changed it by hand. */
+  /** Picking a category suggests its prompt (and name) — unless the user already changed those by hand. */
   function changeCategory(category: AiCategory) {
     setSkillForm(form => {
       if (!form) return form;
@@ -174,17 +174,15 @@ export function AiSettings({
       return {
         ...form,
         category,
+        name: form.name === old.label || form.name === "" ? SKILL_DEFAULTS[category].label : form.name,
         prompt: form.prompt === old.prompt || form.prompt.trim() === "" ? SKILL_DEFAULTS[category].prompt : form.prompt,
       };
     });
   }
 
-  const apiName = (id: number) => apis?.find(a => a.id === id)?.name ?? "?";
-  /** What a skill without a name is called: Vendor.model of the chosen provider. */
-  const skillDefaultLabel = (apiId: number) => {
-    const record = apis?.find(a => a.id === apiId);
-    return record ? defaultSkillLabel(record.vendor, record.model) : "Vendor.model";
-  };
+  /** What a provider without a name is called: Vendor.model. */
+  const apiDefaultLabel = (form: ApiForm) => defaultApiLabel(form.vendor, form.model.trim() || "model");
+  const apiName = (id: number) => apis?.find(a => a.id === id)?.label ?? "?";
 
   return (
     <div className="space-y-6">
@@ -210,26 +208,26 @@ export function AiSettings({
           {apis?.map(record => (
             <li key={record.id} className="flex items-center gap-2 rounded-md border p-2 text-sm">
               <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">{record.name}</div>
+                <div className="truncate font-medium">{record.label}</div>
                 <div className="truncate text-xs text-muted-foreground">
                   {VENDOR_LABELS[record.vendor]} · {record.model}
                   {record.baseUrl ? ` · ${record.baseUrl}` : ""}
                   {record.hasKey ? " · key saved" : ""}
                 </div>
               </div>
-              <Button type="button" variant="ghost" size="sm" title={`Test ${record.name}`} disabled={testing === record.id} onClick={() => testApi(record)}>
+              <Button type="button" variant="ghost" size="sm" title={`Test ${record.label}`} disabled={testing === record.id} onClick={() => testApi(record)}>
                 {testing === record.id ? <Loader2 className="size-3.5 animate-spin" /> : <Zap className="size-3.5" />}
               </Button>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                title={`Edit ${record.name}`}
+                title={`Edit ${record.label}`}
                 onClick={() => setApiForm({ id: record.id, name: record.name, vendor: record.vendor, model: record.model, baseUrl: record.baseUrl ?? "", apiKey: "", hadKey: record.hasKey })}
               >
                 <Pencil className="size-3.5" />
               </Button>
-              <Button type="button" variant="ghost" size="sm" title={`Delete ${record.name}`} onClick={() => removeApi(record)}>
+              <Button type="button" variant="ghost" size="sm" title={`Delete ${record.label}`} onClick={() => removeApi(record)}>
                 <Trash2 className="size-3.5" />
               </Button>
             </li>
@@ -278,7 +276,13 @@ export function AiSettings({
             )}
             <div className="space-y-1.5">
               <Label htmlFor="ai-api-name">Name (optional)</Label>
-              <Input id="ai-api-name" placeholder={`${VENDOR_LABELS[apiForm.vendor]} ${apiForm.model}`.trim()} value={apiForm.name} onChange={e => setApiForm({ ...apiForm, name: e.target.value })} />
+              <Input
+                id="ai-api-name"
+                placeholder={apiDefaultLabel(apiForm)}
+                value={apiForm.name}
+                onChange={e => setApiForm({ ...apiForm, name: e.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">Empty: {apiDefaultLabel(apiForm)}.</p>
             </div>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" size="sm" onClick={() => setApiForm(null)}>
@@ -312,15 +316,15 @@ export function AiSettings({
           {skills.map(skill => (
             <li key={skill.id} className="flex items-center gap-2 rounded-md border p-2 text-sm">
               <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">{skill.label}</div>
+                <div className="truncate font-medium">{skill.name}</div>
                 <div className="truncate text-xs text-muted-foreground">
                   {SKILL_DEFAULTS[skill.category].label} · {apiName(skill.aiApiId)}
                 </div>
               </div>
-              <Button type="button" variant="ghost" size="sm" title={`Edit ${skill.label}`} onClick={() => setSkillForm({ id: skill.id, category: skill.category, name: skill.name, aiApiId: skill.aiApiId, prompt: skill.prompt })}>
+              <Button type="button" variant="ghost" size="sm" title={`Edit ${skill.name}`} onClick={() => setSkillForm({ id: skill.id, category: skill.category, name: skill.name, aiApiId: skill.aiApiId, prompt: skill.prompt })}>
                 <Pencil className="size-3.5" />
               </Button>
-              <Button type="button" variant="ghost" size="sm" title={`Delete ${skill.label}`} onClick={() => removeSkill(skill)}>
+              <Button type="button" variant="ghost" size="sm" title={`Delete ${skill.name}`} onClick={() => removeSkill(skill)}>
                 <Trash2 className="size-3.5" />
               </Button>
             </li>
@@ -345,7 +349,7 @@ export function AiSettings({
                 <select id="ai-skill-api" className={SELECT_CLASS} value={skillForm.aiApiId} onChange={e => setSkillForm({ ...skillForm, aiApiId: Number(e.target.value) })}>
                   {apis?.map(record => (
                     <option key={record.id} value={record.id}>
-                      {record.name}
+                      {record.label}
                     </option>
                   ))}
                 </select>
@@ -353,14 +357,8 @@ export function AiSettings({
             </div>
             <p className="text-xs text-muted-foreground">{SKILL_DEFAULTS[skillForm.category].description}</p>
             <div className="space-y-1.5">
-              <Label htmlFor="ai-skill-name">Name (optional)</Label>
-              <Input
-                id="ai-skill-name"
-                placeholder={skillDefaultLabel(skillForm.aiApiId)}
-                value={skillForm.name}
-                onChange={e => setSkillForm({ ...skillForm, name: e.target.value })}
-              />
-              <p className="text-xs text-muted-foreground">The label of the button or menu entry. Empty: {skillDefaultLabel(skillForm.aiApiId)}.</p>
+              <Label htmlFor="ai-skill-name">Name</Label>
+              <Input id="ai-skill-name" value={skillForm.name} onChange={e => setSkillForm({ ...skillForm, name: e.target.value })} />
             </div>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">

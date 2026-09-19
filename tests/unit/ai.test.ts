@@ -14,7 +14,7 @@ import {
   updateAiSkill,
 } from "../../src/server/models/ai";
 import { aiHttp, complete, emailTextForAi, parseTaxonomy, renderPrompt } from "../../src/server/services/ai";
-import { SKILL_DEFAULTS, AI_CATEGORIES, defaultSkillLabel } from "../../src/ai/categories";
+import { SKILL_DEFAULTS, AI_CATEGORIES, defaultApiLabel } from "../../src/ai/categories";
 
 const key = deriveEncryptionKey("pw", generateSalt());
 
@@ -40,7 +40,7 @@ describe("AI APIs", () => {
     const { db, user } = await setup();
     const api = createAiApi(db, user.id, { vendor: "anthropic", model: "claude-opus-5", apiKey: "sk-secret" }, key);
 
-    expect(api).toMatchObject({ vendor: "anthropic", model: "claude-opus-5", hasKey: true, name: "Anthropic claude-opus-5", baseUrl: null });
+    expect(api).toMatchObject({ vendor: "anthropic", model: "claude-opus-5", hasKey: true, name: "", label: "Anthropic.claude-opus-5", baseUrl: null });
     expect(JSON.stringify(api)).not.toContain("sk-secret");
     const stored = db.query<{ api_key_encrypted: string }, []>("SELECT api_key_encrypted FROM ai_apis").get()!.api_key_encrypted;
     expect(stored).not.toContain("sk-secret");
@@ -66,11 +66,26 @@ describe("AI APIs", () => {
 
     updateAiApi(db, user.id, api.id, { model: "gpt-b", name: "Work GPT" }, key);
     expect(getAiApiConfig(db, user.id, api.id, key)).toMatchObject({ model: "gpt-b", apiKey: "old-key" });
-    expect(listAiApis(db, user.id)[0]!.name).toBe("Work GPT");
+    expect(listAiApis(db, user.id)[0]!.label).toBe("Work GPT");
 
     updateAiApi(db, user.id, api.id, { apiKey: "new-key" }, key);
     expect(getAiApiConfig(db, user.id, api.id, key).apiKey).toBe("new-key");
     expect(() => updateAiApi(db, user.id, api.id, { apiKey: null }, key)).toThrow(/needs an API key/);
+  });
+
+  test("a provider's label is its name, or Vendor.model when it has none — also after editing, and it follows the model", async () => {
+    const { db, user } = await setup();
+    const api = createAiApi(db, user.id, { vendor: "anthropic", model: "claude-opus-5", apiKey: "k" }, key);
+    expect(api).toMatchObject({ name: "", label: "Anthropic.claude-opus-5" });
+
+    expect(updateAiApi(db, user.id, api.id, { name: "Work Claude" }, key).label).toBe("Work Claude");
+    expect(updateAiApi(db, user.id, api.id, { name: "  " }, key)).toMatchObject({ name: "", label: "Anthropic.claude-opus-5" }); // cleared again
+    expect(updateAiApi(db, user.id, api.id, { model: "claude-sonnet-5" }, key).label).toBe("Anthropic.claude-sonnet-5");
+    expect(listAiApis(db, user.id)[0]!.label).toBe("Anthropic.claude-sonnet-5");
+
+    expect(defaultApiLabel("openai", "gpt-5")).toBe("OpenAI.gpt-5");
+    expect(defaultApiLabel("google", "gemini-2.5-pro")).toBe("Google.gemini-2.5-pro");
+    expect(defaultApiLabel("ollama", "llama3")).toBe("Ollama.llama3");
   });
 
   test("users only see and touch their own", async () => {
@@ -94,9 +109,9 @@ describe("AI skills", () => {
     createAiSkill(db, user.id, { aiApiId: a.id, category: "summarize", name: "Sum", prompt: "Summarize." });
     createAiSkill(db, user.id, { aiApiId: b.id, category: "translate", prompt: "Translate to {{language}}." });
 
-    expect(listAiSkills(db, user.id).map(s => [s.category, s.name, s.label, s.aiApiId])).toEqual([
-      ["summarize", "Sum", "Sum", a.id],
-      ["translate", "", "Ollama.llama3", b.id], // no name of its own: shown as Vendor.model
+    expect(listAiSkills(db, user.id).map(s => [s.category, s.name, s.aiApiId])).toEqual([
+      ["summarize", "Sum", a.id],
+      ["translate", "translate", b.id], // no name given: the category
     ]);
     deleteAiApi(db, user.id, a.id);
     expect(listAiSkills(db, user.id).map(s => s.category)).toEqual(["translate"]);
@@ -114,18 +129,13 @@ describe("AI skills", () => {
     expect(updated).toMatchObject({ prompt: "Fix it better.", name: "Proofread", category: "grammar" });
   });
 
-  test("a skill's label is its name, or Vendor.model of its provider when the name is empty — also after editing", async () => {
+  test("a skill without a name is called after its category, and can't be renamed to nothing", async () => {
     const { db, user } = await setup();
     const api = createAiApi(db, user.id, { vendor: "anthropic", model: "claude-opus-5", apiKey: "k" }, key);
     const skill = createAiSkill(db, user.id, { aiApiId: api.id, category: "summarize", prompt: "p" });
-    expect(skill).toMatchObject({ name: "", label: "Anthropic.claude-opus-5" });
-
-    expect(updateAiSkill(db, user.id, skill.id, { name: "Short" }).label).toBe("Short");
-    expect(updateAiSkill(db, user.id, skill.id, { name: "  " })).toMatchObject({ name: "", label: "Anthropic.claude-opus-5" }); // cleared again
-    updateAiApi(db, user.id, api.id, { model: "claude-sonnet-5" }, key);
-    expect(listAiSkills(db, user.id)[0]!.label).toBe("Anthropic.claude-sonnet-5"); // follows the provider
-    expect(defaultSkillLabel("openai", "gpt-5")).toBe("OpenAI.gpt-5");
-    expect(defaultSkillLabel("google", "gemini-2.5-pro")).toBe("Google.gemini-2.5-pro");
+    expect(skill.name).toBe("summarize");
+    expect(updateAiSkill(db, user.id, skill.id, { name: "Short" }).name).toBe("Short");
+    expect(updateAiSkill(db, user.id, skill.id, { name: "  " }).name).toBe("Short"); // blank keeps the old one
   });
 
   test("a specific skill can be asked for, as long as it is the user's and of that category", async () => {

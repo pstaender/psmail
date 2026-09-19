@@ -222,10 +222,15 @@ function installMockFetch(
   bulkRequests.length = 0;
   aiRequests.length = 0;
   let currentAiApis = [...(opts.aiApis ?? [])];
-  // "summarize" or "summarize:Short" (a skill with a name of its own); unnamed ones are labelled like the server does.
+  // "summarize" or "summarize:Short" (a skill with a name of its own; unnamed ones are named after their category, like the server does).
   let currentAiSkills = (opts.aiSkillCategories ?? []).map((spec, i) => {
-    const [category, name = ""] = spec.split(":");
-    return { id: i + 1, aiApiId: 1, category, name, label: name || "Anthropic.claude-opus-5", prompt: `prompt for ${category}`, createdAt: NOW, updatedAt: NOW };
+    const [category, name = category] = spec.split(":");
+    return { id: i + 1, aiApiId: 1, category, name, prompt: `prompt for ${category}`, createdAt: NOW, updatedAt: NOW };
+  });
+  // A provider's label is its name, or Vendor.model when it has none (the server computes it).
+  const withLabel = <T extends { name: string; vendor: string; model: string }>(record: T) => ({
+    ...record,
+    label: record.name || `${({ anthropic: "Anthropic", openai: "OpenAI", google: "Google", ollama: "Ollama" } as Record<string, string>)[record.vendor]}.${record.model}`,
   });
   contactRequests.length = 0;
   folderRequests = 0;
@@ -321,12 +326,12 @@ function installMockFetch(
     if (path.startsWith("/api/ai/") || /\/ai\/(summarize|translate|categorize)$/.test(path)) {
       const body = init?.body ? JSON.parse(init.body as string) : undefined;
       aiRequests.push([method, path, body]);
-      if (path === "/api/ai/apis" && method === "GET") return jsonResponse(currentAiApis);
+      if (path === "/api/ai/apis" && method === "GET") return jsonResponse(currentAiApis.map(withLabel));
       if (path === "/api/ai/apis" && method === "POST") {
         const { apiKey, ...rest } = body;
-        const record = { id: currentAiApis.length + 1, baseUrl: null, ...rest, name: rest.name || `${rest.vendor} ${rest.model}`, hasKey: !!apiKey };
+        const record = { id: currentAiApis.length + 1, baseUrl: null, ...rest, hasKey: !!apiKey };
         currentAiApis = [...currentAiApis, record];
-        return jsonResponse(record, 201);
+        return jsonResponse(withLabel(record), 201);
       }
       const apiById = /^\/api\/ai\/apis\/(\d+)$/.exec(path);
       if (apiById && method === "DELETE") {
@@ -337,11 +342,7 @@ function installMockFetch(
       if (/^\/api\/ai\/apis\/\d+\/test$/.test(path)) return jsonResponse({ ok: true, answer: "OK" });
       if (path === "/api/ai/skills" && method === "GET") return jsonResponse(currentAiSkills);
       if (path === "/api/ai/skills" && method === "POST") {
-        const provider = currentAiApis.find(a => a.id === body.aiApiId);
-        const record = {
-          id: currentAiSkills.length + 10, createdAt: NOW, updatedAt: NOW, ...body,
-          label: body.name || `${provider ? provider.vendor[0]!.toUpperCase() + provider.vendor.slice(1) : "?"}.${provider?.model}`,
-        };
+        const record = { id: currentAiSkills.length + 10, createdAt: NOW, updatedAt: NOW, ...body };
         currentAiSkills = [...currentAiSkills, record];
         return jsonResponse(record, 201);
       }
@@ -2418,9 +2419,40 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await userEvent.click(screen.getByRole("button", { name: "Save provider" }));
 
       await waitFor(() => expect(calls("POST", "/api/ai/apis")).toEqual([{ name: "", vendor: "anthropic", model: "claude-opus-5", baseUrl: null, apiKey: "sk-ant-secret" }]));
-      expect(await screen.findByText("anthropic claude-opus-5")).toBeTruthy();
+      expect(await screen.findByText("Anthropic.claude-opus-5")).toBeTruthy(); // unnamed: shown as Vendor.model
       expect(screen.getByText(/Anthropic · claude-opus-5 · key saved/)).toBeTruthy();
       expect(document.body.textContent).not.toContain("sk-ant-secret");
+    });
+
+    test("a provider's name is optional: the form says what it will be called, and it is shown as Vendor.model when empty", async () => {
+      installMockFetch();
+      await login();
+      await openAiTab();
+      await userEvent.click(await screen.findByRole("button", { name: /add provider/i }));
+      const name = () => screen.getByLabelText("Name (optional)") as HTMLInputElement;
+
+      await userEvent.selectOptions(screen.getByLabelText("Vendor"), "openai");
+      await userEvent.type(screen.getByLabelText("Model"), "gpt-5");
+      expect(name().value).toBe(""); // nothing is filled in
+      expect(name().placeholder).toBe("OpenAI.gpt-5");
+      expect(screen.getByText("Empty: OpenAI.gpt-5.")).toBeTruthy();
+
+      await userEvent.type(screen.getByLabelText(/API key/), "sk-x");
+      await userEvent.click(screen.getByRole("button", { name: "Save provider" }));
+      await waitFor(() => expect(calls("POST", "/api/ai/apis")).toEqual([expect.objectContaining({ name: "", vendor: "openai", model: "gpt-5" })]));
+      expect(await screen.findByText("OpenAI.gpt-5")).toBeTruthy();
+
+      // With a name of its own, that is what's shown — also when picking the provider for a skill.
+      await userEvent.click(screen.getByRole("button", { name: /add provider/i }));
+      await userEvent.type(screen.getByLabelText("Model"), "claude-opus-5");
+      await userEvent.type(screen.getByLabelText(/API key/), "sk-y");
+      await userEvent.type(screen.getByLabelText("Name (optional)"), "Work Claude");
+      await userEvent.click(screen.getByRole("button", { name: "Save provider" }));
+      expect(await screen.findByText("Work Claude")).toBeTruthy();
+
+      await userEvent.click(screen.getByRole("button", { name: /add skill/i }));
+      const providers = Array.from((screen.getByLabelText("AI provider") as HTMLSelectElement).options).map(o => o.textContent);
+      expect(providers).toEqual(["OpenAI.gpt-5", "Work Claude"]);
     });
 
     test("editing a provider keeps its key unless a new one is typed; Test reports the result", async () => {
@@ -2439,14 +2471,12 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await openAiTab();
 
       await userEvent.click(await screen.findByRole("button", { name: /add skill/i }));
-      // The empty name shows what it will be called instead.
-      expect((screen.getByLabelText(/^Name/) as HTMLInputElement).placeholder).toBe("Anthropic.claude-opus-5");
       const prompt = () => (screen.getByLabelText("Instruction (prompt)") as HTMLTextAreaElement).value;
       expect(prompt()).toContain("summarizes e-mail messages"); // first category, suggested
 
       await userEvent.selectOptions(screen.getByLabelText("Category"), "translate");
       expect(prompt()).toContain("helpful translator");
-      expect((screen.getByLabelText(/^Name/) as HTMLInputElement).value).toBe(""); // no name unless you give one
+      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Translate"); // named after the category, as suggested
 
       // Once edited by hand, changing the category leaves the prompt alone…
       await userEvent.type(screen.getByLabelText("Instruction (prompt)"), " Be brief.");
@@ -2458,10 +2488,8 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
       await userEvent.click(screen.getByRole("button", { name: "Save skill" }));
       await waitFor(() => expect(calls("POST", "/api/ai/skills")).toHaveLength(1));
-      expect(calls("POST", "/api/ai/skills")[0]).toMatchObject({ category: "grammar", aiApiId: 1, name: "", prompt: expect.stringContaining("careful proofreader") });
-      // Shown as Vendor.model (the default label) and under its category and provider.
-      expect(await screen.findByText("Anthropic.claude-opus-5")).toBeTruthy();
-      expect(screen.getByText(/Spelling \+ Grammar · Work Claude/)).toBeTruthy();
+      expect(calls("POST", "/api/ai/skills")[0]).toMatchObject({ category: "grammar", aiApiId: 1, name: "Spelling + Grammar", prompt: expect.stringContaining("careful proofreader") });
+      expect(await screen.findByText(/Spelling \+ Grammar · Work Claude/)).toBeTruthy(); // category · provider
     });
 
     test("skills need a provider first, and deleting a provider takes its skills along", async () => {
@@ -2653,14 +2681,14 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
         await openMessage();
 
         await userEvent.click(screen.getByRole("button", { name: /^summarize/i }));
-        expect((await screen.findAllByRole("menuitem")).map(i => i.textContent)).toEqual(["Short", "Anthropic.claude-opus-5", "Detailed"]);
+        expect((await screen.findAllByRole("menuitem")).map(i => i.textContent)).toEqual(["Short", "summarize", "Detailed"]);
         expect(posts("/ai/summarize")).toEqual([]); // the click only opened the menu
 
         await userEvent.click(screen.getByRole("menuitem", { name: "Detailed" }));
         await waitFor(() => expect(posts("/ai/summarize")).toEqual([{ skillId: 3 }]));
         // The Summary tab's own button is the same kind of menu.
         await userEvent.click(await screen.findByRole("button", { name: "Summarize again" }));
-        expect((await screen.findAllByRole("menuitem")).map(i => i.textContent)).toEqual(["Short", "Anthropic.claude-opus-5", "Detailed"]);
+        expect((await screen.findAllByRole("menuitem")).map(i => i.textContent)).toEqual(["Short", "summarize", "Detailed"]);
       });
 
       test("several translators work the same way, and the chosen one is used", async () => {
