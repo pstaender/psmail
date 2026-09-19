@@ -7,6 +7,25 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Bulk selection in the combined lists (72325f4)
+-----------------------------------------------------------
+Cause of "Shift-select doesn't work anymore": since the app opens on the combined Inbox, you were in a
+results list, and only a single account's folder list had multi-select (the account's own Inbox in the
+sidebar still did). Now the combined Inbox/Sent and search results have it too:
+- Cmd/Ctrl+click toggles a row, Shift+click selects a range from the anchor, Cmd/Ctrl+A selects the whole
+  loaded list, Shift+Up/Down extends the selection - all as in folder lists, with the same highlight.
+- The bulk bar (mark read/unread, Move, Delete) works on such a selection, which can span accounts: it
+  is sent as one bulk request per account. Delete asks for confirmation unless every message would
+  only go to Trash. Move is only offered when everything selected is from one account (folders differ
+  per account); the sidebar switches to that account so its folders are what Move lists. Rows that were
+  moved leave a combined Inbox/Sent, and are updated in place in a search.
+- Counts: the selected account's folder badges and the combined Inbox badge update; other accounts'
+  folder badges in the sidebar are only refreshed by their next sync/reload.
+- A new search or another mailbox starts with a clean selection. Folder-list behavior is unchanged.
+- Tests: selecting (click, range, toggle), Cmd/Ctrl+A and Shift+arrows, per-account bulk requests for
+  mark read / delete / move, Move visibility, selection reset; the existing bulk tests still pass.
+
+
 2026-09-19 - Empty password allowed (55118e8)
 ----------------------------------------------
 Changing the password in Settings > Credentials now also accepts an empty new password (leave both
