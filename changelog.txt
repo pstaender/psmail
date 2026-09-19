@@ -7,6 +7,27 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Several skills per category, optional names (f70c08b)
+------------------------------------------------------------------
+- You can now have more than one skill of a category (the settings form already let you create them; now
+  they are used): e.g. two summarizers on different models, or a formal and a casual Phrase.
+- With a single skill of a category its button runs it right away, as before. With several, clicking the
+  button opens a menu with one entry per skill, labelled with the skill's name: Summarize and Translate in
+  the reading pane toolbar, the "Summarize again" button of the Summary tab, and in the compose Refine
+  menu (entries like "Phrase · Formal" and "Translate… · Local"; a category with one skill keeps the plain
+  title). The chosen skill is sent along as skillId (also accepted by /api/ai/run and the message
+  endpoints; it must be the user's and of that category, otherwise the request is refused; without it the
+  oldest skill is used). Categorize is not chosen by hand: the oldest categorize skill still runs together
+  with Summarize.
+- The name is optional now. The form no longer fills it in (it shows what it will be called as the
+  placeholder and in a hint); an empty name is shown as Vendor.model of the skill's provider, e.g.
+  "Anthropic.claude-opus-5" (short vendor names: Anthropic, OpenAI, Google, Ollama), and follows the
+  provider if its model changes. The API returns a label for every skill. Existing skills keep the names
+  they have. Editing a skill and clearing the name makes it unnamed again.
+- Tests: labels and skillId selection (model + HTTP), the placeholder and empty name in the form, the
+  one-skill button, the menus with several summarizers/translators and Refine entries.
+
+
 2026-09-19 - AI buttons only with skills (c6f4a36)
 --------------------------------------------------
 The AI buttons no longer show as disabled hints: they are simply not there unless the matching skill
