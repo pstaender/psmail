@@ -7,6 +7,24 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Collapsed accounts and running syncs on load (3a3a00e)
+------------------------------------------------------------------
+- After the page loads, every account in the sidebar is collapsed: with the combined Inbox showing,
+  no account is selected yet. A side effect is that a collapsed account's folders are not fetched
+  from IMAP at all until you expand it (or select something in it). Expanding by click works as
+  before; an account also expands when something in it gets selected.
+- Sync jobs that were already running when the page loaded (an earlier visit, another tab, or the
+  automatic sync of another browser) are picked up: on load each account's job history is checked
+  once, and a pending/running job gets its spinner and "Syncing n/m..." tooltip and is followed to
+  its end, after which the app refreshes like after any sync (folder counts, open list, combined
+  lists, unread badge, new-mail announcement). A "Sync now" click meanwhile does nothing new, since
+  that account already counts as syncing. Jobs orphaned by a server restart were already marked
+  failed at startup, so only really running ones show.
+- Tests: initial collapse and expand; resuming a running job (spinner and progress), following it to
+  its end, and no spinner for a finished or absent one. The shared test helper now expands the
+  account before going into its Inbox.
+
+
 2026-09-19 - Better recipient autocomplete (8c6966f)
 ---------------------------------------------------
 1. Punctuation no longer matters. A contact stored as 'First Lastname' <flastname@example.com> wasn't
