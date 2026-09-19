@@ -7,6 +7,46 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - AI: summarize, categorize, translate, refine (acd1c9d)
+-----------------------------------------------------------------
+Settings has a new "AI" tab (between Notifications and Credentials).
+- AI providers (table ai_apis): each has a vendor (Anthropic, OpenAI, Google Gemini, Ollama), a model
+  (e.g. claude-opus-5), an API key and optionally an address (for Ollama or OpenAI-compatible services). Every
+  user has many. The key is stored encrypted with the user's key, exactly like the mail account passwords,
+  and is never sent back to the browser (only "key saved"). Changing the login password re-encrypts the AI
+  keys along with the account passwords (and refuses, naming the provider, if one can't be decrypted). A
+  "Test" button checks that a provider answers.
+- Skills (table ai_skills): a category (Summarize, Categorize (taxonomy), Translate, Spelling + Grammar,
+  Phrase), a name, a prompt (agent instruction) and exactly one provider. Choosing a category suggests a
+  prompt, taken from src/ai/skillDefaults.json - the single place to refine the suggestions over time
+  (the translate prompt has a {{language}} placeholder). The prompt follows category changes until you
+  edit it by hand, and "Use suggested prompt" restores it. With several skills of a category the oldest is
+  used. Deleting a provider deletes its skills (the dialog says how many).
+- New message columns: taxonomy_list (JSON array of 2-6 labels), ai_summary, translated_text and (my addition)
+  translated_language, so results are stored permanently and not paid for twice. Existing databases are
+  migrated.
+- Reading pane: "Summarize" stores the summary and - when a Categorize skill exists - the taxonomy in the same
+  go (a failing categorize step doesn't lose the summary and is reported). The summary and the labels (chips)
+  show above the message. "Translate" stores a translation into the language set under "Translate into" and
+  adds a "Translation" tab, which opens right away (a transient choice, not stored as the preferred view).
+- Compose: a "Refine" menu with Phrase, Spelling + Grammar and Translate... (asks for the language, starting
+  with your setting). It only rewrites the part you wrote - not the signature, the quoted original of a reply
+  or a forwarded message - and there is an Undo. Items without a matching skill are disabled, as are the
+  reading pane buttons.
+- Vendors are called from the server with plain fetch: Anthropic messages, OpenAI-style chat completions
+  (also for compatible services via the address), Gemini generateContent, Ollama chat; 90 s timeout, texts
+  cut at 60,000 characters, vendor errors passed on as a 502 with their message.
+- Privacy: the text of the message or draft is sent to the provider you configured, and only when you press
+  one of these buttons (the Settings tab says so).
+- New endpoints under /api/ai/... and .../emails/:id/ai/{summarize,categorize,translate}; user setting
+  aiTargetLanguage. Tests: models, vendor request shapes, prompt/answer helpers, the whole HTTP flow with a
+  stubbed AI (incl. isolation between users and the password change), the Settings tab, both buttons and
+  Refine. The suggested prompts and the vendor request shapes are worth checking against the vendors' current
+  docs - I could not call any real API here.
+- Not done: searching or filtering by taxonomy label, showing labels in the message list, choosing between
+  several skills of one category, and streaming answers.
+
+
 2026-09-19 - Left-aligned recipient line (f9a0cfd)
 --------------------------------------------------
 The "to ..." summary line below the sender in the message header is now left-aligned. It is a button,
