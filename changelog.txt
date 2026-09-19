@@ -7,6 +7,13 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - "Remember on this device" switch (90ff26a)
+--------------------------------------------------------
+On the sign-in screen the passkey option is now a switch (like the ones in the settings) labelled just
+"Remember on this device", instead of a checkbox with "Remember on this device, unlocked by a passkey / Touch
+ID / security key". Behaviour is unchanged. Tests and README adjusted.
+
+
 2026-09-19 - Passkey unlock of the saved password (bd48f3f)
 ------------------------------------------------------------
 Verdict first: the idea is sound only when the encryption key comes out of the authenticator. "Ask for a
