@@ -7,6 +7,15 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Logo in the login window (880c64e)
+------------------------------------------------
+The login window now shows logo/psmail_logo.svg, centered above the "P.S.Mail" title, in place of
+the round mail icon (the rounded-full bg-primary/10 p-3 badge is gone). The logo is 5rem (size-20)
+and bundled with the app like any other asset. The file is now tracked in git; logo/
+psmail_logo_solid.svg is untouched and still untracked. The test setup's asset plugin also serves
+.svg imports now, and a test checks the logo is there and the old badge isn't.
+
+
 2026-09-19 - Tab renames, fallback tab not remembered (f1a895f)
 --------------------------------------------------------------
 - The reading-pane tabs "Plain text" and "Full HTML" are now called "Plain" and "HTML". Only the
