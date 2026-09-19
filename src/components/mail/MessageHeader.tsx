@@ -53,7 +53,7 @@ export function MessageHeader({ email }: { email: EmailRecord }) {
 
           <button
             onClick={() => setExpanded(v => !v)}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            className="flex w-full items-center justify-start gap-1 text-left text-xs text-muted-foreground hover:text-foreground"
           >
             to {email.to.map(a => a.name || a.address).join(", ") || "—"}
             {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}

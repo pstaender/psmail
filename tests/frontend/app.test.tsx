@@ -2276,6 +2276,13 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     }
     const line = (label: string) => screen.getByText(label).nextElementSibling as HTMLElement;
 
+    test("the 'to' summary line under the sender is left-aligned (buttons center their text by default)", () => {
+      render(<MessageHeader email={email} />);
+      const summary = screen.getByRole("button", { name: /^to /i });
+      expect(summary.className).toContain("text-left");
+      expect(summary.className).toContain("justify-start");
+    });
+
     test("the Message-ID is hidden by default", async () => {
       await openDetails();
       expect(screen.queryByText("Message-ID")).toBeNull();
