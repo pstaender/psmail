@@ -70,7 +70,7 @@ function enc(value: string): string {
 async function request<T>(
   method: string,
   path: string,
-  opts: { token?: string; body?: unknown; formData?: FormData; signal?: AbortSignal } = {}
+  opts: { token?: string; body?: unknown; formData?: FormData; signal?: AbortSignal; onResponse?: (res: Response) => void } = {}
 ): Promise<T> {
   const headers: Record<string, string> = {};
   if (opts.token) headers.authorization = `Bearer ${opts.token}`;
@@ -84,6 +84,7 @@ async function request<T>(
   }
 
   const res = await fetch(path, { method, headers, body: payload, signal: opts.signal });
+  opts.onResponse?.(res);
 
   if (!res.ok) {
     const data = await res.json().catch(() => ({ error: res.statusText }));
@@ -114,9 +115,19 @@ export const api = {
   checkImapCapabilities: (token: string, email: string) =>
     request<Account>("POST", `/api/accounts/${enc(email)}/imap-capabilities`, { token }),
 
-  /** Without `live`: the server's last known folder list (instant; counts are always fresh). With it: re-read from IMAP, which can be slow. */
-  listFolders: (token: string, accountEmail: string, opts: { live?: boolean } = {}) =>
-    request<FolderInfo[]>("GET", `/api/accounts/${enc(accountEmail)}/folders${opts.live ? "?live=1" : ""}`, { token }),
+  /**
+   * Without `live`: the server's last known folder list (instant; counts are always fresh). With it: re-read from IMAP,
+   * which can be slow. `onWarning` gets the reason when the server couldn't be reached and the list is only what is
+   * stored locally (null when it could).
+   */
+  listFolders: (token: string, accountEmail: string, opts: { live?: boolean; onWarning?: (warning: string | null) => void } = {}) =>
+    request<FolderInfo[]>("GET", `/api/accounts/${enc(accountEmail)}/folders${opts.live ? "?live=1" : ""}`, {
+      token,
+      onResponse: res => {
+        const warning = res.headers.get("x-folders-warning");
+        opts.onWarning?.(warning ? decodeURIComponent(warning) : null);
+      },
+    }),
 
   listEmails: (token: string, accountEmail: string, folder: string, opts: { limit?: number; offset?: number } = {}) => {
     const params = new URLSearchParams({ folder });

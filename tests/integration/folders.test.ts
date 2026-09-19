@@ -22,7 +22,12 @@ afterAll(() => {
 async function get(path: string, token: string) {
   const res = await fetch(`${base}${path}`, { headers: { authorization: `Bearer ${token}` } });
   const text = await res.text();
-  return { status: res.status, json: text ? JSON.parse(text) : undefined, source: res.headers.get("x-folders-source") };
+  return {
+    status: res.status,
+    json: text ? JSON.parse(text) : undefined,
+    source: res.headers.get("x-folders-source"),
+    warning: res.headers.get("x-folders-warning") ? decodeURIComponent(res.headers.get("x-folders-warning")!) : null,
+  };
 }
 async function post(path: string, body: unknown, token?: string) {
   const res = await fetch(`${base}${path}`, {
@@ -73,10 +78,41 @@ describe("folder list", () => {
     expect((await get(acc, token)).json[0]).toMatchObject({ total: 2, unread: 1 }); // counts come from the database every time
   });
 
-  test("?live=1 talks to the server (here: fails with the reason) and leaves the cache alone", async () => {
+  test("?live=1 talks to the server; when it can't be reached the cached folders are still listed, with the reason", async () => {
     const res = await get(`${acc}?live=1`, token);
-    expect(res.status).toBe(502);
-    expect(res.json.error).toContain("slow@example.com");
-    expect((await get(acc, token)).source).toBe("cache"); // still usable afterwards
+    expect(res.status).toBe(200);
+    expect(res.source).toBe("local");
+    expect(res.warning).toContain("Couldn't read the folders of slow@example.com from 127.0.0.1");
+    expect(res.json.map((f: { path: string; total: number }) => [f.path, f.total])).toEqual([["INBOX", 2], ["Sent", 0]]); // the stored structure and counts
+    expect((await get(acc, token)).source).toBe("cache"); // and a plain request still works from the cache
+  });
+});
+
+describe("folder list when the server can't be reached and nothing is cached", () => {
+  test("the folders that hold stored mail are listed anyway, so downloaded mail stays readable", async () => {
+    await post("/api/users", { username: "gil", password: "pw" });
+    const token = (await post("/api/auth/login", { username: "gil", password: "pw" })).json.token;
+    const created = await post(
+      "/api/accounts",
+      { email: "down@example.com", imapHost: "127.0.0.1", imapPort: 1, imapUsername: "u", imapPassword: "x", smtpHost: "h", smtpPort: 465, smtpUsername: "u", smtpPassword: "y" },
+      token
+    );
+    const path = `/api/accounts/${encodeURIComponent("down@example.com")}/folders`;
+
+    // Nothing stored either: an error with the reason is all there is to show.
+    expect((await get(path, token)).status).toBe(502);
+
+    createEmail(db, created.json.id, { folder: "INBOX", uid: 1, isDraft: false, isRead: false, subject: "kept" });
+    createEmail(db, created.json.id, { folder: "Archive/2024", uid: 1, isDraft: false, isRead: true, subject: "old" });
+    createEmail(db, created.json.id, { folder: "Sent", uid: 1, isDraft: false, isRead: true, subject: "out" });
+
+    const res = await get(path, token);
+    expect(res.status).toBe(200);
+    expect(res.source).toBe("local");
+    expect(res.warning).toContain("down@example.com");
+    const byPath = Object.fromEntries(res.json.map((f: { path: string; total: number; unread: number; specialUse: string | null }) => [f.path, f]));
+    expect(Object.keys(byPath).sort()).toEqual(["Archive/2024", "INBOX", "Sent"]);
+    expect(byPath["INBOX"]).toMatchObject({ total: 1, unread: 1 });
+    expect(byPath["Sent"].specialUse).toBe("\\Sent"); // guessed from the name, for a sensible icon
   });
 });

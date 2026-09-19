@@ -100,7 +100,7 @@ function listLive(db: Database, account: AccountRow, encryptionKey: Buffer): Pro
  * sometimes needs many seconds), so the last live listing is kept: a plain request is answered from that at once
  * — with counts read fresh from the local database — and only `?live=1` (what the web client asks for in the
  * background after showing the cached tree) talks to the server. With no cache yet, even a plain request has to
- * go live. A failing live listing is a 502 with the server's reason, never a hang.
+ * go live. A failing live listing never hangs and never hides the downloaded mail: the folders that are stored locally are listed anyway, with the reason in an `x-folders-warning` header (a 502 with the reason only when nothing is stored either).
  */
 export function foldersRoutes(db: Database) {
   return {
@@ -113,9 +113,20 @@ export function foldersRoutes(db: Database) {
 
         const live = new URL(req.url).searchParams.get("live") === "1";
         const cached = getFoldersCache<ImapFolder>(db, account.id);
-        const folders = !live && cached ? cached : await listLive(db, account, encryptionKey);
+        const counts = getFolderCounts(db, account.id);
 
-        return json(mergeFolderCounts(folders, getFolderCounts(db, account.id)), { headers: { "x-folders-source": !live && cached ? "cache" : "live" } });
+        try {
+          const folders = !live && cached ? cached : await listLive(db, account, encryptionKey);
+          return json(mergeFolderCounts(folders, counts), { headers: { "x-folders-source": !live && cached ? "cache" : "live" } });
+        } catch (error) {
+          // The server can't be reached (or throttles us): the mail already downloaded is still there to read, so list the
+          // folders it is in — the remembered structure if there is one, else just the folders that hold stored mail —
+          // and say why in a header. Only when there is nothing local to show at all is it an error.
+          if (!(error instanceof ApiError) || (!cached && counts.length === 0)) throw error;
+          return json(mergeFolderCounts(cached ?? [], counts), {
+            headers: { "x-folders-source": "local", "x-folders-warning": encodeURIComponent(error.message) },
+          });
+        }
       }),
     },
   };

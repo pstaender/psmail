@@ -7,6 +7,8 @@ export function useFolders(accountEmail: string | null) {
   const [folders, setFolders] = useState<FolderInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set when the mail server couldn't be reached and only the folders stored locally are listed (with the reason).
+  const [warning, setWarning] = useState<string | null>(null);
 
   // Which account `folders` currently belongs to. A refresh for the *same* account keeps showing the
   // folders it already has (stale-while-revalidate) instead of blanking the tree behind a spinner —
@@ -26,7 +28,7 @@ export function useFolders(accountEmail: string | null) {
       setLoading(true);
     }
     try {
-      const result = await api.listFolders(token, accountEmail);
+      const result = await api.listFolders(token, accountEmail, { onWarning: setWarning });
       if (loadedFor.current !== accountEmail) return;
       setFolders(result);
       setError(null);
@@ -46,7 +48,7 @@ export function useFolders(accountEmail: string | null) {
     refresh().then(() => {
       if (cancelled || !token || !accountEmail) return;
       api
-        .listFolders(token, accountEmail, { live: true })
+        .listFolders(token, accountEmail, { live: true, onWarning: setWarning })
         .then(live => {
           if (!cancelled && loadedFor.current === accountEmail) setFolders(live);
         })
@@ -75,5 +77,5 @@ export function useFolders(accountEmail: string | null) {
     );
   }, []);
 
-  return { folders, loading, error, refresh, patchCounts };
+  return { folders, loading, error, warning, refresh, patchCounts };
 }

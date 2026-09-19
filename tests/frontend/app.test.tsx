@@ -198,6 +198,8 @@ function installMockFetch(
     syncStaysRunning?: boolean;
     /** What GET .../folders?live=1 (the slow IMAP read) answers: a folder list, or "fail" for a 502. Default: the same as the cached list. */
     liveFolders?: Record<string, unknown>[] | "fail";
+    /** GET .../folders answers with the stored folders and this reason in x-folders-warning (the mail server can't be reached). */
+    folderWarning?: string;
     /** Categories the user has AI skills for (all on one provider); they show up in GET /api/ai/skills. */
     aiSkillCategories?: string[];
     /** Provider records GET /api/ai/apis starts with. */
@@ -247,6 +249,11 @@ function installMockFetch(
   folderDelayMs = 0;
   let currentSettings: Record<string, unknown> = { ...opts.settings };
 
+  const warned = (response: Response) => {
+    if (opts.folderWarning) response.headers.set("x-folders-warning", encodeURIComponent(opts.folderWarning));
+    return response;
+  };
+
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     const method = init?.method ?? "GET";
@@ -290,12 +297,12 @@ function installMockFetch(
         await new Promise(resolve => setTimeout(resolve, 150)); // IMAP takes its time
         return jsonResponse(opts.liveFolders);
       }
-      return jsonResponse(FOLDERS);
+      return warned(jsonResponse(FOLDERS));
     }
     if (method === "GET" && path === "/api/accounts/me%40example.com/folders") {
       folderRequests += 1;
       if (folderDelayMs > 0) await new Promise(resolve => setTimeout(resolve, folderDelayMs));
-      return jsonResponse(FOLDERS);
+      return warned(jsonResponse(FOLDERS));
     }
     if (method === "POST" && path === "/api/accounts/me%40example.com/downloads") {
       downloadPosts.push(init?.body ? JSON.parse(init.body as string) : {});
@@ -2939,6 +2946,23 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await new Promise(resolve => setTimeout(resolve, 50));
       expect(screen.getByText("Entwürfe")).toBeTruthy();
       expect(screen.queryByText(/Couldn't read the folders/)).toBeNull();
+    });
+
+    test("when the mail server can't be reached, the stored folders are listed with a note explaining why", async () => {
+      installMockFetch({ folderWarning: "Couldn't read the folders of me@example.com from imap.example.com: Unexpected close" });
+      await openTree();
+
+      expect(await screen.findByText("Entwürfe")).toBeTruthy(); // the stored folders, so the downloaded mail can be read
+      const note = await screen.findByText("Server not reachable — showing the stored folders.");
+      expect(note.getAttribute("title")).toContain("Unexpected close"); // the reason on hover
+    });
+
+    test("no note when the server answered", async () => {
+      installMockFetch();
+      await openTree();
+      await screen.findByText("Entwürfe");
+      await waitFor(() => expect(liveFolderRequests).toBeGreaterThan(0));
+      expect(screen.queryByText(/Server not reachable/)).toBeNull();
     });
 
     test("refreshing counts (after a sync, say) doesn't ask IMAP again", async () => {

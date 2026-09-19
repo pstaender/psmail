@@ -46,6 +46,8 @@ export interface SharedFolders {
   folders: FolderInfo[];
   loading: boolean;
   error: string | null;
+  /** The mail server couldn't be reached: the list is only what is stored locally (the reason). */
+  warning: string | null;
   refresh: () => void;
 }
 
@@ -81,7 +83,7 @@ export function AccountRow({
   // move-to-folder menus, and keeps unread counts patched on read/flag/delete/move), reuse that
   // instead of fetching an independent copy that would only ever catch up on a full refresh.
   const own = useFolders(usingShared ? null : expanded ? account.email : null);
-  const { folders, loading, error, refresh } = usingShared ? sharedFolders : own;
+  const { folders, loading, error, warning, refresh } = usingShared ? sharedFolders : own;
   const job = syncJob;
   const isRunning = job?.status === "pending" || job?.status === "running";
   const syncLabel = job
@@ -166,6 +168,11 @@ export function AccountRow({
           </div>
         )}
         {error && folders.length === 0 && <p className="py-1 pl-4 text-xs text-destructive">{error}</p>}
+        {warning && folders.length > 0 && (
+          <p className="py-1 pl-4 text-xs text-muted-foreground" title={warning}>
+            Server not reachable — showing the stored folders.
+          </p>
+        )}
 
         {folders.map(folder => {
             const Icon = folderIcon(folder);

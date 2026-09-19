@@ -207,7 +207,7 @@ export function AppShell() {
     selectedAccountEmail,
     selectedFolder
   );
-  const { folders, loading: foldersLoading, error: foldersError, refresh: refreshFolders, patchCounts: patchRawFolderCounts } =
+  const { folders, loading: foldersLoading, error: foldersError, warning: foldersWarning, refresh: refreshFolders, patchCounts: patchRawFolderCounts } =
     useFolders(selectedAccountEmail);
 
   // Unread messages across every account's Inbox, for the combined Inbox's badge. Loaded from the
@@ -904,6 +904,7 @@ export function AppShell() {
                   folders,
                   loading: foldersLoading,
                   error: foldersError,
+                  warning: foldersWarning,
                   refresh: refreshFolders,
                 }}
               />
