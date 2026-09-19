@@ -154,6 +154,8 @@ const downloadPosts: Record<string, unknown>[] = [];
 const capturedResultPatches: Record<string, unknown>[] = [];
 // Bodies of POST /api/auth/change-password.
 const passwordChanges: Record<string, unknown>[] = [];
+// Every bulk PATCH/DELETE/move request, with the account it went to.
+const bulkRequests: { account: string; method: string; move: string | null; body: Record<string, unknown> }[] = [];
 let folderRequests = 0;
 let unreadRequests = 0;
 // The afterId (or null) of every GET /api/unified/inbox/new call.
@@ -182,6 +184,8 @@ function installMockFetch(
     inboxUnread?: number;
     /** The sync job never finishes (GET job stays running at 12/340) — to look at the in-progress UI. */
     syncStaysRunning?: boolean;
+    /** Replaces the combined Inbox's rows (default: one starred message). */
+    unifiedInboxRows?: Record<string, unknown>[];
     /** Makes POST /api/auth/change-password answer with this error (status 401) instead of succeeding. */
     changePasswordError?: string;
     /** What GET /api/unified/inbox/new answers when asked with an afterId (without one it just reports latestId: 100). */
@@ -199,6 +203,7 @@ function installMockFetch(
   downloadPosts.length = 0;
   capturedResultPatches.length = 0;
   passwordChanges.length = 0;
+  bulkRequests.length = 0;
   folderRequests = 0;
   unreadRequests = 0;
   newMailRequests.length = 0;
@@ -293,6 +298,7 @@ function installMockFetch(
       return jsonResponse(currentSettings);
     }
     if (method === "GET" && path === "/api/unified/inbox") {
+      if (opts.unifiedInboxRows) return jsonResponse(opts.unifiedInboxRows);
       return jsonResponse([
         {
           id: 10, accountEmail: "me@example.com", folder: "INBOX", uid: 1, isRead: true, isFlagged: true,
@@ -347,17 +353,11 @@ function installMockFetch(
 
     // Bulk actions (mark-as-read/unread, delete, move) share one request for the whole
     // selection — see runBulkAction in both AppShell.tsx and server/routes/emails.ts.
-    if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/bulk") {
+    const bulk = /^\/api\/accounts\/([^/]+)\/emails\/bulk(\/move\/.*)?$/.exec(path);
+    if (bulk && (method === "PATCH" || method === "DELETE")) {
       const body = init?.body ? JSON.parse(init.body as string) : { ids: [] };
-      return jsonResponse((body.ids as number[]).map(id => ({ id, ok: true })));
-    }
-    if (method === "DELETE" && path === "/api/accounts/me%40example.com/emails/bulk") {
-      const body = init?.body ? JSON.parse(init.body as string) : { ids: [] };
-      return jsonResponse((body.ids as number[]).map(id => ({ id, ok: true, softDeleted: false })));
-    }
-    if (method === "PATCH" && path.startsWith("/api/accounts/me%40example.com/emails/bulk/move/")) {
-      const body = init?.body ? JSON.parse(init.body as string) : { ids: [] };
-      return jsonResponse((body.ids as number[]).map(id => ({ id, ok: true })));
+      bulkRequests.push({ account: decodeURIComponent(bulk[1]!), method, move: bulk[2] ? decodeURIComponent(bulk[2].slice(6)) : null, body });
+      return jsonResponse((body.ids as number[]).map(id => ({ id, ok: true, ...(method === "DELETE" ? { softDeleted: false } : {}) })));
     }
     if (method === "GET" && path === "/api/search") {
       // The mock doesn't replicate real matching (that's covered by backend tests) —
@@ -2023,6 +2023,133 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
       expect(await screen.findByText("Current password is incorrect")).toBeTruthy();
       expect((screen.getByLabelText("New password") as HTMLInputElement).value).toBe("new-pw");
+    });
+  });
+
+  describe("bulk selection in the combined lists", () => {
+    const row = (id: number, subject: string, accountEmail: string, extra: Record<string, unknown> = {}) => ({
+      id, accountEmail, folder: "INBOX", uid: id, isRead: false, isFlagged: false, subject,
+      from: [{ name: "Alice", address: "alice@example.com" }], date: NOW, ...extra,
+    });
+    const ROWS = [
+      row(10, "Mine one", "me@example.com"),
+      row(11, "Mine two", "me@example.com"),
+      row(12, "Theirs three", "you@example.com"),
+    ];
+    const rowOf = (subject: string) => screen.getByText(subject).closest("li")!;
+    const selectedRows = () => ROWS.filter(r => rowOf(r.subject as string).firstElementChild!.className.includes("ring-primary"));
+
+    async function openCombined() {
+      installMockFetch({ unifiedInboxRows: ROWS });
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await screen.findByText("Mine one"); // the app opens on the combined Inbox
+    }
+
+    test("Cmd/Ctrl+click and Shift+click select rows, across accounts", async () => {
+      await openCombined();
+
+      fireEvent.click(screen.getByText("Mine one"), { ctrlKey: true });
+      await waitFor(() => expect(screen.getByText("1 selected")).toBeTruthy());
+      expect(screen.getByText("Select a message")).toBeTruthy(); // the reading pane wasn't touched
+
+      fireEvent.click(screen.getByText("Theirs three"), { shiftKey: true }); // range from the anchor, over both accounts
+      await waitFor(() => expect(screen.getByText("3 selected")).toBeTruthy());
+      expect(selectedRows().map(r => r.id)).toEqual([10, 11, 12]);
+
+      fireEvent.click(screen.getByText("Mine two"), { ctrlKey: true }); // toggles one out
+      await waitFor(() => expect(screen.getByText("2 selected")).toBeTruthy());
+
+      await userEvent.click(screen.getByText("Mine one")); // a plain click reads it and drops the selection
+      await waitFor(() => expect(screen.queryByText(/\d+ selected/)).toBeNull());
+    });
+
+    test("Cmd/Ctrl+A and Shift+arrows work in the combined list too", async () => {
+      await openCombined();
+      (document.body as HTMLElement).focus();
+
+      await userEvent.keyboard("{Control>}a{/Control}");
+      await waitFor(() => expect(screen.getByText("3 selected")).toBeTruthy());
+
+      await userEvent.click(screen.getByTitle("Clear selection"));
+      await waitFor(() => expect(screen.queryByText(/\d+ selected/)).toBeNull());
+
+      await userEvent.click(screen.getByText("Mine one"));
+      (document.body as HTMLElement).focus();
+      await userEvent.keyboard("{Shift>}{ArrowDown}{ArrowDown}{/Shift}");
+      await waitFor(() => expect(screen.getByText("3 selected")).toBeTruthy());
+    });
+
+    test("marking read sends one bulk request per account and updates the rows", async () => {
+      await openCombined();
+      await userEvent.click(screen.getByText("Mine one"));
+      (document.body as HTMLElement).focus();
+      await userEvent.keyboard("{Control>}a{/Control}");
+      await waitFor(() => expect(screen.getByText("3 selected")).toBeTruthy());
+
+      await userEvent.click(screen.getByTitle("Mark as read"));
+      await waitFor(() =>
+        expect(bulkRequests).toEqual([
+          { account: "me@example.com", method: "PATCH", move: null, body: expect.objectContaining({ ids: [10, 11], isRead: true }) },
+          { account: "you@example.com", method: "PATCH", move: null, body: expect.objectContaining({ ids: [12], isRead: true }) },
+        ])
+      );
+      await waitFor(() => expect(screen.queryByText(/\d+ selected/)).toBeNull());
+      for (const r of ROWS) expect(rowOf(r.subject as string).querySelector(".bg-primary.rounded-full")).toBeNull(); // no unread dots left
+    });
+
+    test("Move is offered only when the selection is from a single account", async () => {
+      await openCombined();
+      fireEvent.click(screen.getByText("Mine one"), { ctrlKey: true });
+      fireEvent.click(screen.getByText("Mine two"), { ctrlKey: true });
+      await waitFor(() => expect(screen.getByText("2 selected")).toBeTruthy());
+      await waitFor(() => expect(screen.getByTitle("Move")).toBeTruthy());
+
+      fireEvent.click(screen.getByText("Theirs three"), { ctrlKey: true });
+      await waitFor(() => expect(screen.getByText("3 selected")).toBeTruthy());
+      expect(screen.queryByTitle("Move")).toBeNull();
+    });
+
+    test("moving a single account's selection sends one bulk move and the rows leave the combined Inbox", async () => {
+      await openCombined();
+      fireEvent.click(screen.getByText("Mine one"), { ctrlKey: true });
+      fireEvent.click(screen.getByText("Mine two"), { ctrlKey: true });
+      await waitFor(() => expect(screen.getByText("2 selected")).toBeTruthy());
+
+      await userEvent.click(await screen.findByTitle("Move"));
+      await userEvent.click(await screen.findByRole("menuitem", { name: "Entwürfe" })); // the account's folders, minus INBOX where they all are
+
+      await waitFor(() => expect(bulkRequests).toEqual([{ account: "me@example.com", method: "PATCH", move: "Entwürfe", body: expect.objectContaining({ ids: [10, 11] }) }]));
+      await waitFor(() => expect(screen.queryByText("Mine one")).toBeNull());
+      expect(screen.getByText("Theirs three")).toBeTruthy(); // the other account's message stays
+    });
+
+    test("deleting across accounts confirms (the permanent ones), then deletes per account and removes the rows", async () => {
+      await openCombined();
+      (document.body as HTMLElement).focus();
+      await userEvent.keyboard("{Control>}a{/Control}");
+      await waitFor(() => expect(screen.getByText("3 selected")).toBeTruthy());
+
+      await userEvent.click(screen.getByTitle("Delete"));
+      const confirm = await screen.findByRole("alertdialog");
+      expect(bulkRequests).toEqual([]); // not before the confirmation
+      await userEvent.click(within(confirm).getByRole("button", { name: /delete/i }));
+
+      await waitFor(() => expect(bulkRequests.map(r => [r.account, r.method, r.body.ids])).toEqual([
+        ["me@example.com", "DELETE", [10, 11]],
+        ["you@example.com", "DELETE", [12]],
+      ]));
+      await waitFor(() => expect(screen.queryByText("Mine one")).toBeNull());
+      expect(screen.queryByText("Theirs three")).toBeNull();
+    });
+
+    test("a new search or another mailbox starts with a clean selection", async () => {
+      await openCombined();
+      fireEvent.click(screen.getByText("Mine one"), { ctrlKey: true });
+      await waitFor(() => expect(screen.getByText("1 selected")).toBeTruthy());
+
+      await userEvent.click(screen.getByTitle("Sent of all accounts"));
+      await waitFor(() => expect(screen.queryByText(/\d+ selected/)).toBeNull());
     });
   });
 });

@@ -52,7 +52,7 @@ import type { SearchResult } from "../../server/models/search";
  * the server doesn't always call it literally "Trash" — so this stays in sync with what the
  * backend will actually decide.
  */
-function willSoftDelete(account: Account | null, email: EmailRecord, folders: FolderInfo[]): boolean {
+function willSoftDelete(account: Account | null, email: { uid: number | null; folder: string }, folders: FolderInfo[]): boolean {
   return (
     !!account &&
     !account.readOnly &&
@@ -61,6 +61,14 @@ function willSoftDelete(account: Account | null, email: EmailRecord, folders: Fo
     !account.skipSoftDelete &&
     email.folder !== resolveSpecialFolder(folders, "\\Trash", "Trash")
   );
+}
+
+interface SelectionItem {
+  id: number;
+  accountEmail: string;
+  folder: string;
+  uid: number | null;
+  isRead: boolean;
 }
 
 export function AppShell() {
@@ -257,9 +265,8 @@ export function AppShell() {
   //
   // - Esc closes the search (same as its "x") and takes focus out of the search box.
   // - Cmd/Ctrl+K focuses the search input, from anywhere (even while typing in another field).
-  // - Cmd/Ctrl+A selects every loaded message in the folder list (for the bulk actions) — only
-  //   outside text fields, where it keeps its normal meaning, and not in search/combined lists,
-  //   which have no bulk selection.
+  // - Cmd/Ctrl+A selects every loaded message in the list on screen (for the bulk actions) — only
+  //   outside text fields, where it keeps its normal meaning.
   // - Cmd/Ctrl+R replies to the open message (instead of reloading the page) — only when one is open.
   // - Backspace/Delete deletes the open message (or the bulk selection, if there is one), same as
   //   clicking the Delete button — also skipped while typing in a text field.
@@ -290,9 +297,10 @@ export function AppShell() {
       }
 
       if (mod && key === "a") {
-        if (typing || showingResults || emails.length === 0) return;
+        const { ids } = activeList();
+        if (typing || ids.length === 0) return;
         e.preventDefault();
-        setSelectedIds(new Set(emails.map(email => email.id)));
+        setSelectedIds(new Set(ids));
         return;
       }
 
@@ -313,7 +321,7 @@ export function AppShell() {
       if (e.key !== "Backspace" && e.key !== "Delete") return;
 
       if (typing) return;
-      if (!(!showingResults && selectedIds.size > 0) && !selectedEmail) return;
+      if (selectedIds.size === 0 && !selectedEmail) return;
 
       e.preventDefault();
       requestDelete();
@@ -323,26 +331,29 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", onKeyDown);
   });
 
+  /** The ids of the list on screen (folder messages, or search/combined results), in order, and how to open one in the reading pane. */
+  function activeList(): { ids: number[]; open: (id: number) => void } {
+    if (showingResults) {
+      return {
+        ids: searchResults.map(r => r.id),
+        open: id => {
+          const result = searchResults.find(r => r.id === id);
+          if (result) selectSearchResult(result);
+        },
+      };
+    }
+    return { ids: emails.map(e => e.id), open: id => setSelectedEmailId(id) };
+  }
+
   /**
-   * Arrow up/down through the active list: shows the next/previous message (in a folder list, or in
-   * search/combined results). In a folder list, Shift+arrow instead extends the bulk selection from
-   * the anchor to the new position, like Shift+click. Returns whether the key did something.
+   * Arrow up/down through the active list (folder list, search results or combined lists): shows the
+   * next/previous message; with Shift, extends the bulk selection from the anchor to the new position
+   * instead, like Shift+click. Returns whether the key did something.
    */
   function moveListCursor(direction: 1 | -1, extend: boolean): boolean {
-    if (showingResults) {
-      if (extend || searchResults.length === 0) return false; // results have no bulk selection
-      const index = searchResults.findIndex(r => r.id === selectedEmailId);
-      const next = index === -1 ? (direction > 0 ? 0 : searchResults.length - 1) : Math.min(Math.max(index + direction, 0), searchResults.length - 1);
-      const result = searchResults[next]!;
-      if (result.id !== selectedEmailId) {
-        selectSearchResult(result);
-        setCursorId(result.id);
-      }
-      return true;
-    }
+    const { ids, open } = activeList();
+    if (ids.length === 0) return false;
 
-    if (emails.length === 0) return false;
-    const ids = emails.map(e => e.id);
     const from = ids.indexOf(cursorId ?? selectionAnchorId ?? selectedEmailId ?? -1);
     const next = from === -1 ? (direction > 0 ? 0 : ids.length - 1) : Math.min(Math.max(from + direction, 0), ids.length - 1);
     const nextId = ids[next]!;
@@ -355,7 +366,7 @@ export function AppShell() {
       setSelectionAnchorId(anchorId);
     } else {
       setSelectedIds(new Set());
-      setSelectedEmailId(nextId);
+      open(nextId);
       setSelectionAnchorId(nextId);
     }
     setCursorId(nextId);
@@ -387,40 +398,48 @@ export function AppShell() {
     setSelectionAnchorId(null);
   }
 
-  // Plain click reads the message as usual (and drops any bulk selection, like every
-  // other mail client). Cmd/Ctrl+click toggles it in the bulk-action selection without
-  // touching the reading pane, so you can build a selection while still reading. Shift+click
-  // selects every message between the anchor (the last plain- or Cmd/Ctrl-clicked one) and
-  // this one, replacing the current selection — the anchor itself doesn't move, so repeated
-  // Shift+clicks grow/shrink the range from the same starting point.
-  function selectEmail(email: EmailRecord, event: React.MouseEvent) {
+  /**
+   * Cmd/Ctrl+click toggles a message in the bulk-action selection without touching the reading pane, so
+   * you can build a selection while still reading. Shift+click selects every message between the anchor
+   * (the last plain- or Cmd/Ctrl-clicked one) and this one, replacing the current selection — the anchor
+   * itself doesn't move, so repeated Shift+clicks grow/shrink the range from the same starting point.
+   * Shared by the folder list and the search/combined lists. Returns false for a plain click.
+   */
+  function handleSelectionClick(ids: number[], id: number, event: React.MouseEvent): boolean {
     if (event.shiftKey) {
-      const ids = emails.map(e => e.id);
       const anchorIndex = selectionAnchorId !== null ? ids.indexOf(selectionAnchorId) : -1;
-      const targetIndex = ids.indexOf(email.id);
+      const targetIndex = ids.indexOf(id);
 
       if (anchorIndex === -1 || targetIndex === -1) {
-        setSelectedIds(new Set([email.id]));
+        setSelectedIds(new Set([id]));
       } else {
         const [start, end] = anchorIndex <= targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
         setSelectedIds(new Set(ids.slice(start, end + 1)));
       }
 
-      if (selectionAnchorId === null) setSelectionAnchorId(email.id);
-      return;
+      if (selectionAnchorId === null) setSelectionAnchorId(id);
+      setCursorId(id);
+      return true;
     }
 
     if (event.metaKey || event.ctrlKey) {
       setSelectedIds(prev => {
         const next = new Set(prev);
-        if (next.has(email.id)) next.delete(email.id);
-        else next.add(email.id);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
         return next;
       });
-      setSelectionAnchorId(email.id);
-      setCursorId(email.id);
-      return;
+      setSelectionAnchorId(id);
+      setCursorId(id);
+      return true;
     }
+
+    return false;
+  }
+
+  // A plain click reads the message as usual (and drops any bulk selection, like every other mail client).
+  function selectEmail(email: EmailRecord, event: React.MouseEvent) {
+    if (handleSelectionClick(emails.map(e => e.id), email.id, event)) return;
 
     setSelectedIds(new Set());
     setSelectedEmailId(email.id);
@@ -437,6 +456,14 @@ export function AppShell() {
     setSelectedEmailId(result.id);
     setSelectedIds(new Set());
     setSelectionAnchorId(null);
+  }
+
+  function selectResult(result: SearchResult, event: React.MouseEvent) {
+    if (handleSelectionClick(searchResults.map(r => r.id), result.id, event)) return;
+
+    selectSearchResult(result);
+    setSelectionAnchorId(result.id);
+    setCursorId(result.id);
   }
 
   function errorMessage(err: unknown, fallback: string): string {
@@ -540,91 +567,135 @@ export function AppShell() {
     toast.success(`Moved to ${folder}`);
   }
 
+  // What the bulk actions act on: the checked rows of whichever list is on screen. In the folder list they
+  // all belong to the selected account; search/combined results can mix accounts.
+  const selectionItems: SelectionItem[] = useMemo(() => {
+    if (selectedIds.size === 0) return [];
+    if (showingResults) {
+      return searchResults
+        .filter(r => selectedIds.has(r.id))
+        .map(r => ({ id: r.id, accountEmail: r.accountEmail, folder: r.folder, uid: r.uid, isRead: r.isRead }));
+    }
+    return emails
+      .filter(e => selectedIds.has(e.id))
+      .map(e => ({ id: e.id, accountEmail: selectedAccountEmail ?? "", folder: e.folder, uid: e.uid, isRead: e.isRead }));
+  }, [selectedIds, showingResults, searchResults, emails, selectedAccountEmail]);
+
+  // The one account every selected message belongs to, if there is exactly one — Move needs that (folders
+  // are per account), so the sidebar's account follows it and its folder list is what Move offers.
+  const selectionAccount = selectionItems.length > 0 && selectionItems.every(i => i.accountEmail === selectionItems[0]!.accountEmail)
+    ? selectionItems[0]!.accountEmail
+    : null;
+  useEffect(() => {
+    if (showingResults && selectionAccount && selectionAccount !== selectedAccountEmail) setSelectedAccountEmail(selectionAccount);
+  }, [showingResults, selectionAccount, selectedAccountEmail]);
+
+  // A different result list (new search, another combined mailbox) starts with a clean selection.
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setSelectionAnchorId(null);
+    setCursorId(null);
+  }, [searchQuery.trim()]); // eslint-disable-line react-hooks/exhaustive-deps
+
   /**
-   * Runs one bulk request for every selected message — a single shared IMAP connection
-   * server-side (see runBulkAction in server/routes/emails.ts), instead of firing one request
-   * per message — and reports how many of them actually succeeded.
+   * Runs the bulk request for the selected messages — one request per account (each a single shared IMAP
+   * connection server-side, see runBulkAction in server/routes/emails.ts, instead of one per message) —
+   * and reports how many of them actually succeeded. Returns the successes with their list rows.
    */
-  async function runBulkAction(action: (ids: number[]) => Promise<BulkResult[]>, verb: string): Promise<BulkResult[]> {
-    if (!token || !selectedAccountEmail) return [];
-    const ids = [...selectedIds];
+  async function runBulkAction(
+    perAccount: (accountEmail: string, ids: number[]) => Promise<BulkResult[]>,
+    verb: string
+  ): Promise<{ result: BulkResult; item: SelectionItem }[]> {
+    if (!token) return [];
+    const items = selectionItems;
     setSelectedIds(new Set());
 
-    let results: BulkResult[];
-    try {
-      results = await action(ids);
-    } catch (err) {
-      toast.error(errorMessage(err, `Failed to ${verb.toLowerCase()} message(s)`));
-      return [];
+    const byAccount = new Map<string, SelectionItem[]>();
+    for (const item of items) byAccount.set(item.accountEmail, [...(byAccount.get(item.accountEmail) ?? []), item]);
+
+    const succeeded: { result: BulkResult; item: SelectionItem }[] = [];
+    let failed = 0;
+    for (const [accountEmail, group] of byAccount) {
+      try {
+        const results = await perAccount(accountEmail, group.map(i => i.id));
+        for (const result of results) {
+          const item = group.find(i => i.id === result.id);
+          if (result.ok && item) succeeded.push({ result, item });
+          else failed += 1;
+        }
+      } catch (err) {
+        failed += group.length;
+        toast.error(errorMessage(err, `Failed to ${verb.toLowerCase()} message(s)`));
+      }
     }
 
-    const succeeded = results.filter(r => r.ok);
-    const failed = results.length - succeeded.length;
-
-    if (failed > 0) toast.error(`${verb} ${succeeded.length}/${results.length} message(s) — ${failed} failed`);
-    else toast.success(`${verb} ${results.length} message(s)`);
-
+    if (failed > 0) toast.error(`${verb} ${succeeded.length}/${items.length} message(s) — ${failed} failed`);
+    else toast.success(`${verb} ${items.length} message(s)`);
     return succeeded;
   }
 
+  /** Applies count changes to the sidebar's folder badges (only the selected account's are known here) and re-reads the combined Inbox's badge. */
+  function applyCountChanges(changes: { item: SelectionItem; folder: string; total?: number; unread?: number }[]) {
+    const perFolder = new Map<string, { total: number; unread: number }>();
+    for (const change of changes) {
+      if (change.item.accountEmail !== selectedAccountEmail) continue;
+      const entry = perFolder.get(change.folder) ?? { total: 0, unread: 0 };
+      entry.total += change.total ?? 0;
+      entry.unread += change.unread ?? 0;
+      perFolder.set(change.folder, entry);
+    }
+    for (const [folder, deltas] of perFolder) if (deltas.total !== 0 || deltas.unread !== 0) patchFolderCounts(folder, deltas);
+    if (showingResults) refreshUnifiedInboxUnread();
+  }
+
   async function bulkMarkRead(isRead: boolean) {
-    if (!token || !selectedAccountEmail || !selectedFolder) return;
+    if (!token) return;
     const succeeded = await runBulkAction(
-      ids => api.bulkUpdateEmails(token, selectedAccountEmail, ids, { isRead }),
+      (accountEmail, ids) => api.bulkUpdateEmails(token, accountEmail, ids, { isRead }),
       isRead ? "Marked as read" : "Marked as unread"
     );
-    let unreadDelta = 0;
-    succeeded.forEach(r => {
-      const email = emails.find(e => e.id === r.id);
-      if (email && email.isRead !== isRead) unreadDelta += isRead ? -1 : 1;
-      patchLocal(r.id, { isRead });
+    succeeded.forEach(({ result, item }) => {
+      patchLocal(result.id, { isRead });
+      patchSearchResult(result.id, { isRead });
+      if (selectedEmail?.id === result.id) setSelectedEmailDetail({ ...selectedEmail, isRead });
     });
-    if (unreadDelta !== 0) patchFolderCounts(selectedFolder, { unread: unreadDelta });
+    applyCountChanges(
+      succeeded.filter(({ item }) => item.isRead !== isRead).map(({ item }) => ({ item, folder: item.folder, unread: isRead ? -1 : 1 }))
+    );
   }
 
   async function bulkDelete() {
-    if (!token || !selectedAccountEmail || !selectedFolder) return;
-    const succeeded = await runBulkAction(ids => api.bulkDeleteEmails(token, selectedAccountEmail, ids), "Deleted");
-    let totalDelta = 0;
-    let unreadDelta = 0;
-    let trashTotal = 0;
-    let trashUnread = 0;
-    succeeded.forEach(r => {
-      const email = emails.find(e => e.id === r.id);
-      totalDelta -= 1;
-      if (email && !email.isRead) unreadDelta -= 1;
-      if (r.softDeleted) {
-        trashTotal += 1;
-        if (email && !email.isRead) trashUnread += 1;
-      }
-      removeLocal(r.id);
-      if (selectedEmailId === r.id) setSelectedEmailId(null);
+    if (!token) return;
+    const trash = resolveSpecialFolder(folders, "\\Trash", "Trash");
+    const succeeded = await runBulkAction((accountEmail, ids) => api.bulkDeleteEmails(token, accountEmail, ids), "Deleted");
+    const changes: Parameters<typeof applyCountChanges>[0] = [];
+    succeeded.forEach(({ result, item }) => {
+      changes.push({ item, folder: item.folder, total: -1, unread: item.isRead ? 0 : -1 });
+      if (result.softDeleted) changes.push({ item, folder: trash, total: 1, unread: item.isRead ? 0 : 1 });
+      removeLocal(result.id);
+      removeSearchResult(result.id);
+      if (selectedEmailId === result.id) setSelectedEmailId(null);
     });
-    if (totalDelta !== 0 || unreadDelta !== 0) patchFolderCounts(selectedFolder, { total: totalDelta, unread: unreadDelta });
-    if (trashTotal !== 0 || trashUnread !== 0) {
-      patchFolderCounts(resolveSpecialFolder(folders, "\\Trash", "Trash"), { total: trashTotal, unread: trashUnread });
-    }
+    applyCountChanges(changes);
   }
 
   async function bulkMove(folder: string) {
-    if (!token || !selectedAccountEmail || !selectedFolder) return;
+    if (!token) return;
     const succeeded = await runBulkAction(
-      ids => api.bulkMoveEmails(token, selectedAccountEmail, ids, folder),
+      (accountEmail, ids) => api.bulkMoveEmails(token, accountEmail, ids, folder),
       `Moved to ${folder} —`
     );
-    let totalDelta = 0;
-    let unreadDelta = 0;
-    succeeded.forEach(r => {
-      const email = emails.find(e => e.id === r.id);
-      totalDelta -= 1;
-      if (email && !email.isRead) unreadDelta -= 1;
-      removeLocal(r.id);
-      if (selectedEmailId === r.id) setSelectedEmailId(null);
+    const changes: Parameters<typeof applyCountChanges>[0] = [];
+    succeeded.forEach(({ result, item }) => {
+      changes.push({ item, folder: item.folder, total: -1, unread: item.isRead ? 0 : -1 });
+      changes.push({ item, folder, total: 1, unread: item.isRead ? 0 : 1 });
+      removeLocal(result.id);
+      // A moved message still matches a search (just in another folder) but leaves a combined Inbox/Sent.
+      if (unifiedView !== null && !isSearching) removeSearchResult(result.id);
+      else patchSearchResult(result.id, { folder });
+      if (selectedEmailId === result.id) setSelectedEmailId(null);
     });
-    if (totalDelta !== 0 || unreadDelta !== 0) {
-      patchFolderCounts(selectedFolder, { total: totalDelta, unread: unreadDelta });
-      patchFolderCounts(folder, { total: -totalDelta, unread: -unreadDelta });
-    }
+    applyCountChanges(changes);
   }
 
   /**
@@ -635,11 +706,18 @@ export function AppShell() {
    * mutually exclusive by construction — selecting one clears the other (see selectEmail).
    */
   function requestDelete() {
-    if (!showingResults && selectedIds.size > 0) {
-      const selectedEmails = emails.filter(e => selectedIds.has(e.id));
-      if (selectedEmails.length === 0) return;
-      if (selectedEmails.every(e => willSoftDelete(selectedAccount, e, folders))) bulkDelete();
-      else setConfirmDelete({ mode: "bulk", count: selectedEmails.length });
+    if (selectedIds.size > 0) {
+      if (selectionItems.length === 0) return;
+      const soft = selectionItems.every(item =>
+        willSoftDelete(
+          accounts.find(a => a.email === item.accountEmail) ?? null,
+          item,
+          // Only the selected account's live folder list is at hand for resolving the Trash path.
+          item.accountEmail === selectedAccountEmail ? folders : []
+        )
+      );
+      if (soft) bulkDelete();
+      else setConfirmDelete({ mode: "bulk", count: selectionItems.length });
       return;
     }
     if (selectedEmail) {
@@ -770,10 +848,11 @@ export function AppShell() {
         )}
 
         <div style={{ width: messageListWidth }} className="flex shrink-0 flex-col border-r">
-          {!showingResults && selectedIds.size > 0 ? (
+          {selectionItems.length > 0 ? (
             <BulkActionBar
-              count={selectedIds.size}
-              folders={folders.filter(f => f.path !== selectedFolder)}
+              count={selectionItems.length}
+              canMove={selectionAccount !== null && selectionAccount === selectedAccountEmail}
+              folders={folders.filter(f => !selectionItems.every(item => item.folder === f.path))}
               onMarkRead={() => bulkMarkRead(true)}
               onMarkUnread={() => bulkMarkRead(false)}
               onMove={bulkMove}
@@ -805,7 +884,8 @@ export function AppShell() {
                 onToggleFlag={toggleResultFlag}
                 showRecipient={unifiedView === "sent" && !isSearching}
                 selectedId={selectedEmailId}
-                onSelect={selectSearchResult}
+                selectedIds={selectedIds}
+                onSelect={selectResult}
               />
             ) : selectedAccountEmail && selectedFolder ? (
               <MessageList

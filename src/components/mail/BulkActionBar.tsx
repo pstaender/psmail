@@ -12,6 +12,7 @@ import type { FolderInfo } from "@/lib/api";
 export function BulkActionBar({
   count,
   folders,
+  canMove = true,
   onMarkRead,
   onMarkUnread,
   onMove,
@@ -20,6 +21,8 @@ export function BulkActionBar({
 }: {
   count: number;
   folders: FolderInfo[];
+  /** False when the selection spans several accounts: their folders differ, so there's nothing to move to. */
+  canMove?: boolean;
   onMarkRead: () => void;
   onMarkUnread: () => void;
   onMove: (folder: string) => void;
@@ -43,6 +46,7 @@ export function BulkActionBar({
           <Mail className="size-4" />
         </Button>
 
+        {canMove && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm" title="Move">
@@ -57,6 +61,7 @@ export function BulkActionBar({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+        )}
 
         <Button variant="ghost" size="sm" onClick={onDelete} title="Delete">
           <Trash2 className="size-4" />

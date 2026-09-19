@@ -23,6 +23,7 @@ export function SearchResultList({
   showRecipient = false,
   onToggleFlag,
   selectedId,
+  selectedIds,
   onSelect,
 }: {
   results: SearchResult[];
@@ -36,7 +37,10 @@ export function SearchResultList({
   /** Clicking a row's star flags/unflags that message. */
   onToggleFlag?: (result: SearchResult) => void;
   selectedId: number | null;
-  onSelect: (result: SearchResult) => void;
+  /** Rows checked for a bulk action (Cmd/Ctrl/Shift+click) — independent of `selectedId`, the one open in the reading pane. */
+  selectedIds: Set<number>;
+  /** `event` carries the click's modifier keys, so the caller can tell a plain click from a selection click. */
+  onSelect: (result: SearchResult, event: React.MouseEvent) => void;
 }) {
   const sentinelRef = useRef<HTMLLIElement>(null);
   const onLoadMoreRef = useRef(onLoadMore);
@@ -72,10 +76,11 @@ export function SearchResultList({
         {results.map(result => (
           <li key={`${result.accountEmail}:${result.id}`} data-row-id={result.id}>
             <button
-              onClick={() => onSelect(result)}
+              onClick={e => onSelect(result, e)}
               className={cn(
                 "group flex w-full flex-col gap-0.5 px-3 py-2.5 text-left hover:bg-accent/60 transition-colors",
-                selectedId === result.id && "bg-accent"
+                selectedId === result.id && "bg-accent",
+                selectedIds.has(result.id) && "bg-primary/10 ring-1 ring-inset ring-primary/50"
               )}
             >
               <div className="flex items-center gap-2">
