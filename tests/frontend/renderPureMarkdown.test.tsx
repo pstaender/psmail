@@ -83,7 +83,7 @@ describe("RenderPureMarkdown", () => {
     expect(quote).toBeTruthy();
     expect(quote.textContent!.trim()).toBe("> first quoted line\n> second quoted line\n> new paragraph");
     expect(quote.querySelectorAll(".md-mark")).toHaveLength(3);
-    for (const mark of quote.querySelectorAll(".md-mark")) expect(mark.textContent).toBe("> ");
+    for (const mark of Array.from(quote.querySelectorAll(".md-mark"))) expect(mark.textContent).toBe("> ");
 
     // Text outside the quote is left alone.
     const root = container.querySelector(".psmail-markdown-render")!;
