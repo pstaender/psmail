@@ -24,6 +24,8 @@ export interface ComposeDraft {
   bcc?: string;
   subject?: string;
   body?: string;
+  /** Reply/forward only: the quoted original that `body` ends with — lets the signature be inserted before it (see withSignature). */
+  quoted?: string;
   inReplyTo?: string | null;
   /** The draft's attachments already on the server, when editing — shown alongside newly-added files, removable individually. */
   attachments?: AttachmentRecord[];

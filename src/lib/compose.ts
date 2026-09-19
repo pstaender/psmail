@@ -11,18 +11,21 @@ export function replyDraft(email: EmailRecord): ComposeDraft {
     .map(line => `> ${line}`)
     .join("\n");
 
+  const quoted = `On ${formatFullDate(email.date)}, ${formatAddressList(email.from)} wrote:\n${quotedBody}`;
+
   return {
     to: formatAddressList(replyTo),
     subject,
-    body: `\n\nOn ${formatFullDate(email.date)}, ${formatAddressList(email.from)} wrote:\n${quotedBody}`,
+    body: `\n\n${quoted}`,
+    quoted,
     inReplyTo: email.messageId,
   };
 }
 
 export function forwardDraft(email: EmailRecord): ComposeDraft {
   const subject = /^fwd:/i.test(email.subject ?? "") ? email.subject! : `Fwd: ${email.subject ?? ""}`;
-  const header = [
-    "\n\n---------- Forwarded message ----------",
+  const quoted = [
+    "---------- Forwarded message ----------",
     `From: ${formatAddressList(email.from)}`,
     `Date: ${formatFullDate(email.date)}`,
     `Subject: ${email.subject ?? ""}`,
@@ -31,7 +34,7 @@ export function forwardDraft(email: EmailRecord): ComposeDraft {
     email.plainText ?? "",
   ].join("\n");
 
-  return { to: "", subject, body: header };
+  return { to: "", subject, body: `\n\n${quoted}`, quoted };
 }
 
 /** Continues editing an existing draft in place (unlike reply/forward, which always start a new one) — saving updates this same row rather than creating another. */
@@ -49,13 +52,16 @@ export function editDraft(email: EmailRecord): ComposeDraft {
 }
 
 /**
- * Appends the account's signature to a fresh composition's body — only meant for a brand new
+ * Adds the account's signature to a fresh composition's body (after it for a new message, before the quoted original for a reply/forward) — only meant for a brand new
  * message, reply, or forward, never for editDraft's result (that body is already the draft's
  * own finalized content; re-appending a signature to it on every edit would just keep piling
  * up copies).
  */
 export function withSignature(draft: ComposeDraft | null, signature: string | null): ComposeDraft {
   if (!signature) return draft ?? {};
+  // Reply/forward: the signature goes between the (empty) place you type your answer and the quoted
+  // original, not below the quote.
+  if (draft?.quoted !== undefined) return { ...draft, body: `\n\n-- \n${signature}\n\n${draft.quoted}` };
   const body = draft?.body ? `${draft.body}\n\n-- \n${signature}` : `\n\n-- \n${signature}`;
   return { ...draft, body };
 }
