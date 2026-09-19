@@ -7,6 +7,32 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - New-mail notifications (08250c8)
+----------------------------------------------
+- Two opt-in settings in the Settings dialog ("New mail notifications"), stored on the server:
+  * Browser notification: a desktop notification with only the sender and subject (no content) for
+    one new mail, or a count like "20 new mails" (with the senders) when several arrive. Clicking
+    it focuses the tab and opens that message, or the combined Inbox. Turning it on asks the
+    browser for permission; if refused, the option isn't saved and the dialog explains why.
+  * Toast in the app: sender as title, then subject, the first ~200 characters of the text, date,
+    To and Cc, with an "Open" button (or "20 new mails" with "Show inbox"), plus a sound. Sounds:
+    crystal_clear (the default), cute_bell, marimba or none, with a play button to try them. The
+    files live in src/sounds/ and are bundled with the app. The sound belongs to the toast only.
+  If both are on, both fire.
+- How new mail is detected: after every sync (manual or interval) the client calls the new
+  GET /api/unified/inbox/new?afterId=..., which returns unread, non-draft mail in the combined
+  Inbox's folders (respecting the folder option) that is newer than the last id seen and less than
+  a day old. Mail read on another device and the backlog of a first sync therefore don't notify.
+  The starting point is read when the app loads, so mail that arrived while it was closed isn't
+  announced; it moves forward on every sync even when notifications are off.
+- Notifications only appear after a sync finishes, so with no sync interval set you only get them
+  after clicking "Sync now".
+- Also: the star toggle in result lists (previous entry) was committed separately.
+- Tests: backend (new-mail query, settings validation) and frontend (toast content, sounds,
+  browser notification and click targets, bundles, permission flow); the test setup got a small
+  plugin so bun test can import the .mp3 files.
+
+
 2026-09-19 - Star toggle in search and combined lists (8fb5517)
 ------------------------------------------------------------
 The star in search results and the combined Inbox/Sent lists is now clickable: it appears on hover
