@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { json, parseIntParam, readJsonBody, requireAuth, withErrorHandling } from "../http";
-import { createUser, deleteUser, getUser, listUsers, updateUserPassword } from "../models/users";
+import { createUser, deleteUser, getUser, listUsers } from "../models/users";
+import { changePasswordForSession } from "../services/passwordChange";
 import { ApiError } from "../types";
 
 interface CreateUserBody {
@@ -10,6 +11,8 @@ interface CreateUserBody {
 
 interface UpdateUserBody {
   password: string;
+  /** The current password — needed because changing it re-encrypts the user's saved account passwords. */
+  currentPassword: string;
 }
 
 export function usersRoutes(db: Database) {
@@ -30,13 +33,14 @@ export function usersRoutes(db: Database) {
       }),
       PATCH: withErrorHandling(async req => {
         const id = parseIntParam(req.params.id, "id");
-        const { session } = requireAuth(req, db);
+        const { session, encryptionKey } = requireAuth(req, db);
         if (session.userId !== id) throw new ApiError(403, "Cannot modify another user");
 
         const body = await readJsonBody<UpdateUserBody>(req);
         if (typeof body.password !== "string") throw new ApiError(400, "password is required");
-        const user = await updateUserPassword(db, id, body.password);
-        return json(user);
+        if (typeof body.currentPassword !== "string") throw new ApiError(400, "currentPassword is required");
+        await changePasswordForSession(db, session, encryptionKey, body.currentPassword, body.password);
+        return json(getUser(db, id));
       }),
       DELETE: withErrorHandling(async req => {
         const id = parseIntParam(req.params.id, "id");

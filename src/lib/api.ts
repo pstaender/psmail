@@ -185,6 +185,12 @@ export const api = {
   getDownloadJob: (token: string, accountEmail: string, jobId: number) =>
     request<DownloadJob>("GET", `/api/accounts/${enc(accountEmail)}/downloads/${jobId}`, { token }),
 
+  /** Changes the signed-in user's password (the server re-encrypts the accounts' saved passwords) and signs out their other sessions. */
+  changePassword: (token: string, currentPassword: string, newPassword: string) =>
+    request<{ ok: true; otherSessionsSignedOut: number }>("POST", "/api/auth/change-password", {
+      token,
+      body: { currentPassword, newPassword },
+    }),
   getSettings: (token: string) => request<UserSettings>("GET", "/api/settings", { token }),
   /** Shallow-merges into the stored settings; a key set to null is removed. */
   updateSettings: (token: string, patch: { [K in keyof UserSettings]?: UserSettings[K] | null }) =>

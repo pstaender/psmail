@@ -47,6 +47,23 @@ export function getSessionEncryptionKey(token: string): Buffer | null {
   return keyCache.get(token) ?? null;
 }
 
+/** Swaps the in-memory key of a live session (after the user's password — and with it the key — changed). */
+export function setSessionEncryptionKey(token: string, encryptionKey: Buffer): void {
+  keyCache.set(token, encryptionKey);
+}
+
+/**
+ * Signs a user out everywhere except `keepToken`: their other sessions' cached keys no longer decrypt
+ * anything after a password change, so those sessions could only fail confusingly. Returns how many were ended.
+ */
+export function destroyOtherSessions(db: Database, userId: number, keepToken: string): number {
+  const others = db
+    .query<{ token: string }, [number, string]>("SELECT token FROM sessions WHERE user_id = ? AND token != ?")
+    .all(userId, keepToken);
+  for (const { token } of others) destroySession(db, token);
+  return others.length;
+}
+
 export function destroySession(db: Database, token: string): void {
   db.query("DELETE FROM sessions WHERE token = ?").run(token);
   keyCache.delete(token);

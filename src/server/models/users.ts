@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { hashPassword, verifyPassword } from "../crypto/password";
-import { generateSalt } from "../crypto/secrets";
-import { ConflictError, NotFoundError, UnauthorizedError, type User } from "../types";
+import { decryptSecret, deriveEncryptionKey, encryptSecret, generateSalt } from "../crypto/secrets";
+import { ApiError, ConflictError, NotFoundError, UnauthorizedError, type User } from "../types";
 
 interface UserRow {
   id: number;
@@ -60,20 +60,58 @@ export function getUserRowById(db: Database, id: number): UserRow | null {
   return db.query<UserRow, [number]>("SELECT * FROM users WHERE id = ?").get(id);
 }
 
-export async function updateUserPassword(db: Database, id: number, newPassword: string): Promise<User> {
+/**
+ * Changes a user's login password — which also changes the key their accounts' IMAP/SMTP passwords are
+ * encrypted with (derived from the password and a salt, see crypto/secrets.ts). So every account secret
+ * is decrypted with the current key (`oldKey`, from the caller's session) and re-encrypted with the key
+ * for the new password and a fresh salt, all in one transaction together with the new hash: either
+ * everything changes or nothing does, and an account whose secrets can't be decrypted stops the change
+ * instead of being silently stranded. Returns the new key for the caller's session.
+ */
+export async function changeUserPassword(
+  db: Database,
+  id: number,
+  currentPassword: string,
+  newPassword: string,
+  oldKey: Buffer
+): Promise<Buffer> {
   const existing = getUserRowById(db, id);
   if (!existing) throw new NotFoundError(`User ${id} not found`);
+  if (!(await verifyPassword(currentPassword, existing.password_hash))) throw new UnauthorizedError("Current password is incorrect");
 
-  const passwordHash = await hashPassword(newPassword);
-  const row = db
-    .query<UserRow, [string, number]>(
-      `UPDATE users SET password_hash = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ?
-       RETURNING *`
-    )
-    .get(passwordHash, id);
+  const newSalt = generateSalt();
+  const newKey = deriveEncryptionKey(newPassword, newSalt);
+  const newHash = await hashPassword(newPassword);
 
-  return toUser(row!);
+  db.transaction(() => {
+    const accounts = db
+      .query<{ id: number; email: string; imap_password_encrypted: string; smtp_password_encrypted: string }, [number]>(
+        "SELECT id, email, imap_password_encrypted, smtp_password_encrypted FROM accounts WHERE user_id = ?"
+      )
+      .all(id);
+
+    const update = db.query("UPDATE accounts SET imap_password_encrypted = ?, smtp_password_encrypted = ? WHERE id = ?");
+    for (const account of accounts) {
+      let imap: string;
+      let smtp: string;
+      try {
+        imap = decryptSecret(account.imap_password_encrypted, oldKey);
+        smtp = decryptSecret(account.smtp_password_encrypted, oldKey);
+      } catch {
+        throw new ApiError(
+          422,
+          `The saved passwords of account "${account.email}" can't be decrypted, so they can't be carried over to the new password. Re-enter them in that account's settings first, then change your password.`
+        );
+      }
+      update.run(encryptSecret(imap, newKey), encryptSecret(smtp, newKey), account.id);
+    }
+
+    db.query(
+      `UPDATE users SET password_hash = ?, password_salt = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`
+    ).run(newHash, newSalt, id);
+  })();
+
+  return newKey;
 }
 
 export function deleteUser(db: Database, id: number): void {

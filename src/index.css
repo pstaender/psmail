@@ -42,6 +42,8 @@ img[alt="P.S.Mail logo"] {
         display: none;
       }
       > .flex-1 > div {
+        overflow: unset;
+        height: unset;
         > div:not(.flex-1), [role="tablist"] {
           display: none;
         }

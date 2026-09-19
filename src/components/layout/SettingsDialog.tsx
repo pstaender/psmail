@@ -5,6 +5,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PasswordForm } from "./PasswordForm";
 import type { UserSettings } from "@/lib/api";
 import { DEFAULT_NOTIFICATION_SOUND, NOTIFICATION_SOUNDS, playNotificationSound } from "@/lib/notifications";
 
@@ -37,6 +39,7 @@ export function SettingsDialog({
   const [notifyBrowser, setNotifyBrowser] = useState(false);
   const [notifyToast, setNotifyToast] = useState(false);
   const [sound, setSound] = useState<SettingsPatch["notificationSound"]>(DEFAULT_NOTIFICATION_SOUND);
+  const [tab, setTab] = useState("inboxes");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +52,7 @@ export function SettingsDialog({
       setNotifyToast(settings.notifyToast === true);
       setSound(settings.notificationSound ?? DEFAULT_NOTIFICATION_SOUND);
       setError(null);
+      setTab("inboxes");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -99,9 +103,22 @@ export function SettingsDialog({
           <DialogDescription>{username && username !== "default" ? `For ${username}` : "Your preferences"}</DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={submit} noValidate className="space-y-4">
-          {error && <p className="text-sm text-destructive">{error}</p>}
+        <Tabs value={tab} onValueChange={setTab} className="gap-4">
+          <TabsList>
+            <TabsTrigger value="inboxes">Inboxes</TabsTrigger>
+            <TabsTrigger value="notifications">Notifications</TabsTrigger>
+            <TabsTrigger value="credentials">Credentials</TabsTrigger>
+          </TabsList>
+        </Tabs>
 
+        {tab === "credentials" ? (
+          <PasswordForm />
+        ) : (
+          <form onSubmit={submit} noValidate className="space-y-4">
+            {error && <p className="text-sm text-destructive">{error}</p>}
+
+            {tab === "inboxes" ? (
+              <>
           <div className="space-y-1.5">
             <Label htmlFor="settings-sync-interval">Sync interval (minutes)</Label>
             <Input
@@ -137,9 +154,9 @@ export function SettingsDialog({
             </div>
           </div>
 
-          <fieldset className="space-y-3 rounded-md border p-3">
-            <legend className="px-1 text-sm font-medium">New mail notifications</legend>
-
+              </>
+            ) : (
+          <div className="space-y-4">
             <div className="flex items-start gap-2">
               <Switch id="settings-notify-browser" className="mt-0.5" checked={notifyBrowser} onCheckedChange={setNotifyBrowser} />
               <div className="space-y-0.5">
@@ -182,7 +199,9 @@ export function SettingsDialog({
                 <Volume2 className="size-4" />
               </Button>
             </div>
-          </fieldset>
+          </div>
+
+            )}
 
           <DialogFooter>
             <Button type="submit" disabled={busy}>
@@ -190,7 +209,8 @@ export function SettingsDialog({
               Save
             </Button>
           </DialogFooter>
-        </form>
+          </form>
+        )}
       </DialogContent>
     </Dialog>
   );

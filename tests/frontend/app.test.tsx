@@ -152,6 +152,8 @@ let capturedAccountPatch: Record<string, unknown> | null = null;
 const downloadPosts: Record<string, unknown>[] = [];
 // Bodies of PATCH .../emails/20 (the combined Sent list's message).
 const capturedResultPatches: Record<string, unknown>[] = [];
+// Bodies of POST /api/auth/change-password.
+const passwordChanges: Record<string, unknown>[] = [];
 let folderRequests = 0;
 let unreadRequests = 0;
 // The afterId (or null) of every GET /api/unified/inbox/new call.
@@ -180,6 +182,8 @@ function installMockFetch(
     inboxUnread?: number;
     /** The sync job never finishes (GET job stays running at 12/340) — to look at the in-progress UI. */
     syncStaysRunning?: boolean;
+    /** Makes POST /api/auth/change-password answer with this error (status 401) instead of succeeding. */
+    changePasswordError?: string;
     /** What GET /api/unified/inbox/new answers when asked with an afterId (without one it just reports latestId: 100). */
     newMail?: { total: number; messages: Record<string, unknown>[] };
   } = {}
@@ -194,6 +198,7 @@ function installMockFetch(
   capturedAccountPatch = null;
   downloadPosts.length = 0;
   capturedResultPatches.length = 0;
+  passwordChanges.length = 0;
   folderRequests = 0;
   unreadRequests = 0;
   newMailRequests.length = 0;
@@ -274,6 +279,11 @@ function installMockFetch(
         return jsonResponse(all.slice(offset, offset + limit));
       }
       return jsonResponse([EMAIL, SECOND_EMAIL, THIRD_EMAIL, DRAFT_EMAIL]);
+    }
+    if (method === "POST" && path === "/api/auth/change-password") {
+      passwordChanges.push(init?.body ? JSON.parse(init.body as string) : {});
+      if (opts.changePasswordError) return jsonResponse({ error: opts.changePasswordError }, 401);
+      return jsonResponse({ ok: true, otherSessionsSignedOut: 2 });
     }
     if (method === "GET" && path === "/api/settings") return jsonResponse(currentSettings);
     if (method === "PATCH" && path === "/api/settings") {
@@ -1712,6 +1722,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await openAccountInbox();
 
       await userEvent.click(screen.getByTitle("Settings"));
+      await userEvent.click(await screen.findByRole("tab", { name: "Notifications" }));
       expect((await screen.findByLabelText("Toast sound") as HTMLSelectElement).value).toBe("crystal_clear"); // the default
       await userEvent.click(screen.getByLabelText("Browser notification"));
       await userEvent.click(screen.getByLabelText("Toast in the app"));
@@ -1734,6 +1745,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await openAccountInbox();
 
       await userEvent.click(screen.getByTitle("Settings"));
+      await userEvent.click(await screen.findByRole("tab", { name: "Notifications" }));
       await userEvent.click(await screen.findByLabelText("Browser notification"));
       await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -1915,6 +1927,94 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       (document.body as HTMLElement).focus();
       await userEvent.keyboard("{ArrowDown}");
       expect(isOpen("Hello there")).toBe(false);
+    });
+  });
+
+  describe("settings tabs and password change", () => {
+    async function openSettings() {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+      await userEvent.click(screen.getByTitle("Settings"));
+      await screen.findByRole("tab", { name: "Inboxes" });
+    }
+
+    test("the settings are split into Inboxes, Notifications and Credentials tabs", async () => {
+      await openSettings();
+      const isSelected = (name: string) => screen.getByRole("tab", { name }).getAttribute("aria-selected") === "true";
+
+      expect(isSelected("Inboxes")).toBe(true); // the first tab
+      expect(screen.getByLabelText("Sync interval (minutes)")).toBeTruthy();
+      expect(screen.getByLabelText("Show mail from folders in the combined Inbox")).toBeTruthy();
+      expect(screen.queryByLabelText("Browser notification")).toBeNull();
+
+      await userEvent.click(screen.getByRole("tab", { name: "Notifications" }));
+      expect(screen.getByLabelText("Browser notification")).toBeTruthy();
+      expect(screen.getByLabelText("Toast in the app")).toBeTruthy();
+      expect(screen.getByLabelText("Toast sound")).toBeTruthy();
+      expect(screen.queryByLabelText("Sync interval (minutes)")).toBeNull();
+
+      await userEvent.click(screen.getByRole("tab", { name: "Credentials" }));
+      expect(screen.getByLabelText("Current password")).toBeTruthy();
+      expect(screen.getByLabelText("New password")).toBeTruthy();
+      expect(screen.getByLabelText("Confirm new password")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Save" })).toBeNull(); // this tab has its own button
+      expect(screen.getByRole("button", { name: "Change password" })).toBeTruthy();
+    });
+
+    test("edits made on different tabs are saved together, and tabs keep their values while you switch", async () => {
+      await openSettings();
+      await userEvent.type(screen.getByLabelText("Sync interval (minutes)"), "7");
+      await userEvent.click(screen.getByRole("tab", { name: "Notifications" }));
+      await userEvent.click(screen.getByLabelText("Toast in the app"));
+      await userEvent.click(screen.getByRole("tab", { name: "Inboxes" }));
+      expect((screen.getByLabelText("Sync interval (minutes)") as HTMLInputElement).value).toBe("7");
+
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(capturedSettingsPatches).toEqual([{ ...DEFAULT_PATCH, syncIntervalMinutes: 7, notifyToast: true }]));
+    });
+
+    test("changing the password sends the current and new one, then clears the form", async () => {
+      await openSettings();
+      await userEvent.click(screen.getByRole("tab", { name: "Credentials" }));
+
+      await userEvent.type(screen.getByLabelText("Current password"), "old-pw");
+      await userEvent.type(screen.getByLabelText("New password"), "new-pw");
+      await userEvent.type(screen.getByLabelText("Confirm new password"), "new-pw");
+      await userEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+      await waitFor(() => expect(passwordChanges).toEqual([{ currentPassword: "old-pw", newPassword: "new-pw" }]));
+      expect((await screen.findAllByText(/Password changed\. 2 other sessions were signed out/)).length).toBeGreaterThan(0);
+      expect((screen.getByLabelText("New password") as HTMLInputElement).value).toBe("");
+      expect((screen.getByLabelText("Current password") as HTMLInputElement).value).toBe("");
+    });
+
+    test("a mismatched or empty new password is caught before anything is sent", async () => {
+      await openSettings();
+      await userEvent.click(screen.getByRole("tab", { name: "Credentials" }));
+
+      await userEvent.click(screen.getByRole("button", { name: "Change password" }));
+      expect(await screen.findByText("Enter a new password.")).toBeTruthy();
+
+      await userEvent.type(screen.getByLabelText("New password"), "one");
+      await userEvent.type(screen.getByLabelText("Confirm new password"), "two");
+      await userEvent.click(screen.getByRole("button", { name: "Change password" }));
+      expect(await screen.findByText(/don't match/)).toBeTruthy();
+      expect(passwordChanges).toEqual([]);
+    });
+
+    test("the server's refusal (wrong current password) is shown and the fields are kept", async () => {
+      installMockFetch({ changePasswordError: "Current password is incorrect" });
+      await openSettings();
+      await userEvent.click(screen.getByRole("tab", { name: "Credentials" }));
+
+      await userEvent.type(screen.getByLabelText("Current password"), "nope");
+      await userEvent.type(screen.getByLabelText("New password"), "new-pw");
+      await userEvent.type(screen.getByLabelText("Confirm new password"), "new-pw");
+      await userEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+      expect(await screen.findByText("Current password is incorrect")).toBeTruthy();
+      expect((screen.getByLabelText("New password") as HTMLInputElement).value).toBe("new-pw");
     });
   });
 });
