@@ -2476,13 +2476,28 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await waitFor(() => expect(capturedSettingsPatches).toEqual([{ aiTargetLanguage: "German" }]));
     });
 
-    test("Summarize and Translate are disabled until the matching skill exists", async () => {
+    test("without AI skills there are no AI buttons at all: no Summarize, Translate, Summary tab or Refine", async () => {
       installMockFetch();
       await login();
       await userEvent.click(await screen.findByText("Hello there"));
       await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
-      expect(screen.getByRole("button", { name: /summarize/i }).hasAttribute("disabled")).toBe(true);
-      expect(screen.getByRole("button", { name: /^translate/i }).hasAttribute("disabled")).toBe(true);
+      expect(screen.queryByRole("button", { name: /summarize/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /^translate/i })).toBeNull();
+      expect(screen.queryByRole("tab", { name: "Summary" })).toBeNull();
+
+      await userEvent.click(screen.getByRole("button", { name: /new/i }));
+      const dialog = (await screen.findByText("New message")).closest('[role="dialog"]') as HTMLElement;
+      expect(within(dialog).queryByRole("button", { name: /refine/i })).toBeNull();
+    });
+
+    test("each button appears only for the skill that exists", async () => {
+      installMockFetch({ aiSkillCategories: ["translate"] });
+      await login();
+      await userEvent.click(await screen.findByText("Hello there"));
+      await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+      expect(await screen.findByRole("button", { name: /^translate/i })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /summarize/i })).toBeNull();
+      expect(screen.queryByRole("tab", { name: "Summary" })).toBeNull();
     });
 
     test("Summary is an extra tab after HTML, with the AI icon; it is offered only with a Summarize skill (or an existing summary)", async () => {
@@ -2597,14 +2612,13 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await waitFor(() => expect(editorText(dialog)).toContain("Corrected text"));
     });
 
-    test("Refine items without a matching skill are disabled", async () => {
+    test("Refine only lists the skills that exist", async () => {
       installMockFetch({ aiSkillCategories: ["grammar"] });
       await login();
       const dialog = await openDraftInCompose();
 
       await userEvent.click(within(dialog).getByRole("button", { name: /refine/i }));
-      const disabled = (await screen.findAllByRole("menuitem")).filter(i => i.getAttribute("data-disabled") !== null).map(i => i.textContent);
-      expect(disabled).toEqual(["Phrase", "Translate…"]);
+      expect((await screen.findAllByRole("menuitem")).map(i => i.textContent)).toEqual(["Spelling + Grammar"]);
     });
   });
 });

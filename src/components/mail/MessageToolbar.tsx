@@ -37,7 +37,7 @@ export function MessageToolbar({
   onMove: (folder: string) => void;
   onToggleRead: () => void;
   onEditDraft: () => void;
-  /** Which AI skills exist: Summarize/Translate are only usable with a matching skill (set up in Settings → AI). */
+  /** Which AI skills exist: Summarize/Translate are only shown for those (set up in Settings → AI). */
   aiCategories: Set<AiCategory>;
   aiBusy: "summarize" | "translate" | null;
   onSummarize: () => void;
@@ -68,26 +68,23 @@ export function MessageToolbar({
         <Forward className="size-4" /> Forward
       </Button>
 
-      <Separator orientation="vertical" className="mx-1 h-5" />
+      {/* The AI buttons only exist for skills the user has set up — nobody who doesn't want AI is nudged to. */}
+      {(aiCategories.has("summarize") || aiCategories.has("translate")) && (
+        <>
+          <Separator orientation="vertical" className="mx-1 h-5" />
 
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={!aiCategories.has("summarize") || aiBusy !== null}
-        title={aiCategories.has("summarize") ? "Summarize (and categorize) this message with AI" : "Set up a Summarize skill in Settings → AI"}
-        onClick={onSummarize}
-      >
-        {aiBusy === "summarize" ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} Summarize
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={!aiCategories.has("translate") || aiBusy !== null}
-        title={aiCategories.has("translate") ? "Translate this message with AI" : "Set up a Translate skill in Settings → AI"}
-        onClick={onTranslate}
-      >
-        {aiBusy === "translate" ? <Loader2 className="size-4 animate-spin" /> : <Languages className="size-4" />} Translate
-      </Button>
+          {aiCategories.has("summarize") && (
+            <Button variant="ghost" size="sm" disabled={aiBusy !== null} title="Summarize (and categorize) this message with AI" onClick={onSummarize}>
+              {aiBusy === "summarize" ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} Summarize
+            </Button>
+          )}
+          {aiCategories.has("translate") && (
+            <Button variant="ghost" size="sm" disabled={aiBusy !== null} title="Translate this message with AI" onClick={onTranslate}>
+              {aiBusy === "translate" ? <Loader2 className="size-4 animate-spin" /> : <Languages className="size-4" />} Translate
+            </Button>
+          )}
+        </>
+      )}
 
       <Separator orientation="vertical" className="mx-1 h-5" />
 

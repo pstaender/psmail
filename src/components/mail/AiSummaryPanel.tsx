@@ -26,9 +26,9 @@ export function AiSummaryPanel({
     <div className="space-y-3 p-4">
       {email.aiSummary ? (
         <RenderPureMarkdown markdown={email.aiSummary} aria-label="AI summary" />
-      ) : (
+      ) : canSummarize ? (
         <p className="text-sm text-muted-foreground">No summary yet. The AI summarizes this message when you press the button.</p>
-      )}
+      ) : null}
 
       {labels.length > 0 && (
         <ul className="flex flex-wrap gap-1.5" aria-label="Categories">
@@ -40,17 +40,12 @@ export function AiSummaryPanel({
         </ul>
       )}
 
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled={!canSummarize || busy}
-        title={canSummarize ? undefined : "Set up a Summarize skill in Settings → AI"}
-        onClick={onSummarize}
-      >
-        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-        {email.aiSummary ? "Summarize again" : "Summarize with AI"}
-      </Button>
+      {canSummarize && (
+        <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onSummarize}>
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+          {email.aiSummary ? "Summarize again" : "Summarize with AI"}
+        </Button>
+      )}
     </div>
   );
 }

@@ -55,7 +55,7 @@ export function ComposeDialog({
   initial: ComposeDraft | null;
   /** `sent` is true when the draft was actually sent, false when it was just saved. */
   onSent: (sent: boolean) => void;
-  /** Which AI skills the user has set up — the Refine menu offers only those. */
+  /** Which AI skills the user has set up — the Refine button and its items exist only for those. */
   aiCategories: Set<AiCategory>;
   /** The language Translate starts with (the user's setting). */
   aiLanguage: string;
@@ -248,39 +248,23 @@ export function ComposeDialog({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button type="button" variant="outline" size="sm" disabled={refining !== null || busy !== null}>
-                  {refining ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-                  Refine
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                {(
-                  [
-                    ["improve", "Phrase"],
-                    ["grammar", "Spelling + Grammar"],
-                  ] as const
-                ).map(([category, label]) => (
-                  <DropdownMenuItem
-                    key={category}
-                    disabled={!aiCategories.has(category)}
-                    title={aiCategories.has(category) ? undefined : "Set up this skill in Settings → AI"}
-                    onSelect={() => refine(category)}
-                  >
-                    {label}
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuItem
-                  disabled={!aiCategories.has("translate")}
-                  title={aiCategories.has("translate") ? undefined : "Set up this skill in Settings → AI"}
-                  onSelect={() => setTranslateTo(aiLanguage)}
-                >
-                  Translate…
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          <div className="flex flex-wrap items-center gap-2 empty:hidden">
+            {/* Only for skills that exist: no Refine at all without any, and no items for the missing ones. */}
+            {(aiCategories.has("improve") || aiCategories.has("grammar") || aiCategories.has("translate")) && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="outline" size="sm" disabled={refining !== null || busy !== null}>
+                    {refining ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                    Refine
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {aiCategories.has("improve") && <DropdownMenuItem onSelect={() => refine("improve")}>Phrase</DropdownMenuItem>}
+                  {aiCategories.has("grammar") && <DropdownMenuItem onSelect={() => refine("grammar")}>Spelling + Grammar</DropdownMenuItem>}
+                  {aiCategories.has("translate") && <DropdownMenuItem onSelect={() => setTranslateTo(aiLanguage)}>Translate…</DropdownMenuItem>}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             {translateTo !== null && (
               <form
                 className="flex items-center gap-1.5"
