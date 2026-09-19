@@ -85,6 +85,7 @@ const SECOND_EMAIL = {
   from: [{ name: "Bob", address: "bob@example.com" }],
   plainText: "Hi from Bob",
   htmlText: "<p>Hi <b>from</b> Bob</p>",
+  attachmentCount: 1,
 };
 
 const THIRD_EMAIL = {
@@ -110,6 +111,10 @@ const DRAFT_EMAIL = {
   htmlText: null,
 };
 
+const SYNC_JOB = (status: string) => ({
+  id: 1, accountId: 1, folder: null, status, progressCurrent: 0, progressTotal: 0, error: null, startedAt: NOW, finishedAt: null, createdAt: NOW,
+});
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
@@ -128,6 +133,12 @@ const pagedRequests: { limit: number; offset: number }[] = [];
 // Bodies of every PATCH /api/settings and of the last PATCH /api/accounts/:email.
 const capturedSettingsPatches: Record<string, unknown>[] = [];
 let capturedAccountPatch: Record<string, unknown> | null = null;
+// Bodies of POST .../downloads (sync) calls, and how often the folder list / unread count were fetched.
+const downloadPosts: Record<string, unknown>[] = [];
+let folderRequests = 0;
+let unreadRequests = 0;
+// Artificial latency for GET .../folders — lets a test look at the tree *while* a refresh is in flight.
+let folderDelayMs = 0;
 
 function installMockFetch(
   opts: {
@@ -139,6 +150,8 @@ function installMockFetch(
     pagedEmailCount?: number;
     /** The server-side user settings GET /api/settings starts out with. */
     settings?: { bodyView?: string };
+    /** What GET /api/unified/inbox/unread reports (the combined Inbox's badge). */
+    inboxUnread?: number;
   } = {}
 ) {
   // A fresh mutable copy per test (installMockFetch runs in beforeEach), so a PATCH in one
@@ -149,6 +162,10 @@ function installMockFetch(
   pagedRequests.length = 0;
   capturedSettingsPatches.length = 0;
   capturedAccountPatch = null;
+  downloadPosts.length = 0;
+  folderRequests = 0;
+  unreadRequests = 0;
+  folderDelayMs = 0;
   let currentSettings: Record<string, unknown> = { ...opts.settings };
 
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -187,7 +204,20 @@ function installMockFetch(
       currentAccount = { ...currentAccount, supportsUidPlus: opts.uidPlusSupported ?? true };
       return jsonResponse(currentAccount);
     }
-    if (method === "GET" && path === "/api/accounts/me%40example.com/folders") return jsonResponse(FOLDERS);
+    if (method === "GET" && path === "/api/accounts/me%40example.com/folders") {
+      folderRequests += 1;
+      if (folderDelayMs > 0) await new Promise(resolve => setTimeout(resolve, folderDelayMs));
+      return jsonResponse(FOLDERS);
+    }
+    if (method === "POST" && path === "/api/accounts/me%40example.com/downloads") {
+      downloadPosts.push(init?.body ? JSON.parse(init.body as string) : {});
+      return jsonResponse(SYNC_JOB("running"), 202);
+    }
+    if (method === "GET" && path === "/api/accounts/me%40example.com/downloads/1") return jsonResponse(SYNC_JOB("completed"));
+    if (method === "GET" && path === "/api/unified/inbox/unread") {
+      unreadRequests += 1;
+      return jsonResponse({ count: opts.inboxUnread ?? 0 });
+    }
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails") {
       if (opts.pagedEmailCount !== undefined) {
         const params = new URL(url, "http://localhost").searchParams;
@@ -1184,5 +1214,65 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.click(screen.getAllByText("Inbox")[1]!); // [0] is the combined Inbox row above the accounts
     await waitFor(() => expect(screen.queryByText("Sent · all accounts")).toBeNull());
     expect(await screen.findByText("Hello there")).toBeTruthy();
+  });
+
+  test("message rows with attachments show a paperclip, in folder lists and in the combined Inbox", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    // Only SECOND_EMAIL has attachmentCount: 1.
+    await screen.findByText("Second message");
+    const marks = screen.getAllByLabelText("Has attachments");
+    expect(marks).toHaveLength(1);
+    expect(marks[0]!.closest("li")!.textContent).toContain("Second message");
+  });
+
+  test("the combined Inbox shows the unread count across all accounts, and drops it as messages are read", async () => {
+    installMockFetch({ inboxUnread: 3 });
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    const combined = () => screen.getByTitle("Inbox of all accounts");
+    await waitFor(() => expect(combined().textContent).toContain("3"));
+
+    // Opening the unread INBOX message marks it read: the badge follows without another request.
+    const requestsBefore = unreadRequests;
+    await userEvent.click(await screen.findByText("Hello there"));
+    await waitFor(() => expect(combined().textContent).toContain("2"));
+    expect(unreadRequests).toBe(requestsBefore);
+  });
+
+  test("no badge on the combined Inbox when nothing is unread", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await waitFor(() => expect(unreadRequests).toBeGreaterThan(0));
+    expect(screen.getByTitle("Inbox of all accounts").textContent).toBe("Inbox");
+  });
+
+  test("Sync now syncs the whole account (no folder), and the tree refreshes in place instead of reloading", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await screen.findByText("Hello there");
+    const foldersBefore = folderRequests;
+    const unreadBefore = unreadRequests;
+
+    // Make the post-sync folder refresh slow, so we can look at the tree while it's in flight.
+    folderDelayMs = 400;
+    await userEvent.click(screen.getByTitle("Sync now"));
+    await waitFor(() => expect(downloadPosts).toEqual([{}])); // no `folder` = every folder
+
+    await waitFor(() => expect(folderRequests).toBeGreaterThan(foldersBefore)); // refresh started…
+    // …and while it's running the folder rows are still there, with no "Loading folders…" spinner.
+    expect(screen.queryByText("Loading folders…")).toBeNull();
+    expect(screen.getAllByText("Inbox").length).toBeGreaterThan(1);
+    expect(screen.getByText("Entwürfe")).toBeTruthy();
+
+    // The combined Inbox's count is re-read too, and the open list keeps showing its messages.
+    await waitFor(() => expect(unreadRequests).toBeGreaterThan(unreadBefore));
+    expect(screen.getByText("Hello there")).toBeTruthy();
   });
 });

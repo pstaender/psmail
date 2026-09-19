@@ -8,8 +8,8 @@ import { deriveEncryptionKey, generateSalt } from "../../src/server/crypto/secre
 import { createAccount, getAccountRow } from "../../src/server/models/accounts";
 import { createDownloadJob, getDownloadJob } from "../../src/server/models/downloads";
 import { findEmailByUid, listEmails } from "../../src/server/models/emails";
-import { runSync } from "../../src/server/services/sync";
-import type { RemoteFlagState } from "../../src/server/services/imap";
+import { isSyncableFolder, runSync } from "../../src/server/services/sync";
+import type { ImapFolder, RemoteFlagState } from "../../src/server/services/imap";
 
 function rawMessage(opts: { uid: number; subject: string; withAttachment?: boolean }): string {
   const lines = [
@@ -157,6 +157,88 @@ describe("runSync", () => {
       { status: "running", current: 3, total: 3 },
     ]);
     expect(getDownloadJob(db, job.id).status).toBe("completed");
+  });
+
+  test("allFolders syncs every syncable folder (Inbox first), with progress across all of them, and learns the Sent folder", async () => {
+    const { db, user, account } = await setup();
+    const job = createDownloadJob(db, account.id, null);
+    const folder = (path: string, specialUse: string | null = null, flags: string[] = []): ImapFolder => ({
+      path, name: path, delimiter: "/", specialUse, flags,
+    });
+    const requested: string[] = [];
+    const progress: { current: number; total: number }[] = [];
+
+    const result = await runSync({
+      db,
+      account,
+      username: user.username,
+      allFolders: true,
+      downloadJobId: job.id,
+      imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      listRemoteFolders: async () => [
+        folder("Archive"),
+        folder("[Gmail]", null, ["\\Noselect"]),
+        folder("[Gmail]/All Mail", "\\All"),
+        folder("Gesendet", "\\Sent"),
+        folder("INBOX", "\\Inbox"),
+      ],
+      fetchMessages: async (creds, folderPath, sinceUid) => {
+        requested.push(folderPath);
+        return fakeFetchMessages(creds, folderPath, sinceUid);
+      },
+      fetchRemoteFlags: fakeFetchRemoteFlagsNoop,
+      onProgress: p => progress.push(p),
+    });
+
+    expect(requested).toEqual(["INBOX", "Archive", "Gesendet"]);
+    expect(result.downloaded).toBe(9);
+    for (const name of ["INBOX", "Archive", "Gesendet"]) expect(listEmails(db, account.id, { folder: name })).toHaveLength(3);
+
+    // Progress is cumulative over the folders, ending at the grand total.
+    expect(progress.at(-1)).toEqual({ current: 9, total: 9 });
+    const finished = getDownloadJob(db, job.id);
+    expect(finished.status).toBe("completed");
+    expect([finished.progressCurrent, finished.progressTotal]).toEqual([9, 9]);
+    expect(getAccountRow(db, account.id).sent_folder).toBe("Gesendet");
+  });
+
+  test("allFolders: one folder failing doesn't stop the others, but the job ends up failed and says which", async () => {
+    const { db, user, account } = await setup();
+    const job = createDownloadJob(db, account.id, null);
+    const result = await runSync({
+      db,
+      account,
+      username: user.username,
+      allFolders: true,
+      downloadJobId: job.id,
+      imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      listRemoteFolders: async () => [
+        { path: "INBOX", name: "INBOX", delimiter: "/", specialUse: "\\Inbox", flags: [] },
+        { path: "Broken", name: "Broken", delimiter: "/", specialUse: null, flags: [] },
+      ],
+      fetchMessages: async (creds, folderPath, sinceUid) => {
+        if (folderPath === "Broken") throw new Error("mailbox is corrupt");
+        return fakeFetchMessages(creds, folderPath, sinceUid);
+      },
+      fetchRemoteFlags: fakeFetchRemoteFlagsNoop,
+    });
+
+    expect(result.downloaded).toBe(3);
+    expect(listEmails(db, account.id, { folder: "INBOX" })).toHaveLength(3);
+    const failed = getDownloadJob(db, job.id);
+    expect(failed.status).toBe("failed");
+    expect(failed.error).toContain("Broken");
+    expect(failed.error).toContain("mailbox is corrupt");
+  });
+
+  test("isSyncableFolder skips unselectable containers and virtual all-mail/flagged views", () => {
+    const f = (specialUse: string | null, flags: string[] = []): ImapFolder => ({ path: "x", name: "x", delimiter: "/", specialUse, flags });
+    expect(isSyncableFolder(f(null))).toBe(true);
+    expect(isSyncableFolder(f("\\Trash"))).toBe(true);
+    expect(isSyncableFolder(f(null, ["\\Noselect"]))).toBe(false);
+    expect(isSyncableFolder(f(null, ["\\NonExistent"]))).toBe(false);
+    expect(isSyncableFolder(f("\\All"))).toBe(false);
+    expect(isSyncableFolder(f("\\Flagged"))).toBe(false);
   });
 
   test("incremental sync only fetches messages newer than the highest stored uid", async () => {

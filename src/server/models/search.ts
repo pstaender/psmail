@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import type { EmailAddress } from "../types";
+import { emailIdsWithAttachments } from "./emails";
 
 export interface SearchResult {
   id: number;
@@ -12,6 +13,7 @@ export interface SearchResult {
   from: EmailAddress[];
   /** Recipients — only filled by the unified Sent list, which shows who a message went to rather than who sent it. */
   to?: EmailAddress[];
+  hasAttachments?: boolean;
   date: string | null;
 }
 
@@ -176,5 +178,7 @@ export function searchEmails(db: Database, userId: number, query: string, option
     if (results.length >= offset + limit) break;
   }
 
-  return results.slice(offset, offset + limit);
+  const page = results.slice(offset, offset + limit);
+  const withAttachments = emailIdsWithAttachments(db, page.map(r => r.id));
+  return page.map(r => ({ ...r, hasAttachments: withAttachments.has(r.id) }));
 }

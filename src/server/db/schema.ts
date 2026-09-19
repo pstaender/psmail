@@ -86,6 +86,8 @@ CREATE INDEX IF NOT EXISTS idx_emails_account_folder ON emails(account_id, folde
 CREATE INDEX IF NOT EXISTS idx_emails_message_id ON emails(message_id);
 -- Serves the folder listing (WHERE account_id AND folder ORDER BY date DESC, id DESC LIMIT n) straight
 -- off the index: no sort of the whole folder, so paging through 5k+ messages stays cheap.
+-- Keeps unread counts (per-folder badges, the combined Inbox's) cheap: only unread rows are indexed.
+CREATE INDEX IF NOT EXISTS idx_emails_unread ON emails(account_id, folder) WHERE is_read = 0;
 CREATE INDEX IF NOT EXISTS idx_emails_folder_date ON emails(account_id, folder, date DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS attachments (

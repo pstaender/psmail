@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import type { EmailAddress } from "../types";
+import { emailIdsWithAttachments } from "./emails";
 import type { SearchResult } from "./search";
 
 export type UnifiedKind = "inbox" | "sent";
@@ -87,5 +88,18 @@ export function listUnifiedEmails(
   }
 
   merged.sort((a, b) => (a.sortDate === b.sortDate ? b.id - a.id : a.sortDate < b.sortDate ? 1 : -1));
-  return merged.slice(offset, offset + limit).map(({ sortDate: _sortDate, ...result }) => result);
+  const page = merged.slice(offset, offset + limit);
+  const withAttachments = emailIdsWithAttachments(db, page.map(r => r.id));
+  return page.map(({ sortDate: _sortDate, ...result }) => ({ ...result, hasAttachments: withAttachments.has(result.id) }));
+}
+
+/** Unread messages across every account's Inbox — the combined Inbox's badge. */
+export function countUnifiedInboxUnread(db: Database, userId: number): number {
+  const row = db
+    .query<{ count: number }, [number]>(
+      `SELECT COUNT(*) AS count FROM emails e JOIN accounts a ON a.id = e.account_id
+       WHERE a.user_id = ? AND e.folder = 'INBOX' AND e.is_read = 0`
+    )
+    .get(userId);
+  return row?.count ?? 0;
 }

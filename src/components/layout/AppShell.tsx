@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LogOut, Mail, PanelLeftOpen, PenSquare, Search, X } from "lucide-react";
 import {
   AlertDialog,
@@ -132,8 +132,34 @@ export function AppShell() {
     selectedAccountEmail,
     selectedFolder
   );
-  const { folders, loading: foldersLoading, error: foldersError, refresh: refreshFolders, patchCounts: patchFolderCounts } =
+  const { folders, loading: foldersLoading, error: foldersError, refresh: refreshFolders, patchCounts: patchRawFolderCounts } =
     useFolders(selectedAccountEmail);
+
+  // Unread messages across every account's Inbox, for the combined Inbox's badge. Loaded from the
+  // server (which knows all accounts, not just the selected one) and then nudged optimistically
+  // alongside the per-folder counts below; re-read whenever something else could have changed it.
+  const [unifiedInboxUnread, setUnifiedInboxUnread] = useState(0);
+  const refreshUnifiedInboxUnread = useCallback(() => {
+    if (!token) return;
+    api.unifiedInboxUnread(token).then(r => setUnifiedInboxUnread(r.count)).catch(() => {});
+  }, [token]);
+  useEffect(() => {
+    refreshUnifiedInboxUnread();
+  }, [refreshUnifiedInboxUnread]);
+
+  function patchFolderCounts(folder: string, deltas: { total?: number; unread?: number }) {
+    patchRawFolderCounts(folder, deltas);
+    if (folder === "INBOX" && deltas.unread) setUnifiedInboxUnread(count => Math.max(0, count + deltas.unread!));
+  }
+
+  // A sync finished for some account: pick up its new mail without disturbing anything else
+  // (the folder tree refreshes in place; see useFolders). Reloads the open list only if it's this
+  // account's folder, or the combined/search list that may include it.
+  function handleSyncComplete(accountEmail: string) {
+    if (accountEmail === selectedAccountEmail) refreshEmails();
+    refreshSearchResults();
+    refreshUnifiedInboxUnread();
+  }
   const { email: selectedEmail, setEmail: setSelectedEmailDetail } = useEmailDetail(selectedAccountEmail, selectedEmailId);
 
   // Mark-as-read on open, like every other mail client. Patches both the folder-scoped list
@@ -535,6 +561,8 @@ export function AppShell() {
                 onSelectFolder={selectFolder}
                 onDeleteAccount={setPendingDeleteAccount}
                 onEditAccount={setEditingAccountEmail}
+                unifiedInboxUnread={unifiedInboxUnread}
+                onSyncComplete={handleSyncComplete}
                 unifiedView={unifiedView}
                 onSelectUnified={selectUnified}
                 onCollapse={() => setSidebarCollapsed(true)}
@@ -643,6 +671,7 @@ export function AppShell() {
           onSent={sent => {
             refreshEmails();
             refreshSearchResults();
+            refreshUnifiedInboxUnread();
             refreshFolders();
             toast.success(sent ? "E-Mail sent" : "Saved");
           }}

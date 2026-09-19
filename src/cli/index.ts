@@ -68,9 +68,9 @@ async function cmdSync(argv: string[]) {
   const client = new ApiClient(typeof flags.url === "string" ? flags.url : undefined);
   await loginFromFlags(client, flags);
 
-  const folder = typeof flags.folder === "string" ? flags.folder : "INBOX";
+  const folder = typeof flags.folder === "string" ? flags.folder : undefined;
   const job = await client.triggerDownload(accountEmail, folder);
-  console.log(`Started download job #${job.id} for "${accountEmail}" (${folder})`);
+  console.log(`Started download job #${job.id} for "${accountEmail}" (${folder ?? "all folders"})`);
 
   let finished = false;
   while (!finished) {

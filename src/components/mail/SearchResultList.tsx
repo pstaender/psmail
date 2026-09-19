@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Paperclip } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { formatListDate } from "@/lib/time";
@@ -80,7 +80,10 @@ export function SearchResultList({
                 <span className={cn("flex-1 truncate text-sm", !result.isRead && "font-semibold")}>{participantLabel(result, showRecipient)}</span>
                 <span className="shrink-0 text-xs text-muted-foreground">{formatListDate(result.date)}</span>
               </div>
-              <div className={cn("truncate text-sm", !result.isRead && "font-medium")}>{result.subject || "(no subject)"}</div>
+              <div className={cn("flex items-center gap-1.5 text-sm", !result.isRead && "font-medium")}>
+                <span className="flex-1 truncate">{result.subject || "(no subject)"}</span>
+                {result.hasAttachments && <Paperclip aria-label="Has attachments" className="size-3.5 shrink-0 text-muted-foreground" />}
+              </div>
               <p className="truncate text-xs text-muted-foreground">
                 {result.accountEmail} · {result.folder}
               </p>

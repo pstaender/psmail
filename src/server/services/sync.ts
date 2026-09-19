@@ -3,9 +3,11 @@ import { join } from "node:path";
 import { getEmailAttachmentsDir, sanitizeSegment } from "../config/paths";
 import { addAttachment, createEmail, deleteEmail, findEmailByUid, listSyncedRefs, updateEmail } from "../models/emails";
 import { completeDownloadJob, failDownloadJob, startDownloadJob, updateDownloadProgress, updateDownloadTotal } from "../models/downloads";
-import type { AccountRow } from "../models/accounts";
+import { setSentFolder, type AccountRow } from "../models/accounts";
 import {
   fetchNewMessages,
+  listFolders,
+  type ImapFolder,
   type FetchHooks,
   fetchRemoteFlags as fetchRemoteFlagsFromServer,
   withImapClient,
@@ -73,6 +75,8 @@ export interface RunSyncOptions {
   imapCredentials: ImapCredentials;
   downloadJobId: number;
   folder?: string;
+  /** Sync every syncable folder the server lists instead of just `folder` (see runSync). */
+  allFolders?: boolean;
   onProgress?: (progress: SyncProgress) => void;
   /**
    * Overridable for tests, so they can hand runSync canned messages as a plain function
@@ -84,6 +88,8 @@ export interface RunSyncOptions {
   fetchMessages?: FetchMessagesFn;
   /** Same reasoning as `fetchMessages`, for the two-way reconciliation step (see reconcileExisting). */
   fetchRemoteFlags?: FetchRemoteFlagsFn;
+  /** Same reasoning as `fetchMessages`, for listing the account's folders when `allFolders` is set. */
+  listRemoteFolders?: (creds: ImapCredentials) => Promise<ImapFolder[]>;
 }
 
 /**
@@ -117,12 +123,24 @@ async function reconcileExisting(
   }
 }
 
+/** Folders that hold no real mail of their own: unselectable containers, and Gmail-style virtual views that would just duplicate everything. */
+export function isSyncableFolder(folder: ImapFolder): boolean {
+  if (folder.flags.some(flag => flag.toLowerCase() === "\\noselect" || flag.toLowerCase() === "\\nonexistent")) return false;
+  return folder.specialUse !== "\\All" && folder.specialUse !== "\\Flagged";
+}
+
+async function defaultListRemoteFolders(creds: ImapCredentials): Promise<ImapFolder[]> {
+  syncLog(`connecting to ${creds.host}:${creds.port} to list folders...`);
+  return withImapClient(creds, client => listFolders(client));
+}
+
 /**
- * Runs an incremental sync for a single folder: fetches every message with a
- * UID greater than the highest one already stored, parses it, persists it
- * (with attachments written to disk), and reports progress via the
- * downloads job row + optional callback (used by the CLI for a live
- * progress display).
+ * Runs an incremental sync: for each folder, fetches every message with a UID greater than the
+ * highest one already stored, parses it, persists it (with attachments written to disk), and
+ * reports progress via the downloads job row + optional callback (used by the CLI for a live
+ * progress display). By default that's just `folder` (INBOX); with `allFolders`, every syncable
+ * folder the server lists, Inbox first — a folder that fails is logged and skipped, the rest
+ * still sync, and the job is marked failed at the end naming what went wrong.
  */
 export async function runSync(options: RunSyncOptions): Promise<{ downloaded: number }> {
   const {
@@ -132,55 +150,65 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
     imapCredentials,
     downloadJobId,
     folder = "INBOX",
+    allFolders = false,
     onProgress,
     fetchMessages = defaultFetchMessages,
     fetchRemoteFlags = defaultFetchRemoteFlags,
+    listRemoteFolders = defaultListRemoteFolders,
   } = options;
 
-  const tag = `job #${downloadJobId} ${account.email}/${folder}`;
+  const jobTag = `job #${downloadJobId} ${account.email}`;
   const startedAt = Date.now();
-  let stage = "reconciling existing messages";
+  let stage = "starting";
 
-  try {
-    syncLog(`${tag}: starting (IMAP ${imapCredentials.username}@${imapCredentials.host}:${imapCredentials.port}, ${imapCredentials.secure ? "TLS" : "no TLS"})`);
-    await reconcileExisting(db, account.id, folder, imapCredentials, fetchRemoteFlags);
+  let jobStarted = false;
+  // Progress is reported across all folders: what finished folders contributed, plus the folder in flight.
+  let doneTotal = 0;
+  let doneCurrent = 0;
+  const setTotal = (total: number) => {
+    if (jobStarted) updateDownloadTotal(db, downloadJobId, total);
+    else startDownloadJob(db, downloadJobId, total);
+    jobStarted = true;
+  };
+
+  async function syncFolder(folderPath: string): Promise<number> {
+    const tag = `${jobTag}/${folderPath}`;
+    stage = `${folderPath}: reconciling existing messages`;
+    await reconcileExisting(db, account.id, folderPath, imapCredentials, fetchRemoteFlags);
 
     const maxUidRow = db
       .query<{ max_uid: number | null }, [number, string]>(
         "SELECT MAX(uid) as max_uid FROM emails WHERE account_id = ? AND folder = ?"
       )
-      .get(account.id, folder);
+      .get(account.id, folderPath);
     const sinceUid = maxUidRow?.max_uid ?? 0;
 
-    stage = `fetching messages newer than UID ${sinceUid}`;
+    stage = `${folderPath}: fetching messages newer than UID ${sinceUid}`;
     syncLog(`${tag}: ${stage}`);
     // While the (single, all-at-once) download runs, expose its progress on the job row: the
     // total is only an estimate (messages in the folder minus those already stored) until the
     // download ends, when it's replaced by the exact count.
-    let started = false;
-    const { messages } = await fetchMessages(imapCredentials, folder, sinceUid, {
+    const { messages } = await fetchMessages(imapCredentials, folderPath, sinceUid, {
       onOpened: exists => {
-        started = true;
-        const alreadyStored = listSyncedRefs(db, account.id, folder).length;
-        startDownloadJob(db, downloadJobId, Math.max(exists - alreadyStored, 0));
+        const alreadyStored = listSyncedRefs(db, account.id, folderPath).length;
+        setTotal(doneTotal + Math.max(exists - alreadyStored, 0));
       },
-      onDownloaded: count => updateDownloadProgress(db, downloadJobId, count),
+      onDownloaded: count => updateDownloadProgress(db, downloadJobId, doneCurrent + count),
     });
     syncLog(`${tag}: server returned ${messages.length} new message(s)`);
 
-    if (started) updateDownloadTotal(db, downloadJobId, messages.length);
-    else startDownloadJob(db, downloadJobId, messages.length);
-    updateDownloadProgress(db, downloadJobId, 0);
-    onProgress?.({ current: 0, total: messages.length });
+    setTotal(doneTotal + messages.length);
+    updateDownloadProgress(db, downloadJobId, doneCurrent);
+    onProgress?.({ current: doneCurrent, total: doneTotal + messages.length });
 
     let downloaded = 0;
     for (const message of messages) {
-      stage = `processing UID ${message.uid}`;
-      if (!findEmailByUid(db, account.id, folder, message.uid)) {
+      stage = `${folderPath}: processing UID ${message.uid}`;
+      if (!findEmailByUid(db, account.id, folderPath, message.uid)) {
         const parsed = await parseMessage(message.source);
 
         const email = createEmail(db, account.id, {
-          folder,
+          folder: folderPath,
           uid: message.uid,
           isDraft: false,
           isRead: false,
@@ -230,16 +258,57 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
       if (downloaded % 25 === 0 || downloaded === messages.length) {
         syncLog(`${tag}: ${downloaded}/${messages.length} stored`);
       }
-      updateDownloadProgress(db, downloadJobId, downloaded);
-      onProgress?.({ current: downloaded, total: messages.length });
+      updateDownloadProgress(db, downloadJobId, doneCurrent + downloaded);
+      onProgress?.({ current: doneCurrent + downloaded, total: doneTotal + messages.length });
+    }
+
+    doneTotal += messages.length;
+    doneCurrent += messages.length;
+    return downloaded;
+  }
+
+  try {
+    syncLog(`${jobTag}: starting (IMAP ${imapCredentials.username}@${imapCredentials.host}:${imapCredentials.port}, ${imapCredentials.secure ? "TLS" : "no TLS"})`);
+
+    let folderPaths = [folder];
+    if (allFolders) {
+      stage = "listing folders";
+      const remote = await listRemoteFolders(imapCredentials);
+      const sent = remote.find(f => f.specialUse === "\\Sent");
+      if (sent) setSentFolder(db, account.id, sent.path);
+      const syncable = remote.filter(isSyncableFolder);
+      // Inbox first, so new mail shows up before the long tail of archive folders is walked.
+      folderPaths = [...syncable.filter(f => f.specialUse === "\\Inbox"), ...syncable.filter(f => f.specialUse !== "\\Inbox")].map(f => f.path);
+      syncLog(`${jobTag}: syncing ${folderPaths.length} folder(s): ${folderPaths.join(", ")}`);
+    }
+
+    let downloaded = 0;
+    const failures: string[] = [];
+    for (const folderPath of folderPaths) {
+      try {
+        downloaded += await syncFolder(folderPath);
+      } catch (error) {
+        if (!allFolders) throw error;
+        const description = describeError(error);
+        syncLog(`${jobTag}/${folderPath}: FAILED while ${stage}: ${description}`);
+        failures.push(`${folderPath}: ${description}`);
+      }
+    }
+
+    if (!jobStarted) setTotal(0);
+    if (failures.length > 0) {
+      const summary = `${failures.length} of ${folderPaths.length} folder(s) failed — ${failures.join("; ")}`;
+      failDownloadJob(db, downloadJobId, summary);
+      syncLog(`${jobTag}: finished with errors after ${Date.now() - startedAt}ms, ${downloaded} message(s) stored: ${summary}`);
+      return { downloaded };
     }
 
     completeDownloadJob(db, downloadJobId);
-    syncLog(`${tag}: completed, ${downloaded} message(s) in ${Date.now() - startedAt}ms`);
+    syncLog(`${jobTag}: completed, ${downloaded} message(s) in ${Date.now() - startedAt}ms`);
     return { downloaded };
   } catch (error) {
     const description = describeError(error);
-    syncLog(`${tag}: FAILED while ${stage} after ${Date.now() - startedAt}ms: ${description}`);
+    syncLog(`${jobTag}: FAILED while ${stage} after ${Date.now() - startedAt}ms: ${description}`);
     failDownloadJob(db, downloadJobId, `${description} (while ${stage})`);
     throw error;
   }

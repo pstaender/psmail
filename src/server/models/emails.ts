@@ -34,6 +34,8 @@ interface EmailRow {
   size: number | null;
   created_at: string;
   updated_at: string;
+  /** Only present on message-list rows (see LIST_COLUMNS). */
+  attachment_count?: number;
 }
 
 interface AttachmentRow {
@@ -97,6 +99,7 @@ function toEmail(row: EmailRow, attachments?: AttachmentRow[]): EmailRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     attachments: attachments?.map(toAttachment),
+    ...(row.attachment_count !== undefined ? { attachmentCount: row.attachment_count } : {}),
   };
 }
 
@@ -223,7 +226,8 @@ export function getFolderCounts(db: Database, accountId: number): FolderCount[] 
  */
 const LIST_COLUMNS = `id, account_id, folder, uid, is_draft, is_read, is_flagged, message_id, in_reply_to,
   from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject, date, size, created_at, updated_at,
-  substr(plain_text, 1, 200) AS plain_text`;
+  substr(plain_text, 1, 200) AS plain_text,
+  (SELECT COUNT(*) FROM attachments WHERE email_id = emails.id AND is_inline = 0) AS attachment_count`;
 
 export function listEmails(db: Database, accountId: number, options: ListEmailsOptions = {}): EmailRecord[] {
   const limit = options.limit ?? 50;
@@ -428,3 +432,18 @@ export function deleteAttachment(db: Database, id: number): void {
 }
 
 export type { EmailRow, AttachmentRow };
+
+/** Of the given message ids, those that have at least one real (non-inline) attachment — for lists that don't load attachments themselves. */
+export function emailIdsWithAttachments(db: Database, ids: number[]): Set<number> {
+  const found = new Set<number>();
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    const rows = db
+      .query<{ email_id: number }, number[]>(
+        `SELECT DISTINCT email_id FROM attachments WHERE is_inline = 0 AND email_id IN (${chunk.map(() => "?").join(",")})`
+      )
+      .all(...chunk);
+    for (const row of rows) found.add(row.email_id);
+  }
+  return found;
+}

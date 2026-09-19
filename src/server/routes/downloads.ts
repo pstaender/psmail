@@ -25,10 +25,11 @@ export function downloadsRoutes(db: Database) {
         const username = getUserRowById(db, session.userId)!.username;
 
         const body = req.headers.get("content-length") === "0" ? {} : await readJsonBody<CreateDownloadBody>(req);
-        const folder = body.folder ?? "INBOX";
+        // No folder = sync every folder of the account; a specific one is still supported (CLI --folder).
+        const folder = body.folder;
 
-        const job = createDownloadJob(db, account.id, folder);
-        if (process.env.NODE_ENV !== "test") console.log(`[sync] queued job #${job.id} for ${account.email}/${folder}`);
+        const job = createDownloadJob(db, account.id, folder ?? null);
+        if (process.env.NODE_ENV !== "test") console.log(`[sync] queued job #${job.id} for ${account.email} (${folder ?? "all folders"})`);
         const { imapPassword } = decryptAccountCredentials(account, encryptionKey);
 
         // Run in the background; the client polls GET .../downloads/:id for progress.
@@ -37,6 +38,7 @@ export function downloadsRoutes(db: Database) {
           account,
           username,
           folder,
+          allFolders: folder === undefined,
           downloadJobId: job.id,
           imapCredentials: {
             host: account.imap_host,

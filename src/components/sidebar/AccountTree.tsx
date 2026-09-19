@@ -1,4 +1,5 @@
 import { Inbox, Loader2, PanelLeftClose, Send } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { UnifiedKind } from "@/lib/api";
@@ -19,6 +20,8 @@ export function AccountTree({
   sharedFolders,
   unifiedView,
   onSelectUnified,
+  unifiedInboxUnread,
+  onSyncComplete,
 }: {
   accounts: Account[];
   loading: boolean;
@@ -38,6 +41,9 @@ export function AccountTree({
   /** Which cross-account mailbox (all Inboxes / all Sents) is showing, if any. */
   unifiedView: UnifiedKind | null;
   onSelectUnified: (kind: UnifiedKind) => void;
+  /** Unread messages across all Inboxes, shown as a badge on the combined Inbox. */
+  unifiedInboxUnread: number;
+  onSyncComplete: (accountEmail: string) => void;
 }) {
   return (
     <div className="flex h-full flex-col border-r bg-muted/20">
@@ -66,6 +72,11 @@ export function AccountTree({
           >
             <Icon className="size-4 shrink-0 text-muted-foreground" />
             <span className="flex-1 truncate">{label}</span>
+            {kind === "inbox" && unifiedInboxUnread > 0 && (
+              <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                {unifiedInboxUnread}
+              </Badge>
+            )}
           </button>
         ))}
       </div>
@@ -86,6 +97,7 @@ export function AccountTree({
               onDeleteAccount={onDeleteAccount}
               onEditAccount={onEditAccount}
               sharedFolders={sharedFolders}
+              onSyncComplete={onSyncComplete}
             />
           ))}
         </div>

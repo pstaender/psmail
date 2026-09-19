@@ -69,6 +69,8 @@ export interface EmailRecord {
   createdAt: string;
   updatedAt: string;
   attachments?: AttachmentRecord[];
+  /** Number of real (non-inline) attachments — set on message-list rows, where `attachments` itself isn't loaded. */
+  attachmentCount?: number;
 }
 
 export interface AttachmentRecord {

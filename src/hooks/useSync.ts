@@ -50,7 +50,7 @@ export function useSync(accountEmail: string | null, onComplete?: () => void) {
   );
 
   const start = useCallback(
-    async (folder = "INBOX") => {
+    async (folder?: string) => {
       if (!token || !accountEmail) return;
       setError(null);
       try {

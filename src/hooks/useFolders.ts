@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type FolderInfo } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -8,19 +8,32 @@ export function useFolders(accountEmail: string | null) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Which account `folders` currently belongs to. A refresh for the *same* account keeps showing the
+  // folders it already has (stale-while-revalidate) instead of blanking the tree behind a spinner —
+  // only the very first load for an account (or a switch to another one) shows "Loading…".
+  const loadedFor = useRef<string | null>(null);
+
   const refresh = useCallback(async () => {
     if (!token || !accountEmail) {
+      loadedFor.current = null;
       setFolders([]);
       return;
     }
-    setLoading(true);
-    setError(null);
+    const background = loadedFor.current === accountEmail;
+    if (!background) {
+      loadedFor.current = accountEmail;
+      setFolders([]);
+      setLoading(true);
+    }
     try {
-      setFolders(await api.listFolders(token, accountEmail));
+      const result = await api.listFolders(token, accountEmail);
+      if (loadedFor.current !== accountEmail) return;
+      setFolders(result);
+      setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (loadedFor.current === accountEmail) setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (loadedFor.current === accountEmail) setLoading(false);
     }
   }, [token, accountEmail]);
 

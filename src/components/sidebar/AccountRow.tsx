@@ -56,6 +56,7 @@ export function AccountRow({
   onDeleteAccount,
   onEditAccount,
   sharedFolders,
+  onSyncComplete,
 }: {
   account: Account;
   selected: { accountEmail: string; folder: string } | null;
@@ -63,6 +64,8 @@ export function AccountRow({
   onDeleteAccount: (accountEmail: string) => void;
   onEditAccount: (accountEmail: string) => void;
   sharedFolders: SharedFolders;
+  /** Called when a sync of this account finishes (successfully or not), so the rest of the app can pick up the new mail. */
+  onSyncComplete?: (accountEmail: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const usingShared = sharedFolders.accountEmail === account.email;
@@ -71,7 +74,10 @@ export function AccountRow({
   // instead of fetching an independent copy that would only ever catch up on a full refresh.
   const own = useFolders(usingShared ? null : expanded ? account.email : null);
   const { folders, loading, error, refresh } = usingShared ? sharedFolders : own;
-  const { isRunning, start, job } = useSync(account.email, refresh);
+  const { isRunning, start, job } = useSync(account.email, () => {
+    refresh();
+    onSyncComplete?.(account.email);
+  });
 
   return (
     <Collapsible open={expanded} onOpenChange={setExpanded}>
@@ -95,7 +101,7 @@ export function AccountRow({
           className="size-6 shrink-0 opacity-0 group-hover:opacity-100"
           disabled={isRunning}
           title="Sync now"
-          onClick={() => start("INBOX")}
+          onClick={() => start()}
         >
           {isRunning ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
         </Button>
@@ -129,16 +135,15 @@ export function AccountRow({
       )}
 
       <CollapsibleContent className="pl-4">
-        {loading && (
+        {/* Only the first load blanks the tree; a refresh (e.g. after a sync) keeps the folders on screen. */}
+        {loading && folders.length === 0 && (
           <div className="flex items-center gap-2 py-1 pl-4 text-xs text-muted-foreground">
             <Loader2 className="size-3 animate-spin" /> Loading folders…
           </div>
         )}
-        {error && <p className="py-1 pl-4 text-xs text-destructive">{error}</p>}
+        {error && folders.length === 0 && <p className="py-1 pl-4 text-xs text-destructive">{error}</p>}
 
-        {!loading &&
-          !error &&
-          folders.map(folder => {
+        {folders.map(folder => {
             const Icon = folderIcon(folder);
             const isSelected = selected?.accountEmail === account.email && selected.folder === folder.path;
             return (

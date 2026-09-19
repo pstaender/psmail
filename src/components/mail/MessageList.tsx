@@ -111,8 +111,10 @@ export function MessageList({
                 </span>
               </div>
               <div className={cn("flex items-center gap-1.5 truncate text-sm", !email.isRead && "font-medium")}>
-                {(email.attachments?.length ?? 0) > 0 && <Paperclip className="size-3 shrink-0 text-muted-foreground" />}
-                <span className="truncate">{email.subject || "(no subject)"}</span>
+                <span className="flex-1 truncate">{email.subject || "(no subject)"}</span>
+                {((email.attachmentCount ?? email.attachments?.length) ?? 0) > 0 && (
+                  <Paperclip aria-label="Has attachments" className="size-3.5 shrink-0 text-muted-foreground" />
+                )}
               </div>
               {email.plainText && (
                 <p className="truncate text-xs text-muted-foreground">{email.plainText.replace(/\s+/g, " ").trim()}</p>

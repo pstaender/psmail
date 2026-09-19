@@ -3,8 +3,8 @@ import { createTestDb } from "../helpers/db";
 import { createUser } from "../../src/server/models/users";
 import { deriveEncryptionKey, generateSalt } from "../../src/server/crypto/secrets";
 import { createAccount, deleteAccount, listAccounts, setAccountPosition, setSentFolder, updateAccount, normalizeAccountPositions } from "../../src/server/models/accounts";
-import { createEmail } from "../../src/server/models/emails";
-import { listUnifiedEmails } from "../../src/server/models/unified";
+import { addAttachment, createEmail, listEmails, updateEmail } from "../../src/server/models/emails";
+import { countUnifiedInboxUnread, listUnifiedEmails } from "../../src/server/models/unified";
 import { searchEmails } from "../../src/server/models/search";
 import { getUserSettings, updateUserSettings } from "../../src/server/models/userSettings";
 
@@ -139,5 +139,55 @@ describe("user settings", () => {
     const { db, user } = await setup([]);
     expect(() => updateUserSettings(db, user.id, { bodyView: "nope" })).toThrow(/bodyView/);
     expect(() => updateUserSettings(db, user.id, { theme: "dark" })).toThrow(/Unknown setting/);
+  });
+});
+
+function attach(db: ReturnType<typeof createTestDb>, emailId: number, isInline: boolean) {
+  addAttachment(db, emailId, { filename: "f.pdf", contentType: "application/pdf", contentId: null, isInline, size: 1, filePath: "/tmp/f.pdf" });
+}
+
+describe("attachment indicator", () => {
+  test("list rows carry the number of real attachments; inline images don't count", async () => {
+    const { db, accounts } = await setup(["a@x.com"]);
+    const withFile = mail(db, accounts[0]!.id, "INBOX", "has file", "2026-01-03T00:00:00.000Z");
+    const onlyInline = mail(db, accounts[0]!.id, "INBOX", "logo only", "2026-01-02T00:00:00.000Z");
+    mail(db, accounts[0]!.id, "INBOX", "none", "2026-01-01T00:00:00.000Z");
+    attach(db, withFile.id, false);
+    attach(db, withFile.id, false);
+    attach(db, onlyInline.id, true);
+
+    expect(listEmails(db, accounts[0]!.id, { folder: "INBOX" }).map(e => [e.subject, e.attachmentCount])).toEqual([
+      ["has file", 2],
+      ["logo only", 0],
+      ["none", 0],
+    ]);
+  });
+
+  test("unified lists and search results flag messages with attachments", async () => {
+    const { db, user, accounts } = await setup(["a@x.com"]);
+    const withFile = mail(db, accounts[0]!.id, "INBOX", "has file", "2026-01-02T00:00:00.000Z");
+    mail(db, accounts[0]!.id, "INBOX", "none", "2026-01-01T00:00:00.000Z");
+    attach(db, withFile.id, false);
+
+    expect(listUnifiedEmails(db, user.id, "inbox").map(r => [r.subject, r.hasAttachments])).toEqual([["has file", true], ["none", false]]);
+    expect(searchEmails(db, user.id, "file").map(r => [r.subject, r.hasAttachments])).toEqual([["has file", true]]);
+  });
+});
+
+describe("countUnifiedInboxUnread", () => {
+  test("counts unread INBOX messages across the user's accounts only", async () => {
+    const { db, user, accounts } = await setup(["a@x.com", "b@x.com"]);
+    const other = await createUser(db, "bob", "pw");
+    const bobs = createAccount(db, other.id, accountInput("bob@x.com"), key);
+
+    const first = mail(db, accounts[0]!.id, "INBOX", "u1", "2026-01-01T00:00:00.000Z");
+    mail(db, accounts[1]!.id, "INBOX", "u2", "2026-01-02T00:00:00.000Z");
+    mail(db, accounts[1]!.id, "INBOX", "read", "2026-01-03T00:00:00.000Z", { isRead: true });
+    mail(db, accounts[0]!.id, "Archive", "elsewhere", "2026-01-04T00:00:00.000Z");
+    mail(db, bobs.id, "INBOX", "not mine", "2026-01-05T00:00:00.000Z");
+
+    expect(countUnifiedInboxUnread(db, user.id)).toBe(2);
+    updateEmail(db, first.id, { isRead: true });
+    expect(countUnifiedInboxUnread(db, user.id)).toBe(1);
   });
 });

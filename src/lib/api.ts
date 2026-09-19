@@ -168,8 +168,9 @@ export const api = {
 
   listDownloadJobs: (token: string, accountEmail: string) =>
     request<DownloadJob[]>("GET", `/api/accounts/${enc(accountEmail)}/downloads`, { token }),
-  triggerDownload: (token: string, accountEmail: string, folder: string) =>
-    request<DownloadJob>("POST", `/api/accounts/${enc(accountEmail)}/downloads`, { token, body: { folder } }),
+  /** Syncs every folder of the account, or just `folder` when given. */
+  triggerDownload: (token: string, accountEmail: string, folder?: string) =>
+    request<DownloadJob>("POST", `/api/accounts/${enc(accountEmail)}/downloads`, { token, body: folder ? { folder } : {} }),
   getDownloadJob: (token: string, accountEmail: string, jobId: number) =>
     request<DownloadJob>("GET", `/api/accounts/${enc(accountEmail)}/downloads/${jobId}`, { token }),
 
@@ -177,6 +178,8 @@ export const api = {
   /** Shallow-merges into the stored settings; a key set to null is removed. */
   updateSettings: (token: string, patch: { [K in keyof UserSettings]?: UserSettings[K] | null }) =>
     request<UserSettings>("PATCH", "/api/settings", { token, body: patch }),
+  /** Unread messages across all accounts' Inboxes — the combined Inbox's badge. */
+  unifiedInboxUnread: (token: string) => request<{ count: number }>("GET", "/api/unified/inbox/unread", { token }),
   /** Newest-first messages across all accounts' Inboxes (`inbox`) or Sent folders (`sent`). */
   listUnified: (token: string, kind: UnifiedKind, opts: { limit?: number; offset?: number } = {}) => {
     const params = new URLSearchParams();

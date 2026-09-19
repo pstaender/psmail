@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { json, readJsonBody, requireAuth, withErrorHandling } from "../http";
 import { getUserSettings, updateUserSettings } from "../models/userSettings";
-import { isUnifiedKind, listUnifiedEmails } from "../models/unified";
+import { countUnifiedInboxUnread, isUnifiedKind, listUnifiedEmails } from "../models/unified";
 import { ApiError } from "../types";
 
 export function settingsRoutes(db: Database) {
@@ -15,6 +15,12 @@ export function settingsRoutes(db: Database) {
         const { session } = requireAuth(req, db);
         const body = await readJsonBody<Record<string, unknown>>(req);
         return json(updateUserSettings(db, session.userId, body));
+      }),
+    },
+    "/api/unified/inbox/unread": {
+      GET: withErrorHandling(async req => {
+        const { session } = requireAuth(req, db);
+        return json({ count: countUnifiedInboxUnread(db, session.userId) });
       }),
     },
     /** Newest-first messages across all of the user's accounts: `inbox` (every Inbox) or `sent` (every Sent folder). */
