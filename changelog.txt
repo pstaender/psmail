@@ -7,6 +7,28 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Better recipient autocomplete (8c6966f)
+---------------------------------------------------
+1. Punctuation no longer matters. A contact stored as 'First Lastname' <flastname@example.com> wasn't
+   found by typing First because the quotes were part of the first word. Names are now compared as
+   plain words (case and any punctuation ignored, letters/digits of any script, so umlauts work):
+   First, 'First, last first and first-last all find it. Every typed word has to be the start of some
+   word in the name (irst finds nothing), or the address has to start with what you typed (that part
+   keeps its punctuation: first.l). Quotes around names are also stripped when a contact is stored,
+   and existing contacts are tidied once at startup (so old data is fixed too, and the suggestion
+   shows First Lastname without quotes).
+2. Contacts from other accounts: instead of a button, they are appended automatically, under a
+   "From your other accounts" heading, after the current account's own matches (up to 5, ranked the
+   same way; an address known to several accounts shows once with its counts added up; never an
+   address the current account already has). This account's people always stay first, so the
+   "only this account" feel is kept, but you never have to click anything to reach the rest, and the
+   arrow keys walk through both groups. I chose this over a button because a button hides the
+   contacts exactly when you need them, at the cost of a slightly longer list. The API only does it
+   with scope=all (the recipient fields always ask for it); otherwise it is still this account only.
+- Tests: quoted/punctuated/umlaut names, word order, address prefixes, the startup repair; other-account
+  ranking, caps, dedupe and isolation between users; the heading and keyboard/mouse selection in the UI.
+
+
 2026-09-19 - Bulk selection in the combined lists (72325f4)
 -----------------------------------------------------------
 Cause of "Shift-select doesn't work anymore": since the app opens on the combined Inbox, you were in a
