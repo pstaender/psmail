@@ -87,8 +87,8 @@ export function SettingsDialog({
               onChange={e => setInterval(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              While P.S.Mail is open in your browser, all accounts are synced this often. Leave empty to only sync
-              when you click "Sync now".
+              While P.S.Mail is open in your browser, each account's Inbox is synced this often (other folders only
+              when you click "Sync now"). Leave empty to never sync automatically.
             </p>
           </div>
 

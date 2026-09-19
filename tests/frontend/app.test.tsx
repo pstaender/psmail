@@ -1356,7 +1356,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await waitFor(() => expect(unreadRequests).toBeGreaterThan(before));
   });
 
-  test("with a sync interval set, the client syncs every account on each tick; without one, nothing is scheduled", async () => {
+  test("with a sync interval set, the client syncs every account's Inbox (only) on each tick; without one, nothing is scheduled", async () => {
     const realSetInterval = globalThis.setInterval;
     const minuteTimers: (() => void)[] = [];
     globalThis.setInterval = ((fn: () => void, ms?: number, ...rest: unknown[]) => {
@@ -1376,7 +1376,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(downloadPosts).toEqual([]); // nothing until the first tick
 
       await act(async () => minuteTimers[0]!());
-      await waitFor(() => expect(downloadPosts).toEqual([{}])); // one account here; every folder (no `folder`)
+      await waitFor(() => expect(downloadPosts).toEqual([{ folder: "INBOX" }])); // one account here; the Inbox only, not every folder
 
       // Without the setting (the default), no periodic timer is registered at all.
       cleanup();

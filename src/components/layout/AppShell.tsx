@@ -169,15 +169,16 @@ export function AppShell() {
 
   const { jobs: syncJobs, start: startSync } = useSyncJobs(handleSyncComplete);
 
-  // Automatic sync: while the app is open, every `syncIntervalMinutes` all accounts are synced (an
-  // account that's still busy with the previous run is skipped by startSync).
+  // Automatic sync: while the app is open, every `syncIntervalMinutes` each account's Inbox is synced
+  // (an account that's still busy with the previous run is skipped by startSync). Only the Inbox, to
+  // keep the periodic IMAP traffic small — the other folders sync when the user clicks "Sync now".
   const accountsRef = useRef(accounts);
   accountsRef.current = accounts;
   const syncIntervalMinutes = settings.syncIntervalMinutes;
   useEffect(() => {
     if (!syncIntervalMinutes) return;
     const timer = setInterval(() => {
-      for (const account of accountsRef.current) startSync(account.email, { silent: true });
+      for (const account of accountsRef.current) startSync(account.email, { folder: "INBOX", silent: true });
     }, syncIntervalMinutes * 60_000);
     return () => clearInterval(timer);
   }, [syncIntervalMinutes, startSync]);
