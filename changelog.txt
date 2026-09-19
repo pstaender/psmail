@@ -7,6 +7,21 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Sync button on the combined Inbox (32faf0b)
+-------------------------------------------------------
+The combined Inbox row in the sidebar has a refresh button (shown on hover, like the ones on accounts) that
+syncs the Inbox of every account at once.
+- Only the Inboxes, not all folders (that is what "Sync now" on a single account does); disabled accounts are
+  skipped; an account that is already syncing is left alone. The syncs run in parallel, one job per account,
+  through the same machinery as the per-account buttons (progress, refresh when they end, new-mail
+  announcement).
+- While any account syncs, the button turns into a spinner whose tooltip counts them ("Syncing 2
+  accounts...") and can't be pressed again; when they finish it is back and the lists, folder counts and
+  unread badge are refreshed as after any sync.
+- Tests: all accounts get an Inbox-only sync, disabled ones don't, the spinner/count and no second round,
+  and the refresh at the end.
+
+
 2026-09-19 - Inbox/Sent by name, Inbox always first (ec3a83e)
 ------------------------------------------------------------
 - Some servers don't flag their Inbox and Sent folders (no \Inbox / \Sent special-use). When no folder carries
