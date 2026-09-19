@@ -1388,4 +1388,67 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       globalThis.setInterval = realSetInterval;
     }
   });
+
+  test("Esc closes the search, like its x button", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    const searchBox = screen.getByPlaceholderText(/search all mail/i) as HTMLInputElement;
+    await userEvent.type(searchBox, "second");
+    await waitFor(() => expect(screen.getByText(/Search: "second"/)).toBeTruthy());
+
+    await userEvent.keyboard("{Escape}");
+    expect(searchBox.value).toBe("");
+    expect(document.activeElement).not.toBe(searchBox);
+    await waitFor(() => expect(screen.queryByText(/Search: "second"/)).toBeNull());
+    expect(await screen.findByText("Hello there")).toBeTruthy(); // back to the folder list
+
+    // With no search open, Esc is left alone.
+    const notHandled = fireEvent.keyDown(window, { key: "Escape" });
+    expect(notHandled).toBe(true);
+  });
+
+  test("Cmd/Ctrl+A selects every message in the list, except while typing in a text field", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await screen.findByText("Second message");
+
+    // In the search box, select-all keeps its normal meaning (select the text).
+    const searchBox = screen.getByPlaceholderText(/search all mail/i);
+    await userEvent.click(searchBox);
+    await userEvent.keyboard("{Control>}a{/Control}");
+    expect(screen.queryByText(/\d+ selected/)).toBeNull();
+
+    (document.body as HTMLElement).focus();
+    const handled = !fireEvent.keyDown(document.body, { key: "a", ctrlKey: true });
+    expect(handled).toBe(true); // preventDefault'd, so the browser doesn't select the page text
+    await waitFor(() => expect(screen.getByText("4 selected")).toBeTruthy());
+
+    // Cmd works the same as Ctrl.
+    await userEvent.click(screen.getByTitle("Clear selection"));
+    await waitFor(() => expect(screen.queryByText(/\d+ selected/)).toBeNull());
+    expect(fireEvent.keyDown(document.body, { key: "a", metaKey: true })).toBe(false);
+    await waitFor(() => expect(screen.getByText("4 selected")).toBeTruthy());
+  });
+
+  test("Cmd/Ctrl+R replies to the open message; without one it doesn't interfere with the browser", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    // Nothing open: the key isn't handled (the browser would reload).
+    (document.body as HTMLElement).focus();
+    expect(fireEvent.keyDown(document.body, { key: "r", ctrlKey: true })).toBe(true);
+    expect(screen.queryByText("New message")).toBeNull();
+
+    await userEvent.click(await screen.findByText("Hello there"));
+    await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+    (document.body as HTMLElement).focus();
+    expect(fireEvent.keyDown(document.body, { key: "r", metaKey: true })).toBe(false); // preventDefault'd: no page reload
+
+    const composeDialog = (await screen.findByText("New message")).closest('[role="dialog"]') as HTMLElement;
+    expect((within(composeDialog).getByLabelText("Subject") as HTMLInputElement).value).toBe("Re: Hello there");
+  });
 });

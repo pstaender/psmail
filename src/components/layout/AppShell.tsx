@@ -213,28 +213,60 @@ export function AppShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEmail?.id]);
 
-  // Cmd/Ctrl+K focuses the search input, from anywhere (even while typing in another field) —
-  // unlike Backspace/Delete below, skipped only while a dialog is open (Radix would trap focus
-  // inside it anyway, so this couldn't reach the search input then even without the guard).
+  // Keyboard shortcuts. All are skipped while a dialog is open (Radix traps focus inside it anyway,
+  // and its own keys — Esc in particular — belong to it).
   //
-  // Backspace/Delete deletes the open message (or the bulk selection, if there is one), same
-  // as clicking the Delete button — skipped while typing anywhere (an input/textarea/editable
-  // area, e.g. compose or search) or while a dialog that could itself need the key is open.
+  // - Esc closes the search (same as its "x") and takes focus out of the search box.
+  // - Cmd/Ctrl+K focuses the search input, from anywhere (even while typing in another field).
+  // - Cmd/Ctrl+A selects every loaded message in the folder list (for the bulk actions) — only
+  //   outside text fields, where it keeps its normal meaning, and not in search/combined lists,
+  //   which have no bulk selection.
+  // - Cmd/Ctrl+R replies to the open message (instead of reloading the page) — only when one is open.
+  // - Backspace/Delete deletes the open message (or the bulk selection, if there is one), same as
+  //   clicking the Delete button — also skipped while typing in a text field.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        if (composeOpen || editingAccountEmail !== null || pendingDeleteAccount !== null || confirmDelete !== null) return;
+      const dialogOpen =
+        composeOpen || settingsOpen || editingAccountEmail !== null || pendingDeleteAccount !== null || confirmDelete !== null;
+      if (dialogOpen) return;
+
+      const target = e.target as HTMLElement | null;
+      const typing = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      const mod = (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey;
+      const key = e.key.toLowerCase();
+
+      if (e.key === "Escape") {
+        if (searchQuery === "") return;
+        e.preventDefault();
+        setSearchQuery("");
+        searchInputRef.current?.blur();
+        return;
+      }
+
+      if (mod && key === "k") {
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
         return;
       }
 
+      if (mod && key === "a") {
+        if (typing || showingResults || emails.length === 0) return;
+        e.preventDefault();
+        setSelectedIds(new Set(emails.map(email => email.id)));
+        return;
+      }
+
+      if (mod && key === "r") {
+        if (!selectedEmail) return;
+        e.preventDefault();
+        openCompose(replyDraft(selectedEmail));
+        return;
+      }
+
       if (e.key !== "Backspace" && e.key !== "Delete") return;
 
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
-      if (composeOpen || editingAccountEmail !== null || pendingDeleteAccount !== null || confirmDelete !== null) return;
+      if (typing) return;
       if (!(!showingResults && selectedIds.size > 0) && !selectedEmail) return;
 
       e.preventDefault();
