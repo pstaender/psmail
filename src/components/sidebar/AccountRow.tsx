@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Archive,
   ChevronRight,
@@ -20,8 +20,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useFolders } from "@/hooks/useFolders";
-import { useSync } from "@/hooks/useSync";
-import type { Account } from "../../server/types";
+import type { Account, DownloadJob } from "../../server/types";
 import type { FolderInfo } from "@/lib/api";
 
 function folderIcon(folder: FolderInfo) {
@@ -56,7 +55,8 @@ export function AccountRow({
   onDeleteAccount,
   onEditAccount,
   sharedFolders,
-  onSyncComplete,
+  syncJob,
+  onSync,
 }: {
   account: Account;
   selected: { accountEmail: string; folder: string } | null;
@@ -64,8 +64,9 @@ export function AccountRow({
   onDeleteAccount: (accountEmail: string) => void;
   onEditAccount: (accountEmail: string) => void;
   sharedFolders: SharedFolders;
-  /** Called when a sync of this account finishes (successfully or not), so the rest of the app can pick up the new mail. */
-  onSyncComplete?: (accountEmail: string) => void;
+  /** This account's latest sync job, if any (see useSyncJobs). */
+  syncJob: DownloadJob | undefined;
+  onSync: (accountEmail: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const usingShared = sharedFolders.accountEmail === account.email;
@@ -74,10 +75,17 @@ export function AccountRow({
   // instead of fetching an independent copy that would only ever catch up on a full refresh.
   const own = useFolders(usingShared ? null : expanded ? account.email : null);
   const { folders, loading, error, refresh } = usingShared ? sharedFolders : own;
-  const { isRunning, start, job } = useSync(account.email, () => {
-    refresh();
-    onSyncComplete?.(account.email);
-  });
+  const job = syncJob;
+  const isRunning = job?.status === "pending" || job?.status === "running";
+
+  // When a sync ends, re-read this account's folder counts (in place — see useFolders). Keyed on the
+  // job reaching a finished state rather than on "was running" so a sync too quick to ever render as
+  // running still refreshes.
+  const finished = job?.status === "completed" || job?.status === "failed";
+  useEffect(() => {
+    if (finished) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.id, finished]);
 
   return (
     <Collapsible open={expanded} onOpenChange={setExpanded}>
@@ -101,7 +109,7 @@ export function AccountRow({
           className="size-6 shrink-0 opacity-0 group-hover:opacity-100"
           disabled={isRunning}
           title="Sync now"
-          onClick={() => start()}
+          onClick={() => onSync(account.email)}
         >
           {isRunning ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
         </Button>

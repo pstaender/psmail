@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { getEmailAttachmentsDir, sanitizeSegment } from "../config/paths";
 import { addAttachment, createEmail, deleteEmail, findEmailByUid, listSyncedRefs, updateEmail } from "../models/emails";
 import { completeDownloadJob, failDownloadJob, startDownloadJob, updateDownloadProgress, updateDownloadTotal } from "../models/downloads";
-import { setSentFolder, type AccountRow } from "../models/accounts";
+import { learnSpecialFolders, type AccountRow } from "../models/accounts";
+import { isUidDeleted, listDeletedUids, maxDeletedUid, removeDeletedUids } from "../models/tombstones";
 import {
   fetchNewMessages,
   listFolders,
@@ -107,9 +108,13 @@ async function reconcileExisting(
   fetchRemoteFlags: FetchRemoteFlagsFn
 ): Promise<void> {
   const refs = listSyncedRefs(db, accountId, folder);
-  if (refs.length === 0) return;
+  // UIDs deleted locally only (read-only accounts) are checked too, so their tombstones can be
+  // dropped once the server itself no longer has the message.
+  const tombstones = listDeletedUids(db, accountId, folder);
+  if (refs.length === 0 && tombstones.length === 0) return;
 
-  const remote = await fetchRemoteFlags(imapCredentials, folder, refs.map(ref => ref.uid));
+  const remote = await fetchRemoteFlags(imapCredentials, folder, [...refs.map(ref => ref.uid), ...tombstones]);
+  removeDeletedUids(db, accountId, folder, tombstones.filter(uid => !remote.has(uid)));
 
   for (const ref of refs) {
     const state = remote.get(ref.uid);
@@ -181,7 +186,8 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
         "SELECT MAX(uid) as max_uid FROM emails WHERE account_id = ? AND folder = ?"
       )
       .get(account.id, folderPath);
-    const sinceUid = maxUidRow?.max_uid ?? 0;
+    // The watermark also counts tombstoned UIDs: deleting the newest message locally must not make it look "new" again.
+    const sinceUid = Math.max(maxUidRow?.max_uid ?? 0, maxDeletedUid(db, account.id, folderPath));
 
     stage = `${folderPath}: fetching messages newer than UID ${sinceUid}`;
     syncLog(`${tag}: ${stage}`);
@@ -204,7 +210,7 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
     let downloaded = 0;
     for (const message of messages) {
       stage = `${folderPath}: processing UID ${message.uid}`;
-      if (!findEmailByUid(db, account.id, folderPath, message.uid)) {
+      if (!findEmailByUid(db, account.id, folderPath, message.uid) && !isUidDeleted(db, account.id, folderPath, message.uid)) {
         const parsed = await parseMessage(message.source);
 
         const email = createEmail(db, account.id, {
@@ -274,8 +280,7 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
     if (allFolders) {
       stage = "listing folders";
       const remote = await listRemoteFolders(imapCredentials);
-      const sent = remote.find(f => f.specialUse === "\\Sent");
-      if (sent) setSentFolder(db, account.id, sent.path);
+      learnSpecialFolders(db, account.id, remote);
       const syncable = remote.filter(isSyncableFolder);
       // Inbox first, so new mail shows up before the long tail of archive folders is walked.
       folderPaths = [...syncable.filter(f => f.specialUse === "\\Inbox"), ...syncable.filter(f => f.specialUse !== "\\Inbox")].map(f => f.path);

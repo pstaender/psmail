@@ -26,6 +26,8 @@ interface AccountRow {
   position: number;
   /** Path of this account's Sent folder as last seen on the server (learned from the live folder list / a send); NULL = not learned yet. */
   sent_folder: string | null;
+  /** JSON `{drafts?, trash?, junk?, archive?}` of the other special folders' real paths, learned the same way — used to keep them out of the combined Inbox. */
+  special_folders: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -306,3 +308,35 @@ export function decryptAccountCredentials(row: AccountRow, encryptionKey: Buffer
 }
 
 export type { AccountRow };
+
+const SPECIAL_USE_KEYS: Record<string, string> = {
+  "\\Drafts": "drafts",
+  "\\Trash": "trash",
+  "\\Junk": "junk",
+  "\\Archive": "archive",
+};
+
+/**
+ * Learns where an account's special folders (Sent, Drafts, Trash, Junk, Archive) actually live
+ * from a live IMAP folder listing — names vary per server and language, and the local database
+ * only knows folder paths, not what they're for. Only what the listing names is updated.
+ */
+export function learnSpecialFolders(db: Database, id: number, folders: { path: string; specialUse: string | null }[]): void {
+  const sent = folders.find(f => f.specialUse === "\\Sent");
+  if (sent) setSentFolder(db, id, sent.path);
+
+  const found: Record<string, string> = {};
+  for (const folder of folders) {
+    const key = folder.specialUse ? SPECIAL_USE_KEYS[folder.specialUse] : undefined;
+    if (key) found[key] = folder.path;
+  }
+  if (Object.keys(found).length === 0) return;
+
+  const existing = db.query<{ special_folders: string | null }, [number]>("SELECT special_folders FROM accounts WHERE id = ?").get(id);
+  let merged: Record<string, string> = {};
+  try {
+    merged = existing?.special_folders ? JSON.parse(existing.special_folders) : {};
+  } catch {}
+  merged = { ...merged, ...found };
+  db.query("UPDATE accounts SET special_folders = ? WHERE id = ?").run(JSON.stringify(merged), id);
+}

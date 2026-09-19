@@ -5,14 +5,11 @@ export interface Settings {
   port: number;
   /** Session lifetime in seconds. */
   sessionTtlSeconds: number;
-  /** How often (seconds) the CLI/background scheduler should trigger a sync per account. */
-  downloadIntervalSeconds: number;
 }
 
 const DEFAULT_SETTINGS: Settings = {
   port: 3001,
   sessionTtlSeconds: 60 * 60 * 12,
-  downloadIntervalSeconds: 300,
 };
 
 let cached: Settings | null = null;

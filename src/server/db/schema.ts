@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   signature TEXT,
   position INTEGER NOT NULL DEFAULT 0,
   sent_folder TEXT,
+  special_folders TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   UNIQUE(user_id, email)
@@ -115,6 +116,16 @@ CREATE TABLE IF NOT EXISTS contacts (
   sent_count INTEGER NOT NULL DEFAULT 0,
   last_used TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (account_id, address)
+) WITHOUT ROWID;
+
+-- Tombstones for messages deleted (or moved away) locally only — a read-only account never tells the
+-- server, so without these the next sync would just download them again. Only the UID is kept; the
+-- message row itself (bodies, attachments) is really deleted. See models/tombstones.ts.
+CREATE TABLE IF NOT EXISTS deleted_uids (
+  account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  folder TEXT NOT NULL,
+  uid INTEGER NOT NULL,
+  PRIMARY KEY (account_id, folder, uid)
 ) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS downloads (

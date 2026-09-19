@@ -20,7 +20,8 @@ export function settingsRoutes(db: Database) {
     "/api/unified/inbox/unread": {
       GET: withErrorHandling(async req => {
         const { session } = requireAuth(req, db);
-        return json({ count: countUnifiedInboxUnread(db, session.userId) });
+        const includeFolders = getUserSettings(db, session.userId).combinedInboxIncludesFolders === true;
+        return json({ count: countUnifiedInboxUnread(db, session.userId, { includeFolders }) });
       }),
     },
     /** Newest-first messages across all of the user's accounts: `inbox` (every Inbox) or `sent` (every Sent folder). */
@@ -33,7 +34,8 @@ export function settingsRoutes(db: Database) {
         const url = new URL(req.url);
         const limit = Number(url.searchParams.get("limit") ?? 50);
         const offset = Number(url.searchParams.get("offset") ?? 0);
-        return json(listUnifiedEmails(db, session.userId, kind, { limit, offset }));
+        const includeFolders = getUserSettings(db, session.userId).combinedInboxIncludesFolders === true;
+        return json(listUnifiedEmails(db, session.userId, kind, { limit, offset, includeFolders }));
       }),
     },
   };

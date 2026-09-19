@@ -37,6 +37,10 @@ export type UnifiedKind = "inbox" | "sent";
 /** Server-persisted per-user preferences (GET/PATCH /api/settings). */
 export interface UserSettings {
   bodyView?: "text" | "md" | "plain" | "safe" | "full";
+  /** Minutes between automatic syncs of all accounts while the web client is open; unset = never. */
+  syncIntervalMinutes?: number;
+  /** Opt-in: the combined Inbox also lists mail from accounts' other incoming folders. */
+  combinedInboxIncludesFolders?: boolean;
 }
 
 export interface BulkResult {

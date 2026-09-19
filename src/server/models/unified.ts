@@ -35,6 +35,40 @@ function parseAddresses(json: string | null): EmailAddress[] {
   }
 }
 
+/** Names servers give folders that aren't "incoming mail" — the fallback for accounts whose special folders haven't been learned (see learnSpecialFolders). */
+const NON_INBOX_FOLDER_NAMES = new Set([
+  ...SENT_FOLDER_NAMES,
+  "drafts", "draft", "entwürfe", "entwurf", "trash", "deleted items", "deleted messages", "deleted", "papierkorb", "gelöscht", "gelöschte elemente",
+  "junk", "junk e-mail", "junk-e-mail", "junk email", "spam", "bulk mail", "archive", "archiv", "archives",
+]);
+
+interface AccountFolders {
+  id: number;
+  sent_folder: string | null;
+  special_folders: string | null;
+}
+
+/** True for a folder that holds something other than incoming mail (Sent, Drafts, Trash, Junk, Archive), by learned path or by common name. */
+function isNonInboxFolder(folder: string, account: AccountFolders): boolean {
+  const learned = new Set<string>();
+  if (account.sent_folder) learned.add(account.sent_folder);
+  try {
+    for (const path of Object.values(JSON.parse(account.special_folders ?? "{}"))) if (typeof path === "string") learned.add(path);
+  } catch {}
+  if (learned.has(folder)) return true;
+  const lower = folder.toLowerCase();
+  const lastSegment = lower.split(/[/.]/).pop() ?? lower;
+  return NON_INBOX_FOLDER_NAMES.has(lower) || NON_INBOX_FOLDER_NAMES.has(lastSegment);
+}
+
+/** The folders of an account that the combined Inbox covers: just INBOX, or — opt-in — every folder that isn't Sent/Drafts/Trash/Junk/Archive. */
+function inboxFolders(db: Database, account: AccountFolders, includeFolders: boolean): string[] {
+  if (!includeFolders) return ["INBOX"];
+  const folders = db.query<{ folder: string }, [number]>("SELECT DISTINCT folder FROM emails WHERE account_id = ?").all(account.id);
+  const included = folders.map(f => f.folder).filter(folder => folder === "INBOX" || !isNonInboxFolder(folder, account));
+  return included.length > 0 ? included : ["INBOX"];
+}
+
 function sentFolderFor(db: Database, accountId: number, learned: string | null): string {
   if (learned) return learned;
   const folders = db.query<{ folder: string }, [number]>("SELECT DISTINCT folder FROM emails WHERE account_id = ?").all(accountId);
@@ -51,14 +85,14 @@ export function listUnifiedEmails(
   db: Database,
   userId: number,
   kind: UnifiedKind,
-  options: { limit?: number; offset?: number } = {}
+  options: { limit?: number; offset?: number; includeFolders?: boolean } = {}
 ): SearchResult[] {
   const limit = Math.min(Math.max(options.limit ?? 50, 1), 500);
   const offset = Math.max(options.offset ?? 0, 0);
 
   const accounts = db
-    .query<{ id: number; email: string; sent_folder: string | null }, [number]>(
-      "SELECT id, email, sent_folder FROM accounts WHERE user_id = ?"
+    .query<{ id: number; email: string; sent_folder: string | null; special_folders: string | null }, [number]>(
+      "SELECT id, email, sent_folder, special_folders FROM accounts WHERE user_id = ?"
     )
     .all(userId);
 
@@ -69,8 +103,10 @@ export function listUnifiedEmails(
 
   const merged: (SearchResult & { sortDate: string })[] = [];
   for (const account of accounts) {
-    const folder = kind === "inbox" ? "INBOX" : sentFolderFor(db, account.id, account.sent_folder);
-    for (const row of query.all(account.id, folder, offset + limit)) {
+    const folders = kind === "inbox" ? inboxFolders(db, account, options.includeFolders ?? false) : [sentFolderFor(db, account.id, account.sent_folder)];
+    // One index-served query per (account, folder), merged below — see the doc comment above.
+    const rows = folders.flatMap(folder => query.all(account.id, folder, offset + limit));
+    for (const row of rows) {
       merged.push({
         id: row.id,
         accountEmail: account.email,
@@ -93,13 +129,19 @@ export function listUnifiedEmails(
   return page.map(({ sortDate: _sortDate, ...result }) => ({ ...result, hasAttachments: withAttachments.has(result.id) }));
 }
 
-/** Unread messages across every account's Inbox — the combined Inbox's badge. */
-export function countUnifiedInboxUnread(db: Database, userId: number): number {
-  const row = db
-    .query<{ count: number }, [number]>(
-      `SELECT COUNT(*) AS count FROM emails e JOIN accounts a ON a.id = e.account_id
-       WHERE a.user_id = ? AND e.folder = 'INBOX' AND e.is_read = 0`
-    )
-    .get(userId);
-  return row?.count ?? 0;
+/** Unread messages across every account's Inbox (or, opt-in, its other incoming folders too) — the combined Inbox's badge. */
+export function countUnifiedInboxUnread(db: Database, userId: number, options: { includeFolders?: boolean } = {}): number {
+  const accounts = db
+    .query<AccountFolders, [number]>("SELECT id, sent_folder, special_folders FROM accounts WHERE user_id = ?")
+    .all(userId);
+  const unread = db.query<{ folder: string; count: number }, [number]>(
+    "SELECT folder, COUNT(*) AS count FROM emails WHERE account_id = ? AND is_read = 0 GROUP BY folder"
+  );
+
+  let total = 0;
+  for (const account of accounts) {
+    const covered = new Set(inboxFolders(db, account, options.includeFolders ?? false));
+    for (const row of unread.all(account.id)) if (covered.has(row.folder)) total += row.count;
+  }
+  return total;
 }

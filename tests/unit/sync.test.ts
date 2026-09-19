@@ -8,6 +8,8 @@ import { deriveEncryptionKey, generateSalt } from "../../src/server/crypto/secre
 import { createAccount, getAccountRow } from "../../src/server/models/accounts";
 import { createDownloadJob, getDownloadJob } from "../../src/server/models/downloads";
 import { findEmailByUid, listEmails } from "../../src/server/models/emails";
+import { performDelete } from "../../src/server/routes/emails";
+import { listDeletedUids } from "../../src/server/models/tombstones";
 import { isSyncableFolder, runSync } from "../../src/server/services/sync";
 import type { ImapFolder, RemoteFlagState } from "../../src/server/services/imap";
 
@@ -239,6 +241,40 @@ describe("runSync", () => {
     expect(isSyncableFolder(f(null, ["\\NonExistent"]))).toBe(false);
     expect(isSyncableFolder(f("\\All"))).toBe(false);
     expect(isSyncableFolder(f("\\Flagged"))).toBe(false);
+  });
+
+  test("a message deleted locally in a read-only account (even the newest UID) isn't downloaded again by the next sync", async () => {
+    const { db, user, account } = await setup();
+    db.exec(`UPDATE accounts SET read_only = 1 WHERE id = ${account.id}`);
+    const readOnly = getAccountRow(db, account.id);
+    const sync = async () => {
+      const job = createDownloadJob(db, account.id, "INBOX");
+      await runSync({
+        db, account: readOnly, username: user.username, folder: "INBOX", downloadJobId: job.id,
+        imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+        fetchMessages: fakeFetchMessages,
+        fetchRemoteFlags: fakeFetchRemoteFlagsNoop,
+      });
+    };
+
+    await sync();
+    const newest = findEmailByUid(db, account.id, "INBOX", 3)!;
+    await performDelete(db, readOnly, newest);
+    expect(findEmailByUid(db, account.id, "INBOX", 3)).toBeNull();
+    expect(listDeletedUids(db, account.id, "INBOX")).toEqual([3]);
+
+    await sync(); // the server still has UID 3 — it must stay deleted locally
+    expect(listEmails(db, account.id, { folder: "INBOX" }).map(e => e.subject).sort()).toEqual(["First", "Second"]);
+
+    // Once the server itself no longer has it, the tombstone is cleaned up.
+    const job = createDownloadJob(db, account.id, "INBOX");
+    await runSync({
+      db, account: readOnly, username: user.username, folder: "INBOX", downloadJobId: job.id,
+      imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      fetchMessages: async () => ({ messages: [] }),
+      fetchRemoteFlags: async (_c, _f, uids) => new Map(uids.filter(uid => uid !== 3).map(uid => [uid, { seen: false, flagged: false }])),
+    });
+    expect(listDeletedUids(db, account.id, "INBOX")).toEqual([]);
   });
 
   test("incremental sync only fetches messages newer than the highest stored uid", async () => {

@@ -6,7 +6,7 @@ import type { UnifiedKind } from "@/lib/api";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AccountRow, type SharedFolders } from "./AccountRow";
 import { AddAccountDialog } from "./AddAccountDialog";
-import type { Account } from "../../server/types";
+import type { Account, DownloadJob } from "../../server/types";
 
 export function AccountTree({
   accounts,
@@ -21,7 +21,8 @@ export function AccountTree({
   unifiedView,
   onSelectUnified,
   unifiedInboxUnread,
-  onSyncComplete,
+  syncJobs,
+  onSync,
 }: {
   accounts: Account[];
   loading: boolean;
@@ -43,7 +44,8 @@ export function AccountTree({
   onSelectUnified: (kind: UnifiedKind) => void;
   /** Unread messages across all Inboxes, shown as a badge on the combined Inbox. */
   unifiedInboxUnread: number;
-  onSyncComplete: (accountEmail: string) => void;
+  syncJobs: Record<string, DownloadJob>;
+  onSync: (accountEmail: string) => void;
 }) {
   return (
     <div className="flex h-full flex-col border-r bg-muted/20">
@@ -97,7 +99,8 @@ export function AccountTree({
               onDeleteAccount={onDeleteAccount}
               onEditAccount={onEditAccount}
               sharedFolders={sharedFolders}
-              onSyncComplete={onSyncComplete}
+              syncJob={syncJobs[account.email]}
+              onSync={onSync}
             />
           ))}
         </div>

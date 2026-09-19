@@ -10,6 +10,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { createTestDb } from "../helpers/db";
 import { startTestServer } from "../helpers/server";
+import { listDeletedUids } from "../../src/server/models/tombstones";
 import { createEmail, getEmail } from "../../src/server/models/emails";
 
 const db = createTestDb();
@@ -131,6 +132,8 @@ describe("pushing email actions to IMAP", () => {
     // Never pushed at all (read-only), so it's a plain permanent local delete, not a soft one.
     expect(del.json).toEqual({ softDeleted: false });
     expect(() => getEmail(db, email.id)).toThrow();
+    // The server still has it, so its UID is remembered — otherwise the next sync would download it again.
+    expect(listDeletedUids(db, account.json.id, "INBOX")).toContain(104);
   });
 
   test("MOVE fails closed on a real message for a non-read-only account", async () => {
@@ -147,7 +150,7 @@ describe("pushing email actions to IMAP", () => {
     expect(getEmail(db, email.id).folder).toBe("INBOX");
   });
 
-  test("MOVE succeeds locally for a read-only account, leaving its UID untouched", async () => {
+  test("MOVE succeeds locally for a read-only account: the old folder's UID is tombstoned, the moved row is local-only", async () => {
     const account = await api("GET", `/api/accounts/${encodeURIComponent(readOnlyAccountEmail)}`, { token });
     const email = createEmail(db, account.json.id, { folder: "INBOX", uid: 106, isDraft: false });
 
@@ -158,7 +161,10 @@ describe("pushing email actions to IMAP", () => {
     );
     expect(move.status).toBe(200);
     expect(move.json.folder).toBe("Archive");
-    expect(move.json.uid).toBe(106); // never pushed, so never re-assigned
+    // Never pushed, so the server still has it in INBOX under UID 106: that UID must not be re-downloaded
+    // there, and the moved row no longer corresponds to any server UID (106 belongs to INBOX).
+    expect(move.json.uid).toBeNull();
+    expect(listDeletedUids(db, account.json.id, "INBOX")).toContain(106);
   });
 
   test("checking IMAP capabilities fails closed and never caches a result for an unreachable server", async () => {

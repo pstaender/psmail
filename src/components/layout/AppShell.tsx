@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LogOut, Mail, PanelLeftOpen, PenSquare, Search, X } from "lucide-react";
+import { LogOut, Mail, PanelLeftOpen, PenSquare, Search, Settings, X } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { AccountTree } from "@/components/sidebar/AccountTree";
+import { SettingsDialog } from "@/components/layout/SettingsDialog";
 import { EditAccountDialog } from "@/components/sidebar/EditAccountDialog";
 import { ResizeHandle } from "@/components/layout/ResizeHandle";
 import { EmptyState } from "@/components/mail/EmptyState";
@@ -27,12 +28,13 @@ import { ComposeDialog, type ComposeDraft } from "@/components/mail/ComposeDialo
 import { useAccounts } from "@/hooks/useAccounts";
 import { useEmails } from "@/hooks/useEmails";
 import { useFolders } from "@/hooks/useFolders";
+import { useSyncJobs } from "@/hooks/useSyncJobs";
 import { useEmailDetail } from "@/hooks/useEmailDetail";
 import { useSearchResults } from "@/hooks/useSearchResults";
 import { useResizableWidth } from "@/hooks/useResizableWidth";
 import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import { useAuth } from "@/contexts/AuthContext";
-import { api, type BulkResult, type FolderInfo, type UnifiedKind } from "@/lib/api";
+import { api, type BulkResult, type FolderInfo, type UnifiedKind, type UserSettings } from "@/lib/api";
 import { editDraft, forwardDraft, replyDraft, withSignature } from "@/lib/compose";
 import { resolveSpecialFolder } from "@/lib/folders";
 import type { Account, EmailRecord } from "../../server/types";
@@ -80,18 +82,22 @@ export function AppShell() {
   // Remembered across messages (and folder/account switches) so the next message
   // opened reuses whatever body view the user was last reading with.
   const [preferredBodyView, setPreferredBodyView] = useState<BodyView | null>(null);
-  // Loaded from the server-side user settings, so the last tab picked survives reloads and devices.
+  // Server-side user settings (GET/PATCH /api/settings): the reading tab, the auto-sync interval, and
+  // the combined-Inbox option. Loaded once; edits merge the server's answer back in.
+  const [settings, setSettings] = useState<UserSettings>({});
+  const [settingsOpen, setSettingsOpen] = useState(false);
   useEffect(() => {
     if (!token) return;
     api
       .getSettings(token)
-      .then(settings => {
-        if (settings.bodyView) setPreferredBodyView(settings.bodyView);
+      .then(loaded => {
+        setSettings(loaded);
+        if (loaded.bodyView) setPreferredBodyView(loaded.bodyView);
       })
       .catch(() => {});
   }, [token]);
   function persistBodyView(view: BodyView) {
-    if (token) api.updateSettings(token, { bodyView: view }).catch(() => {});
+    if (token) api.updateSettings(token, { bodyView: view }).then(setSettings).catch(() => {});
   }
   // A cross-account mailbox (all Inboxes / all Sents) shown instead of one account's folder. Set from
   // the top of the sidebar, cleared by picking a real folder; a running search takes precedence over it.
@@ -159,6 +165,32 @@ export function AppShell() {
     if (accountEmail === selectedAccountEmail) refreshEmails();
     refreshSearchResults();
     refreshUnifiedInboxUnread();
+  }
+
+  const { jobs: syncJobs, start: startSync } = useSyncJobs(handleSyncComplete);
+
+  // Automatic sync: while the app is open, every `syncIntervalMinutes` all accounts are synced (an
+  // account that's still busy with the previous run is skipped by startSync).
+  const accountsRef = useRef(accounts);
+  accountsRef.current = accounts;
+  const syncIntervalMinutes = settings.syncIntervalMinutes;
+  useEffect(() => {
+    if (!syncIntervalMinutes) return;
+    const timer = setInterval(() => {
+      for (const account of accountsRef.current) startSync(account.email, { silent: true });
+    }, syncIntervalMinutes * 60_000);
+    return () => clearInterval(timer);
+  }, [syncIntervalMinutes, startSync]);
+
+  async function saveSettings(patch: { syncIntervalMinutes: number | null; combinedInboxIncludesFolders: boolean }) {
+    if (!token) return;
+    const includeChanged = (settings.combinedInboxIncludesFolders === true) !== patch.combinedInboxIncludesFolders;
+    setSettings(await api.updateSettings(token, patch));
+    // The combined Inbox's contents and badge depend on the option, and the server applies it per request.
+    if (includeChanged) {
+      refreshSearchResults();
+      refreshUnifiedInboxUnread();
+    }
   }
   const { email: selectedEmail, setEmail: setSelectedEmailDetail } = useEmailDetail(selectedAccountEmail, selectedEmailId);
 
@@ -530,7 +562,16 @@ export function AppShell() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {username !== "default" && <span className="text-sm text-muted-foreground">{username}</span>}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1.5 text-muted-foreground"
+            onClick={() => setSettingsOpen(true)}
+            title="Settings"
+          >
+            <Settings className="size-4" />
+            {username === "default" ? "Settings" : username}
+          </Button>
           <Button variant="ghost" size="icon" onClick={logout} title="Sign out">
             <LogOut className="size-4" />
           </Button>
@@ -562,7 +603,8 @@ export function AppShell() {
                 onDeleteAccount={setPendingDeleteAccount}
                 onEditAccount={setEditingAccountEmail}
                 unifiedInboxUnread={unifiedInboxUnread}
-                onSyncComplete={handleSyncComplete}
+                syncJobs={syncJobs}
+                onSync={email => startSync(email)}
                 unifiedView={unifiedView}
                 onSelectUnified={selectUnified}
                 onCollapse={() => setSidebarCollapsed(true)}
@@ -677,6 +719,14 @@ export function AppShell() {
           }}
         />
       )}
+
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        settings={settings}
+        username={username}
+        onSave={saveSettings}
+      />
 
       <EditAccountDialog
         account={accounts.find(a => a.email === editingAccountEmail) ?? null}

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createTestDb } from "../helpers/db";
 import { createUser } from "../../src/server/models/users";
 import { deriveEncryptionKey, generateSalt } from "../../src/server/crypto/secrets";
-import { createAccount, deleteAccount, listAccounts, setAccountPosition, setSentFolder, updateAccount, normalizeAccountPositions } from "../../src/server/models/accounts";
+import { createAccount, deleteAccount, learnSpecialFolders, listAccounts, setAccountPosition, setSentFolder, updateAccount, normalizeAccountPositions } from "../../src/server/models/accounts";
 import { addAttachment, createEmail, listEmails, updateEmail } from "../../src/server/models/emails";
 import { countUnifiedInboxUnread, listUnifiedEmails } from "../../src/server/models/unified";
 import { searchEmails } from "../../src/server/models/search";
@@ -189,5 +189,62 @@ describe("countUnifiedInboxUnread", () => {
     expect(countUnifiedInboxUnread(db, user.id)).toBe(2);
     updateEmail(db, first.id, { isRead: true });
     expect(countUnifiedInboxUnread(db, user.id)).toBe(1);
+  });
+});
+
+describe("user settings: sync interval and combined-inbox folders", () => {
+  test("accepts whole minutes (or null to clear) and a boolean, rejects anything else", async () => {
+    const { db, user } = await setup([]);
+    expect(updateUserSettings(db, user.id, { syncIntervalMinutes: 5, combinedInboxIncludesFolders: true })).toEqual({
+      syncIntervalMinutes: 5,
+      combinedInboxIncludesFolders: true,
+    });
+    expect(updateUserSettings(db, user.id, { syncIntervalMinutes: null })).toEqual({ combinedInboxIncludesFolders: true });
+
+    for (const bad of [0, -1, 1.5, "5", 1441, NaN]) {
+      expect(() => updateUserSettings(db, user.id, { syncIntervalMinutes: bad })).toThrow(/syncIntervalMinutes/);
+    }
+    expect(() => updateUserSettings(db, user.id, { combinedInboxIncludesFolders: "yes" })).toThrow(/true or false/);
+  });
+});
+
+describe("combined Inbox including other folders", () => {
+  test("adds incoming folders, but never Sent/Drafts/Trash/Junk/Archive (learned paths or common names)", async () => {
+    const { db, user, accounts } = await setup(["a@x.com"]);
+    const id = accounts[0]!.id;
+    mail(db, id, "INBOX", "in inbox", "2026-01-01T00:00:00.000Z");
+    mail(db, id, "Newsletters", "in newsletters", "2026-01-02T00:00:00.000Z");
+    mail(db, id, "INBOX.Lists", "in lists", "2026-01-03T00:00:00.000Z");
+    mail(db, id, "Sent", "sent", "2026-01-04T00:00:00.000Z");
+    mail(db, id, "Entwürfe", "draft", "2026-01-05T00:00:00.000Z");
+    mail(db, id, "Papierkorb", "trash", "2026-01-06T00:00:00.000Z");
+    mail(db, id, "[Gmail]/Spam", "spam", "2026-01-07T00:00:00.000Z");
+    mail(db, id, "Old Stuff", "learned as archive", "2026-01-08T00:00:00.000Z");
+    learnSpecialFolders(db, id, [{ path: "Old Stuff", specialUse: "\\Archive" }]);
+
+    const subjects = (includeFolders: boolean) => listUnifiedEmails(db, user.id, "inbox", { includeFolders }).map(r => r.subject);
+    expect(subjects(false)).toEqual(["in inbox"]);
+    expect(subjects(true)).toEqual(["in lists", "in newsletters", "in inbox"]);
+    // The result says which folder each message is in.
+    expect(listUnifiedEmails(db, user.id, "inbox", { includeFolders: true }).map(r => r.folder)).toEqual(["INBOX.Lists", "Newsletters", "INBOX"]);
+  });
+
+  test("the unread badge follows the same setting", async () => {
+    const { db, user, accounts } = await setup(["a@x.com", "b@x.com"]);
+    mail(db, accounts[0]!.id, "INBOX", "u1", "2026-01-01T00:00:00.000Z");
+    mail(db, accounts[0]!.id, "Newsletters", "u2", "2026-01-02T00:00:00.000Z");
+    mail(db, accounts[1]!.id, "Newsletters", "u3", "2026-01-03T00:00:00.000Z");
+    mail(db, accounts[1]!.id, "Trash", "u4", "2026-01-04T00:00:00.000Z");
+
+    expect(countUnifiedInboxUnread(db, user.id)).toBe(1);
+    expect(countUnifiedInboxUnread(db, user.id, { includeFolders: true })).toBe(3);
+  });
+
+  test("paging works across the merged folders", async () => {
+    const { db, user, accounts } = await setup(["a@x.com"]);
+    mail(db, accounts[0]!.id, "INBOX", "1", "2026-01-01T00:00:00.000Z");
+    mail(db, accounts[0]!.id, "Lists", "2", "2026-01-02T00:00:00.000Z");
+    mail(db, accounts[0]!.id, "INBOX", "3", "2026-01-03T00:00:00.000Z");
+    expect(listUnifiedEmails(db, user.id, "inbox", { includeFolders: true, limit: 2, offset: 1 }).map(r => r.subject)).toEqual(["2", "1"]);
   });
 });

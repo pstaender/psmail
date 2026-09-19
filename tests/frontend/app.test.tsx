@@ -150,7 +150,7 @@ function installMockFetch(
     /** When set, GET .../emails serves this many generated INBOX messages, honoring limit/offset like the real API. */
     pagedEmailCount?: number;
     /** The server-side user settings GET /api/settings starts out with. */
-    settings?: { bodyView?: string };
+    settings?: { bodyView?: string; syncIntervalMinutes?: number; combinedInboxIncludesFolders?: boolean };
     /** What GET /api/unified/inbox/unread reports (the combined Inbox's badge). */
     inboxUnread?: number;
   } = {}
@@ -1295,5 +1295,97 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     flagged.unmount();
     const plain = render(<MessageHeader email={{ ...EMAIL, isFlagged: false } as never} />);
     expect(plain.container.querySelector('[aria-label="Starred"]')).toBeNull();
+  });
+
+  test("the header's settings button opens a dialog whose values are stored in the user settings", async () => {
+    installMockFetch({ settings: { syncIntervalMinutes: 15 } });
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(screen.getByTitle("Settings"));
+    const interval = (await screen.findByLabelText("Sync interval (minutes)")) as HTMLInputElement;
+    await waitFor(() => expect(interval.value).toBe("15")); // seeded from the stored settings
+    const includeFolders = screen.getByLabelText("Show mail from folders in the combined Inbox");
+    expect(includeFolders.getAttribute("aria-checked")).toBe("false");
+
+    await userEvent.clear(interval);
+    await userEvent.type(interval, "5");
+    await userEvent.click(includeFolders);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(capturedSettingsPatches).toEqual([{ syncIntervalMinutes: 5, combinedInboxIncludesFolders: true }])
+    );
+    await waitFor(() => expect(screen.queryByLabelText("Sync interval (minutes)")).toBeNull()); // closed
+
+    // Leaving the interval empty stores "never" (null).
+    await userEvent.click(screen.getByTitle("Settings"));
+    const again = (await screen.findByLabelText("Sync interval (minutes)")) as HTMLInputElement;
+    await waitFor(() => expect(again.value).toBe("5"));
+    await userEvent.clear(again);
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(capturedSettingsPatches.at(-1)).toEqual({ syncIntervalMinutes: null, combinedInboxIncludesFolders: true }));
+  });
+
+  test("an invalid sync interval is rejected in the dialog without saving", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+    await userEvent.click(screen.getByTitle("Settings"));
+    const interval = await screen.findByLabelText("Sync interval (minutes)");
+    await userEvent.type(interval, "2.5");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText(/whole number of minutes/)).toBeTruthy();
+    expect(capturedSettingsPatches).toEqual([]);
+  });
+
+  test("toggling the combined-Inbox folders option re-reads the combined Inbox's unread count", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+    await waitFor(() => expect(unreadRequests).toBeGreaterThan(0));
+    const before = unreadRequests;
+
+    await userEvent.click(screen.getByTitle("Settings"));
+    await userEvent.click(await screen.findByLabelText("Show mail from folders in the combined Inbox"));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(unreadRequests).toBeGreaterThan(before));
+  });
+
+  test("with a sync interval set, the client syncs every account on each tick; without one, nothing is scheduled", async () => {
+    const realSetInterval = globalThis.setInterval;
+    const minuteTimers: (() => void)[] = [];
+    globalThis.setInterval = ((fn: () => void, ms?: number, ...rest: unknown[]) => {
+      if (ms !== undefined && ms >= 60_000) {
+        minuteTimers.push(fn);
+        return 0 as unknown as ReturnType<typeof setInterval>;
+      }
+      return realSetInterval(fn, ms, ...rest);
+    }) as typeof setInterval;
+
+    try {
+      installMockFetch({ settings: { syncIntervalMinutes: 3 } });
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+      await waitFor(() => expect(minuteTimers).toHaveLength(1));
+      expect(downloadPosts).toEqual([]); // nothing until the first tick
+
+      await act(async () => minuteTimers[0]!());
+      await waitFor(() => expect(downloadPosts).toEqual([{}])); // one account here; every folder (no `folder`)
+
+      // Without the setting (the default), no periodic timer is registered at all.
+      cleanup();
+      installMockFetch();
+      render(<App />); // still signed in from above
+      await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+      expect(minuteTimers).toHaveLength(1); // still just the first render's
+    } finally {
+      globalThis.setInterval = realSetInterval;
+    }
   });
 });

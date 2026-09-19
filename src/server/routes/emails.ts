@@ -1,7 +1,8 @@
 import type { Database } from "bun:sqlite";
 import { join } from "node:path";
 import type { ImapFlow } from "imapflow";
-import { decryptAccountCredentials, setSentFolder, type AccountRow } from "../models/accounts";
+import { decryptAccountCredentials, learnSpecialFolders, type AccountRow } from "../models/accounts";
+import { addDeletedUid } from "../models/tombstones";
 import {
   addAttachment,
   createEmail,
@@ -115,6 +116,10 @@ export async function performDelete(
       return { softDeleted: true };
     }
     await deleteMessage(client!, existing.folder, existing.uid!);
+  } else if (existing.uid !== null) {
+    // Local-only delete of a message that still exists on the server (read-only account): remember
+    // its UID so the next sync doesn't just download it again.
+    addDeletedUid(db, account.id, existing.folder, existing.uid);
   }
   deleteEmail(db, existing.id);
   return { softDeleted: false };
@@ -132,6 +137,12 @@ async function performMove(
   if (canPushToImap(account, existing.uid)) {
     const result = await moveMessage(client!, existing.folder, existing.uid!, folderName);
     newUid = result.newUid;
+  } else if (existing.uid !== null) {
+    // Local-only move (read-only account): the server still has the message in its old folder, so
+    // that UID must not be re-downloaded there — and here the message no longer corresponds to any
+    // server UID (the old one belongs to the old folder), so it becomes a local-only row.
+    addDeletedUid(db, account.id, existing.folder, existing.uid);
+    newUid = null;
   }
   return moveEmail(db, existing.id, folderName, newUid);
 }
@@ -368,7 +379,7 @@ export function emailsRoutes(db: Database) {
             sentFolder = await withImapClient(imapCredentialsFor(account, imapPassword), async client => {
               const liveFolders = await listFolders(client);
               const target = resolveSpecialFolder(liveFolders, "\\Sent", SENT_FOLDER);
-              setSentFolder(db, account.id, target);
+              learnSpecialFolders(db, account.id, liveFolders);
               const result = await appendMessage(client, target, composed.raw, ["\\Seen"]);
               sentUid = result.uid;
               return target;

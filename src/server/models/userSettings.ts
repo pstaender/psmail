@@ -7,7 +7,13 @@ export const BODY_VIEWS = ["text", "md", "plain", "safe", "full"] as const;
 export interface UserSettings {
   /** The reading-pane tab last used (Text / MD / Plain text / Safe HTML / Full HTML). */
   bodyView?: (typeof BODY_VIEWS)[number];
+  /** How often (minutes) the web client triggers a sync of all accounts while it's open. Unset = never. */
+  syncIntervalMinutes?: number;
+  /** Opt-in: the combined Inbox also lists mail from an account's other folders (not Sent/Drafts/Trash/Junk/Archive). */
+  combinedInboxIncludesFolders?: boolean;
 }
+
+export const MAX_SYNC_INTERVAL_MINUTES = 24 * 60;
 
 export function getUserSettings(db: Database, userId: number): UserSettings {
   const row = db.query<{ settings: string }, [number]>("SELECT settings FROM users WHERE id = ?").get(userId);
@@ -29,6 +35,14 @@ export function updateUserSettings(db: Database, userId: number, patch: Record<s
       if (value === null) delete next.bodyView;
       else if (typeof value === "string" && (BODY_VIEWS as readonly string[]).includes(value)) next.bodyView = value;
       else throw new ApiError(400, `bodyView must be one of: ${BODY_VIEWS.join(", ")}`);
+    } else if (key === "syncIntervalMinutes") {
+      if (value === null) delete next.syncIntervalMinutes;
+      else if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= MAX_SYNC_INTERVAL_MINUTES) next.syncIntervalMinutes = value;
+      else throw new ApiError(400, `syncIntervalMinutes must be a whole number of minutes between 1 and ${MAX_SYNC_INTERVAL_MINUTES}, or null for never`);
+    } else if (key === "combinedInboxIncludesFolders") {
+      if (value === null) delete next.combinedInboxIncludesFolders;
+      else if (typeof value === "boolean") next.combinedInboxIncludesFolders = value;
+      else throw new ApiError(400, "combinedInboxIncludesFolders must be true or false");
     } else {
       throw new ApiError(400, `Unknown setting "${key}"`);
     }
