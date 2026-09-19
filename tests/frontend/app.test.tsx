@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { App } from "../../src/App";
 import { MessageHeader } from "../../src/components/mail/MessageHeader";
 import type { Account } from "../../src/server/types";
@@ -112,6 +113,9 @@ const DRAFT_EMAIL = {
   htmlText: null,
 };
 
+// What the Settings dialog saves when only the fields a test touches were changed.
+const DEFAULT_PATCH = { syncIntervalMinutes: null, combinedInboxIncludesFolders: false, notifyBrowser: false, notifyToast: false, notificationSound: "crystal_clear" };
+
 const SYNC_JOB = (status: string) => ({
   id: 1, accountId: 1, folder: null, status, progressCurrent: 0, progressTotal: 0, error: null, startedAt: NOW, finishedAt: null, createdAt: NOW,
 });
@@ -140,6 +144,8 @@ const downloadPosts: Record<string, unknown>[] = [];
 const capturedResultPatches: Record<string, unknown>[] = [];
 let folderRequests = 0;
 let unreadRequests = 0;
+// The afterId (or null) of every GET /api/unified/inbox/new call.
+const newMailRequests: (string | null)[] = [];
 // Artificial latency for GET .../folders — lets a test look at the tree *while* a refresh is in flight.
 let folderDelayMs = 0;
 
@@ -152,9 +158,18 @@ function installMockFetch(
     /** When set, GET .../emails serves this many generated INBOX messages, honoring limit/offset like the real API. */
     pagedEmailCount?: number;
     /** The server-side user settings GET /api/settings starts out with. */
-    settings?: { bodyView?: string; syncIntervalMinutes?: number; combinedInboxIncludesFolders?: boolean };
+    settings?: {
+      bodyView?: string;
+      syncIntervalMinutes?: number;
+      combinedInboxIncludesFolders?: boolean;
+      notifyBrowser?: boolean;
+      notifyToast?: boolean;
+      notificationSound?: string;
+    };
     /** What GET /api/unified/inbox/unread reports (the combined Inbox's badge). */
     inboxUnread?: number;
+    /** What GET /api/unified/inbox/new answers when asked with an afterId (without one it just reports latestId: 100). */
+    newMail?: { total: number; messages: Record<string, unknown>[] };
   } = {}
 ) {
   // A fresh mutable copy per test (installMockFetch runs in beforeEach), so a PATCH in one
@@ -169,6 +184,7 @@ function installMockFetch(
   capturedResultPatches.length = 0;
   folderRequests = 0;
   unreadRequests = 0;
+  newMailRequests.length = 0;
   folderDelayMs = 0;
   let currentSettings: Record<string, unknown> = { ...opts.settings };
 
@@ -218,6 +234,12 @@ function installMockFetch(
       return jsonResponse(SYNC_JOB("running"), 202);
     }
     if (method === "GET" && path === "/api/accounts/me%40example.com/downloads/1") return jsonResponse(SYNC_JOB("completed"));
+    if (method === "GET" && path === "/api/unified/inbox/new") {
+      const afterId = new URL(url, "http://localhost").searchParams.get("afterId");
+      newMailRequests.push(afterId);
+      const result = afterId === null ? { total: 0, messages: [] } : opts.newMail ?? { total: 0, messages: [] };
+      return jsonResponse({ latestId: afterId === null ? 100 : 101, ...result });
+    }
     if (method === "GET" && path === "/api/unified/inbox/unread") {
       unreadRequests += 1;
       return jsonResponse({ count: opts.inboxUnread ?? 0 });
@@ -1322,7 +1344,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
-      expect(capturedSettingsPatches).toEqual([{ syncIntervalMinutes: 5, combinedInboxIncludesFolders: true }])
+      expect(capturedSettingsPatches).toEqual([{ ...DEFAULT_PATCH, syncIntervalMinutes: 5, combinedInboxIncludesFolders: true }])
     );
     await waitFor(() => expect(screen.queryByLabelText("Sync interval (minutes)")).toBeNull()); // closed
 
@@ -1332,7 +1354,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await waitFor(() => expect(again.value).toBe("5"));
     await userEvent.clear(again);
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(capturedSettingsPatches.at(-1)).toEqual({ syncIntervalMinutes: null, combinedInboxIncludesFolders: true }));
+    await waitFor(() => expect(capturedSettingsPatches.at(-1)).toEqual({ ...DEFAULT_PATCH, syncIntervalMinutes: null, combinedInboxIncludesFolders: true }));
   });
 
   test("an invalid sync interval is rejected in the dialog without saving", async () => {
@@ -1517,5 +1539,188 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.click(within(row).getByTitle("Remove star"));
     expect((await screen.findAllByText("simulated IMAP failure")).length).toBeGreaterThan(0); // the error toast
     await waitFor(() => expect(row.querySelector('[aria-label="Starred"]')).toBeTruthy());
+  });
+
+  describe("new mail notifications", () => {
+    const PREVIEW = {
+      id: 10,
+      accountEmail: "me@example.com",
+      folder: "INBOX",
+      from: [{ name: "Alice Anderson", address: "alice@example.com" }],
+      to: [{ address: "me@example.com" }],
+      cc: [{ name: "Bob", address: "bob@example.com" }],
+      subject: "Lunch on Friday?",
+      date: "2026-01-02T10:00:00.000Z",
+      snippet: "Hi! Are you free on Friday for lunch? I know a great place",
+    };
+
+    class FakeNotification {
+      static permission = "granted";
+      static created: FakeNotification[] = [];
+      static requestPermission = async () => FakeNotification.permission;
+      onclick: (() => void) | null = null;
+      closed = false;
+      constructor(public title: string, public options: { body?: string; tag?: string }) {
+        FakeNotification.created.push(this);
+      }
+      close() {
+        this.closed = true;
+      }
+    }
+    const played: string[] = [];
+    const originalNotification = (globalThis as { Notification?: unknown }).Notification;
+    const originalAudio = globalThis.Audio;
+
+    beforeEach(() => {
+      FakeNotification.permission = "granted";
+      FakeNotification.created = [];
+      played.length = 0;
+      (globalThis as { Notification?: unknown }).Notification = FakeNotification;
+      globalThis.Audio = class {
+        constructor(src: string) {
+          played.push(src);
+        }
+        play() {
+          return Promise.resolve();
+        }
+      } as unknown as typeof Audio;
+    });
+    afterEach(() => {
+      toast.dismiss(); // sonner's toast store is global: don't let one test's toasts show up in the next
+      (globalThis as { Notification?: unknown }).Notification = originalNotification;
+      globalThis.Audio = originalAudio;
+    });
+
+    async function loginAndSync(alreadySignedIn = false) {
+      render(<App />);
+      if (!alreadySignedIn) await userEvent.click(await screen.findByText("default"));
+      await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+      await waitFor(() => expect(newMailRequests).toEqual([null])); // the starting point is read on load
+      await userEvent.click(screen.getByTitle("Sync now"));
+      await waitFor(() => expect(newMailRequests.length).toBeGreaterThan(1));
+    }
+
+    test("a toast shows sender, subject, the start of the text, date and recipients, and plays the default sound", async () => {
+      installMockFetch({ settings: { notifyToast: true }, newMail: { total: 1, messages: [PREVIEW] } });
+      await loginAndSync();
+
+      expect(await screen.findByText("Alice Anderson")).toBeTruthy();
+      expect(screen.getByText("Lunch on Friday?")).toBeTruthy();
+      expect(screen.getByText(/Are you free on Friday for lunch/)).toBeTruthy();
+      expect(screen.getByText(/To: me@example.com/).textContent).toContain("Cc: Bob");
+      expect(newMailRequests.at(-1)).toBe("100"); // asked for everything after the starting point
+      expect(played).toHaveLength(1);
+      expect(played[0]).toContain("crystal_clear");
+      expect(FakeNotification.created).toEqual([]); // browser notification wasn't opted into
+
+      // The toast's Open button shows that message.
+      await userEvent.click(screen.getByRole("button", { name: "Open" }));
+      await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+    });
+
+    test("the chosen sound is played, and 'none' plays nothing", async () => {
+      installMockFetch({ settings: { notifyToast: true, notificationSound: "marimba" }, newMail: { total: 1, messages: [PREVIEW] } });
+      await loginAndSync();
+      await screen.findByText("Alice Anderson");
+      expect(played).toHaveLength(1);
+      expect(played[0]).toContain("marimba");
+
+      cleanup();
+      played.length = 0;
+      installMockFetch({ settings: { notifyToast: true, notificationSound: "none" }, newMail: { total: 1, messages: [PREVIEW] } });
+      await loginAndSync(true); // still signed in from above
+      await waitFor(() => expect(screen.getAllByText("Lunch on Friday?").length).toBeGreaterThan(0));
+      expect(played).toEqual([]);
+    });
+
+    test("a browser notification carries only sender and subject, and clicking it opens the message", async () => {
+      installMockFetch({ settings: { notifyBrowser: true }, newMail: { total: 1, messages: [PREVIEW] } });
+      await loginAndSync();
+
+      await waitFor(() => expect(FakeNotification.created).toHaveLength(1));
+      const notification = FakeNotification.created[0]!;
+      expect(notification.title).toBe("Alice Anderson");
+      expect(notification.options.body).toBe("Lunch on Friday?"); // no content, no snippet
+      expect(played).toEqual([]); // the sound belongs to the toast
+      expect(screen.queryByText(/Are you free on Friday/)).toBeNull(); // and no toast was opted into
+
+      act(() => notification.onclick!());
+      expect(notification.closed).toBe(true);
+      await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+    });
+
+    test("several new mails become '20 new mails', and clicking opens the combined Inbox", async () => {
+      installMockFetch({
+        settings: { notifyBrowser: true, notifyToast: true },
+        newMail: { total: 20, messages: [PREVIEW, { ...PREVIEW, id: 11, from: [{ address: "carl@example.com" }] }] },
+      });
+      await loginAndSync();
+
+      await waitFor(() => expect(FakeNotification.created).toHaveLength(1));
+      const notification = FakeNotification.created[0]!;
+      expect(notification.title).toBe("20 new mails");
+      expect(notification.options.body).toContain("Alice Anderson");
+      expect(notification.options.body).not.toContain("Lunch on Friday"); // no subjects for a bundle
+
+      expect((await screen.findAllByText("20 new mails")).length).toBeGreaterThan(0); // the toast, too
+      act(() => notification.onclick!());
+      expect(await screen.findByText("Inbox · all accounts")).toBeTruthy();
+    });
+
+    test("nothing is announced when neither is enabled — but the starting point still moves forward", async () => {
+      installMockFetch({ newMail: { total: 1, messages: [PREVIEW] } });
+      await loginAndSync();
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(FakeNotification.created).toEqual([]);
+      expect(played).toEqual([]);
+      expect(screen.queryByText("Lunch on Friday?")).toBeNull();
+
+      await userEvent.click(screen.getByTitle("Sync now"));
+      await waitFor(() => expect(newMailRequests.length).toBeGreaterThan(2));
+      expect(newMailRequests.at(-1)).toBe("101"); // continues from the last answer's latestId
+    });
+
+    test("the Settings dialog saves the notification options, asking the browser for permission first", async () => {
+      FakeNotification.permission = "default";
+      let asked = 0;
+      FakeNotification.requestPermission = async () => {
+        asked += 1;
+        FakeNotification.permission = "granted";
+        return "granted";
+      };
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+      await userEvent.click(screen.getByTitle("Settings"));
+      expect((await screen.findByLabelText("Toast sound") as HTMLSelectElement).value).toBe("crystal_clear"); // the default
+      await userEvent.click(screen.getByLabelText("Browser notification"));
+      await userEvent.click(screen.getByLabelText("Toast in the app"));
+      await userEvent.selectOptions(screen.getByLabelText("Toast sound"), "cute_bell");
+      await userEvent.click(screen.getByTitle("Play sound"));
+      expect(played.at(-1)).toContain("cute_bell");
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() =>
+        expect(capturedSettingsPatches).toEqual([{ ...DEFAULT_PATCH, notifyBrowser: true, notifyToast: true, notificationSound: "cute_bell" }])
+      );
+      expect(asked).toBe(1);
+      FakeNotification.requestPermission = async () => FakeNotification.permission;
+    });
+
+    test("blocked browser permission keeps the option from being saved and explains why", async () => {
+      FakeNotification.permission = "denied";
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await waitFor(() => expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0), { timeout: 3000 });
+
+      await userEvent.click(screen.getByTitle("Settings"));
+      await userEvent.click(await screen.findByLabelText("Browser notification"));
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(await screen.findByText(/blocked notifications for this site/)).toBeTruthy();
+      expect(capturedSettingsPatches).toEqual([]);
+    });
   });
 });

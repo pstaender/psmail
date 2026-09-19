@@ -1,13 +1,22 @@
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import type { UserSettings } from "@/lib/api";
+import { DEFAULT_NOTIFICATION_SOUND, NOTIFICATION_SOUNDS, playNotificationSound } from "@/lib/notifications";
 
 const MAX_INTERVAL_MINUTES = 24 * 60;
+
+export interface SettingsPatch {
+  syncIntervalMinutes: number | null;
+  combinedInboxIncludesFolders: boolean;
+  notifyBrowser: boolean;
+  notifyToast: boolean;
+  notificationSound: NonNullable<UserSettings["notificationSound"]>;
+}
 
 /** Per-user preferences, stored on the server (so they follow the user across browsers). */
 export function SettingsDialog({
@@ -21,10 +30,13 @@ export function SettingsDialog({
   onOpenChange: (open: boolean) => void;
   settings: UserSettings;
   username: string | null;
-  onSave: (patch: { syncIntervalMinutes: number | null; combinedInboxIncludesFolders: boolean }) => Promise<void>;
+  onSave: (patch: SettingsPatch) => Promise<void>;
 }) {
   const [interval, setInterval] = useState("");
   const [includeFolders, setIncludeFolders] = useState(false);
+  const [notifyBrowser, setNotifyBrowser] = useState(false);
+  const [notifyToast, setNotifyToast] = useState(false);
+  const [sound, setSound] = useState<SettingsPatch["notificationSound"]>(DEFAULT_NOTIFICATION_SOUND);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,6 +45,9 @@ export function SettingsDialog({
     if (open) {
       setInterval(settings.syncIntervalMinutes ? String(settings.syncIntervalMinutes) : "");
       setIncludeFolders(settings.combinedInboxIncludesFolders === true);
+      setNotifyBrowser(settings.notifyBrowser === true);
+      setNotifyToast(settings.notifyToast === true);
+      setSound(settings.notificationSound ?? DEFAULT_NOTIFICATION_SOUND);
       setError(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -50,10 +65,24 @@ export function SettingsDialog({
       }
     }
 
+    // Turning browser notifications on needs the browser's permission, which can only be asked for from
+    // a user action like this click — and if it isn't granted, the option can't work, so don't save it.
+    if (notifyBrowser && settings.notifyBrowser !== true) {
+      if (typeof Notification === "undefined") {
+        setError("This browser doesn't support notifications.");
+        return;
+      }
+      if (Notification.permission === "default") await Notification.requestPermission();
+      if (Notification.permission !== "granted") {
+        setError("The browser blocked notifications for this site. Allow them in the browser's site settings, then try again.");
+        return;
+      }
+    }
+
     setBusy(true);
     setError(null);
     try {
-      await onSave({ syncIntervalMinutes: minutes, combinedInboxIncludesFolders: includeFolders });
+      await onSave({ syncIntervalMinutes: minutes, combinedInboxIncludesFolders: includeFolders, notifyBrowser, notifyToast, notificationSound: sound });
       onOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -64,7 +93,7 @@ export function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>{username && username !== "default" ? `For ${username}` : "Your preferences"}</DialogDescription>
@@ -107,6 +136,53 @@ export function SettingsDialog({
               </p>
             </div>
           </div>
+
+          <fieldset className="space-y-3 rounded-md border p-3">
+            <legend className="px-1 text-sm font-medium">New mail notifications</legend>
+
+            <div className="flex items-start gap-2">
+              <Switch id="settings-notify-browser" className="mt-0.5" checked={notifyBrowser} onCheckedChange={setNotifyBrowser} />
+              <div className="space-y-0.5">
+                <Label htmlFor="settings-notify-browser">Browser notification</Label>
+                <p className="text-xs text-muted-foreground">
+                  A desktop notification with the sender and subject (no content) — or a count when several arrive.
+                  Clicking it opens the message, or the combined Inbox. Your browser will ask for permission.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2">
+              <Switch id="settings-notify-toast" className="mt-0.5" checked={notifyToast} onCheckedChange={setNotifyToast} />
+              <div className="space-y-0.5">
+                <Label htmlFor="settings-notify-toast">Toast in the app</Label>
+                <p className="text-xs text-muted-foreground">
+                  A message in the corner with the sender, subject, the start of the text, date and recipients, and a
+                  sound.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pl-10">
+              <Label htmlFor="settings-sound" className="shrink-0 text-xs text-muted-foreground">
+                Toast sound
+              </Label>
+              <select
+                id="settings-sound"
+                value={sound}
+                onChange={e => setSound(e.target.value as SettingsPatch["notificationSound"])}
+                className="h-8 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-sm"
+              >
+                {NOTIFICATION_SOUNDS.map(option => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <Button type="button" variant="ghost" size="icon" className="size-8" title="Play sound" onClick={() => playNotificationSound(sound)}>
+                <Volume2 className="size-4" />
+              </Button>
+            </div>
+          </fieldset>
 
           <DialogFooter>
             <Button type="submit" disabled={busy}>

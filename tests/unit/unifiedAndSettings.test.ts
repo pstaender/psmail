@@ -4,7 +4,7 @@ import { createUser } from "../../src/server/models/users";
 import { deriveEncryptionKey, generateSalt } from "../../src/server/crypto/secrets";
 import { createAccount, deleteAccount, learnSpecialFolders, listAccounts, setAccountPosition, setSentFolder, updateAccount, normalizeAccountPositions } from "../../src/server/models/accounts";
 import { addAttachment, createEmail, listEmails, updateEmail } from "../../src/server/models/emails";
-import { countUnifiedInboxUnread, listUnifiedEmails } from "../../src/server/models/unified";
+import { countUnifiedInboxUnread, listNewInboxMail, listUnifiedEmails } from "../../src/server/models/unified";
 import { searchEmails } from "../../src/server/models/search";
 import { getUserSettings, updateUserSettings } from "../../src/server/models/userSettings";
 
@@ -246,5 +246,97 @@ describe("combined Inbox including other folders", () => {
     mail(db, accounts[0]!.id, "Lists", "2", "2026-01-02T00:00:00.000Z");
     mail(db, accounts[0]!.id, "INBOX", "3", "2026-01-03T00:00:00.000Z");
     expect(listUnifiedEmails(db, user.id, "inbox", { includeFolders: true, limit: 2, offset: 1 }).map(r => r.subject)).toEqual(["2", "1"]);
+  });
+});
+
+describe("listNewInboxMail", () => {
+  const NOW = Date.parse("2026-03-10T12:00:00.000Z");
+  const recent = "2026-03-10T11:00:00.000Z";
+
+  test("without afterId it only reports where to start; nothing new since the latest id", async () => {
+    const { db, user, accounts } = await setup(["a@x.com"]);
+    mail(db, accounts[0]!.id, "INBOX", "old", recent);
+    const start = listNewInboxMail(db, user.id, null, { now: NOW });
+    expect(start).toEqual({ latestId: expect.any(Number), total: 0, messages: [] });
+    expect(start.latestId).toBeGreaterThan(0);
+    expect(listNewInboxMail(db, user.id, start.latestId, { now: NOW }).total).toBe(0);
+  });
+
+  test("returns mail after afterId with sender, subject, date, recipients and a text snippet", async () => {
+    const { db, user, accounts } = await setup(["a@x.com"]);
+    const { latestId } = listNewInboxMail(db, user.id, null, { now: NOW });
+    mail(db, accounts[0]!.id, "INBOX", "Lunch?", recent, {
+      from: [{ name: "Alice", address: "alice@x.com" }],
+      to: [{ address: "a@x.com" }],
+      cc: [{ address: "bob@x.com" }],
+      plainText: "  Hi there,\n\n  are you free   for lunch?  ",
+    });
+
+    const result = listNewInboxMail(db, user.id, latestId, { now: NOW });
+    expect(result.total).toBe(1);
+    expect(result.messages[0]).toMatchObject({
+      accountEmail: "a@x.com",
+      folder: "INBOX",
+      subject: "Lunch?",
+      date: recent,
+      from: [{ name: "Alice", address: "alice@x.com" }],
+      cc: [{ address: "bob@x.com" }],
+      snippet: "Hi there, are you free for lunch?",
+    });
+    // Asking again from the new latestId finds nothing: each message is announced once.
+    expect(listNewInboxMail(db, user.id, result.latestId, { now: NOW }).total).toBe(0);
+  });
+
+  test("skips read mail, drafts, other users, other folders, sent mail and anything older than a day", async () => {
+    const { db, user, accounts } = await setup(["a@x.com"]);
+    const other = await createUser(db, "bob", "pw");
+    const bobs = createAccount(db, other.id, accountInput("bob@x.com"), key);
+    const { latestId } = listNewInboxMail(db, user.id, null, { now: NOW });
+
+    mail(db, accounts[0]!.id, "INBOX", "counts", recent);
+    mail(db, accounts[0]!.id, "INBOX", "already read", recent, { isRead: true });
+    mail(db, accounts[0]!.id, "INBOX", "a draft", recent, { isDraft: true });
+    mail(db, accounts[0]!.id, "INBOX", "first-sync backlog", "2026-03-01T00:00:00.000Z");
+    mail(db, accounts[0]!.id, "Sent", "sent by me", recent);
+    mail(db, accounts[0]!.id, "Newsletters", "other folder", recent);
+    mail(db, bobs.id, "INBOX", "someone else's", recent);
+
+    expect(listNewInboxMail(db, user.id, latestId, { now: NOW }).messages.map(m => m.subject)).toEqual(["counts"]);
+    // With the combined-Inbox folder option, the other incoming folder counts too — but Sent still doesn't.
+    expect(
+      listNewInboxMail(db, user.id, latestId, { now: NOW, includeFolders: true }).messages.map(m => m.subject).sort()
+    ).toEqual(["counts", "other folder"]);
+  });
+
+  test("total counts everything new while messages holds only the newest few; html-only mail gets a snippet too", async () => {
+    const { db, user, accounts } = await setup(["a@x.com"]);
+    const { latestId } = listNewInboxMail(db, user.id, null, { now: NOW });
+    for (let i = 1; i <= 8; i++) mail(db, accounts[0]!.id, "INBOX", `mail ${i}`, recent);
+    mail(db, accounts[0]!.id, "INBOX", "html only", recent, {
+      plainText: null,
+      htmlText: "<style>p{color:red}</style><p>Hello <b>world</b> &amp; friends</p>",
+    });
+
+    const result = listNewInboxMail(db, user.id, latestId, { now: NOW, limit: 3 });
+    expect(result.total).toBe(9);
+    expect(result.messages.map(m => m.subject)).toEqual(["html only", "mail 8", "mail 7"]);
+    expect(result.messages[0]!.snippet).toBe("Hello world & friends");
+  });
+});
+
+describe("user settings: notifications", () => {
+  test("accepts the two opt-ins and a known sound, rejects anything else", async () => {
+    const { db, user } = await setup([]);
+    expect(updateUserSettings(db, user.id, { notifyBrowser: true, notifyToast: true, notificationSound: "marimba" })).toEqual({
+      notifyBrowser: true,
+      notifyToast: true,
+      notificationSound: "marimba",
+    });
+    expect(updateUserSettings(db, user.id, { notificationSound: "none", notifyBrowser: null })).toEqual({
+      notifyToast: true,
+      notificationSound: "none",
+    });
+    expect(() => updateUserSettings(db, user.id, { notifyToast: "yes" })).toThrow(/true or false/);
+    expect(() => updateUserSettings(db, user.id, { notificationSound: "airhorn" })).toThrow(/notificationSound/);
   });
 });

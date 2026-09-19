@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { json, readJsonBody, requireAuth, withErrorHandling } from "../http";
 import { getUserSettings, updateUserSettings } from "../models/userSettings";
-import { countUnifiedInboxUnread, isUnifiedKind, listUnifiedEmails } from "../models/unified";
+import { countUnifiedInboxUnread, isUnifiedKind, listNewInboxMail, listUnifiedEmails } from "../models/unified";
 import { ApiError } from "../types";
 
 export function settingsRoutes(db: Database) {
@@ -22,6 +22,17 @@ export function settingsRoutes(db: Database) {
         const { session } = requireAuth(req, db);
         const includeFolders = getUserSettings(db, session.userId).combinedInboxIncludesFolders === true;
         return json({ count: countUnifiedInboxUnread(db, session.userId, { includeFolders }) });
+      }),
+    },
+    /** New unread mail in the combined Inbox since `afterId`; without it, just the current `latestId` to start from. */
+    "/api/unified/inbox/new": {
+      GET: withErrorHandling(async req => {
+        const { session } = requireAuth(req, db);
+        const after = new URL(req.url).searchParams.get("afterId");
+        const afterId = after === null ? null : Number(after);
+        if (afterId !== null && !Number.isInteger(afterId)) throw new ApiError(400, "afterId must be an integer");
+        const includeFolders = getUserSettings(db, session.userId).combinedInboxIncludesFolders === true;
+        return json(listNewInboxMail(db, session.userId, afterId, { includeFolders }));
       }),
     },
     /** Newest-first messages across all of the user's accounts: `inbox` (every Inbox) or `sent` (every Sent folder). */

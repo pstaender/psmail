@@ -1,6 +1,9 @@
 import { Database } from "bun:sqlite";
 import { ApiError, NotFoundError } from "../types";
 
+/** The bundled new-mail sounds (see src/sounds and src/lib/notifications.ts), plus "none". */
+export const NOTIFICATION_SOUNDS = ["crystal_clear", "cute_bell", "marimba", "none"] as const;
+
 export const BODY_VIEWS = ["text", "md", "plain", "safe", "full"] as const;
 
 /** Per-user preferences persisted server-side (users.settings, JSON). Every key is optional. */
@@ -11,6 +14,12 @@ export interface UserSettings {
   syncIntervalMinutes?: number;
   /** Opt-in: the combined Inbox also lists mail from an account's other folders (not Sent/Drafts/Trash/Junk/Archive). */
   combinedInboxIncludesFolders?: boolean;
+  /** Opt-in: a browser (desktop) notification when new mail arrives. */
+  notifyBrowser?: boolean;
+  /** Opt-in: an in-app toast with sender, subject, a text preview and details when new mail arrives. */
+  notifyToast?: boolean;
+  /** Sound played with the toast; unset means crystal_clear. */
+  notificationSound?: (typeof NOTIFICATION_SOUNDS)[number];
 }
 
 export const MAX_SYNC_INTERVAL_MINUTES = 24 * 60;
@@ -43,6 +52,14 @@ export function updateUserSettings(db: Database, userId: number, patch: Record<s
       if (value === null) delete next.combinedInboxIncludesFolders;
       else if (typeof value === "boolean") next.combinedInboxIncludesFolders = value;
       else throw new ApiError(400, "combinedInboxIncludesFolders must be true or false");
+    } else if (key === "notifyBrowser" || key === "notifyToast") {
+      if (value === null) delete next[key];
+      else if (typeof value === "boolean") next[key] = value;
+      else throw new ApiError(400, `${key} must be true or false`);
+    } else if (key === "notificationSound") {
+      if (value === null) delete next.notificationSound;
+      else if (typeof value === "string" && (NOTIFICATION_SOUNDS as readonly string[]).includes(value)) next.notificationSound = value;
+      else throw new ApiError(400, `notificationSound must be one of: ${NOTIFICATION_SOUNDS.join(", ")}`);
     } else {
       throw new ApiError(400, `Unknown setting "${key}"`);
     }

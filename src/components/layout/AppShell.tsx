@@ -15,7 +15,9 @@ import { Input } from "@/components/ui/input";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { AccountTree } from "@/components/sidebar/AccountTree";
-import { SettingsDialog } from "@/components/layout/SettingsDialog";
+import { SettingsDialog, type SettingsPatch } from "@/components/layout/SettingsDialog";
+import { showNewMailToast } from "@/components/mail/newMailToast";
+import { DEFAULT_NOTIFICATION_SOUND, playNotificationSound, showBrowserNotification, type NewMailPreview } from "@/lib/notifications";
 import { EditAccountDialog } from "@/components/sidebar/EditAccountDialog";
 import { ResizeHandle } from "@/components/layout/ResizeHandle";
 import { EmptyState } from "@/components/mail/EmptyState";
@@ -165,6 +167,36 @@ export function AppShell() {
     if (accountEmail === selectedAccountEmail) refreshEmails();
     refreshSearchResults();
     refreshUnifiedInboxUnread();
+    announceNewMail();
+  }
+
+  // New-mail announcements: the server says what arrived in the combined Inbox after the highest message
+  // id seen so far. The starting point is read when the app loads, so mail that came in while it was
+  // closed isn't announced, and every sync moves it forward whether or not notifications are on.
+  const newMailBaseline = useRef<number | null>(null);
+  useEffect(() => {
+    if (!token) return;
+    api.newMail(token).then(r => (newMailBaseline.current = r.latestId)).catch(() => {});
+  }, [token]);
+
+  const openNewMail = (mail: NewMailPreview) => {
+    selectFolder(mail.accountEmail, mail.folder);
+    setSelectedEmailId(mail.id);
+  };
+
+  async function announceNewMail() {
+    if (!token || newMailBaseline.current === null) return;
+    const result = await api.newMail(token, newMailBaseline.current).catch(() => null);
+    if (!result) return;
+    newMailBaseline.current = result.latestId;
+    if (result.total === 0) return;
+
+    const handlers = { openMail: openNewMail, openInbox: () => selectUnified("inbox") };
+    if (settings.notifyBrowser) showBrowserNotification(result, handlers);
+    if (settings.notifyToast) {
+      showNewMailToast(result, handlers);
+      playNotificationSound(settings.notificationSound ?? DEFAULT_NOTIFICATION_SOUND);
+    }
   }
 
   const { jobs: syncJobs, start: startSync } = useSyncJobs(handleSyncComplete);
@@ -183,7 +215,7 @@ export function AppShell() {
     return () => clearInterval(timer);
   }, [syncIntervalMinutes, startSync]);
 
-  async function saveSettings(patch: { syncIntervalMinutes: number | null; combinedInboxIncludesFolders: boolean }) {
+  async function saveSettings(patch: SettingsPatch) {
     if (!token) return;
     const includeChanged = (settings.combinedInboxIncludesFolders === true) !== patch.combinedInboxIncludesFolders;
     setSettings(await api.updateSettings(token, patch));

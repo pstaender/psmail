@@ -15,3 +15,11 @@ declare module "*.module.css" {
   const classes: { readonly [key: string]: string };
   export = classes;
 }
+
+declare module "*.mp3" {
+  /**
+   * The URL the bundler serves the audio file under
+   */
+  const url: string;
+  export default url;
+}

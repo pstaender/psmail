@@ -1,3 +1,4 @@
+import type { NewMailResult } from "./notifications";
 import type { Account, DownloadJob, EmailRecord, User } from "../server/types";
 import type { CreateAccountInput, UpdateAccountInput } from "../server/models/accounts";
 import type { EmailInput } from "../server/models/emails";
@@ -41,6 +42,12 @@ export interface UserSettings {
   syncIntervalMinutes?: number;
   /** Opt-in: the combined Inbox also lists mail from accounts' other incoming folders. */
   combinedInboxIncludesFolders?: boolean;
+  /** Opt-in: a browser notification when new mail arrives. */
+  notifyBrowser?: boolean;
+  /** Opt-in: an in-app toast (with preview and details) when new mail arrives. */
+  notifyToast?: boolean;
+  /** The toast's sound: crystal_clear (the default when unset), cute_bell, marimba or none. */
+  notificationSound?: "crystal_clear" | "cute_bell" | "marimba" | "none";
 }
 
 export interface BulkResult {
@@ -182,6 +189,9 @@ export const api = {
   /** Shallow-merges into the stored settings; a key set to null is removed. */
   updateSettings: (token: string, patch: { [K in keyof UserSettings]?: UserSettings[K] | null }) =>
     request<UserSettings>("PATCH", "/api/settings", { token, body: patch }),
+  /** New unread combined-Inbox mail since `afterId`; without it, just the current `latestId` to start from. */
+  newMail: (token: string, afterId?: number) =>
+    request<NewMailResult>("GET", `/api/unified/inbox/new${afterId === undefined ? "" : `?afterId=${afterId}`}`, { token }),
   /** Unread messages across all accounts' Inboxes — the combined Inbox's badge. */
   unifiedInboxUnread: (token: string) => request<{ count: number }>("GET", "/api/unified/inbox/unread", { token }),
   /** Newest-first messages across all accounts' Inboxes (`inbox`) or Sent folders (`sent`). */

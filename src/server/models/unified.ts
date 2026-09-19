@@ -145,3 +145,108 @@ export function countUnifiedInboxUnread(db: Database, userId: number, options: {
   }
   return total;
 }
+
+export interface NewMailPreview {
+  id: number;
+  accountEmail: string;
+  folder: string;
+  from: EmailAddress[];
+  to: EmailAddress[];
+  cc: EmailAddress[];
+  subject: string | null;
+  date: string | null;
+  /** The start of the message text (whitespace collapsed) — for the in-app toast, never for browser notifications. */
+  snippet: string;
+}
+
+export interface NewMailResult {
+  /** The highest message id in the database right now: pass it back as `afterId` next time. */
+  latestId: number;
+  /** How many new messages there are in total (`messages` only holds the newest few). */
+  total: number;
+  messages: NewMailPreview[];
+}
+
+const NEW_MAIL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const SNIPPET_LENGTH = 200;
+
+function makeSnippet(plain: string | null, html: string | null): string {
+  let text = plain ?? "";
+  if (!text.trim() && html) {
+    text = html
+      .replace(/<(style|script)[\s\S]*?<\/\1>/gi, " ")
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+  }
+  text = text.replace(/\s+/g, " ").trim();
+  return text.length > SNIPPET_LENGTH ? `${text.slice(0, SNIPPET_LENGTH).trimEnd()}…` : text;
+}
+
+/**
+ * Unread messages that arrived in the combined Inbox after `afterId` (an email id from an earlier
+ * call's `latestId`) — what the web client announces after a sync. Ids only ever grow, so "newer than
+ * the last id seen" needs no per-client bookkeeping on the server, and the query touches only the
+ * handful of rows past that id. Drafts, already-read messages (read on another device), messages
+ * outside the combined Inbox's folders, and anything older than a day (the backlog of a first sync)
+ * are not "new mail". Without `afterId` it just reports the current `latestId` — the starting point.
+ */
+export function listNewInboxMail(
+  db: Database,
+  userId: number,
+  afterId: number | null,
+  options: { includeFolders?: boolean; limit?: number; now?: number } = {}
+): NewMailResult {
+  const latestId = db.query<{ id: number }, []>("SELECT COALESCE(MAX(id), 0) AS id FROM emails").get()!.id;
+  if (afterId === null || afterId >= latestId) return { latestId, total: 0, messages: [] };
+
+  const accounts = new Map(
+    db
+      .query<{ id: number; email: string; sent_folder: string | null; special_folders: string | null }, [number]>(
+        "SELECT id, email, sent_folder, special_folders FROM accounts WHERE user_id = ?"
+      )
+      .all(userId)
+      .map(account => [account.id, { ...account, folders: new Set<string>() }])
+  );
+  for (const account of accounts.values()) account.folders = new Set(inboxFolders(db, account, options.includeFolders ?? false));
+
+  const cutoff = new Date((options.now ?? Date.now()) - NEW_MAIL_MAX_AGE_MS).toISOString();
+  const candidates = db
+    .query<{ id: number; account_id: number; folder: string }, [number, number, string]>(
+      `SELECT id, account_id, folder FROM emails
+       WHERE id > ? AND id <= ? AND is_read = 0 AND is_draft = 0 AND (date IS NULL OR date >= ?)
+       ORDER BY id DESC`
+    )
+    .all(afterId, latestId, cutoff)
+    .filter(row => accounts.get(row.account_id)?.folders.has(row.folder));
+
+  const detail = db.query<
+    { from_addr: string | null; to_addr: string | null; cc_addr: string | null; subject: string | null; date: string | null; plain_text: string | null; html_text: string | null },
+    [number]
+  >(
+    `SELECT from_addr, to_addr, cc_addr, subject, date, substr(plain_text, 1, 1000) AS plain_text,
+            CASE WHEN plain_text IS NULL OR trim(plain_text) = '' THEN substr(html_text, 1, 20000) END AS html_text
+     FROM emails WHERE id = ?`
+  );
+
+  const messages = candidates.slice(0, options.limit ?? 5).map(row => {
+    const d = detail.get(row.id)!;
+    return {
+      id: row.id,
+      accountEmail: accounts.get(row.account_id)!.email,
+      folder: row.folder,
+      from: parseAddresses(d.from_addr),
+      to: parseAddresses(d.to_addr),
+      cc: parseAddresses(d.cc_addr),
+      subject: d.subject,
+      date: d.date,
+      snippet: makeSnippet(d.plain_text, d.html_text),
+    };
+  });
+
+  return { latestId, total: candidates.length, messages };
+}
