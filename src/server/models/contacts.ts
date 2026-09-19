@@ -8,6 +8,18 @@ export interface Contact {
   ccCount: number;
   sentCount: number;
   lastUsed: string;
+  /** True for a suggestion that comes from another of the user's accounts (only with `includeOtherAccounts`). */
+  other?: boolean;
+}
+
+/** Lower-cases and reduces text to its words (letters/digits of any script) separated by single spaces — so `'First Lastname'` and `first-lastname` are both just "first lastname". */
+export function normalizeSearchText(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+/** A display name without the quotes some mail programs wrap around it (`'First Lastname'`, `"Last, First"`). */
+export function tidyDisplayName(name: string): string {
+  return name.trim().replace(/^['"‘’“”\s]+|['"‘’“”\s]+$/g, "");
 }
 
 export interface MailAddressFields {
@@ -44,8 +56,8 @@ export function recordContacts(db: Database, accountId: number, ownAddress: stri
     for (const entry of list) {
       const address = entry.address?.trim().toLowerCase();
       if (!address || address === own) continue;
-      const name = entry.name?.trim() ?? "";
-      stmt.run(accountId, address, name, name.toLowerCase(), fromCount, ccCount, sentCount, when);
+      const name = tidyDisplayName(entry.name ?? "");
+      stmt.run(accountId, address, name, normalizeSearchText(name), fromCount, ccCount, sentCount, when);
     }
   };
 
@@ -61,40 +73,114 @@ export function recordContacts(db: Database, accountId: number, ownAddress: stri
 
 export interface SuggestOptions {
   limit?: number;
+  /** Also suggest matches from the user's other accounts, after this account's own (see `otherLimit`). */
+  includeOtherAccounts?: boolean;
+  otherLimit?: number;
+}
+
+interface ContactRow {
+  address: string;
+  name: string;
+  from_count: number;
+  cc_count: number;
+  sent_count: number;
+  last_used: string;
+}
+
+function toContact(row: ContactRow, other = false): Contact {
+  return {
+    address: row.address,
+    name: row.name,
+    fromCount: row.from_count,
+    ccCount: row.cc_count,
+    sentCount: row.sent_count,
+    lastUsed: row.last_used,
+    ...(other ? { other: true } : {}),
+  };
 }
 
 /**
- * Autocomplete candidates whose address starts with `query`, or whose display name has a word starting
+ * The WHERE condition (on a `contacts` row aliased `c`) for a typed query, with its bindings: the address
+ * starts with what was typed, OR every word typed is the start of some word of the display name. Words are
+ * compared in normalized form (see normalizeSearchText), so punctuation around a name never matters and
+ * "last first" finds "First Lastname" too. No query = everything.
+ */
+function matchCondition(query: string): { sql: string; params: string[] } {
+  const q = query.trim().toLowerCase();
+  if (q === "") return { sql: "1", params: [] };
+
+  const words = normalizeSearchText(q).split(" ").filter(Boolean).slice(0, 5);
+  const nameSql = words.map(() => "instr(' ' || c.name_lc, ' ' || ?) > 0").join(" AND ");
+  const addressSql = "(c.address >= ? AND c.address < ?)";
+  return {
+    sql: words.length > 0 ? `(${addressSql} OR (${nameSql}))` : addressSql,
+    params: [q, q + "\uffff", ...words],
+  };
+}
+
+const RANK_BY_CLOSENESS = `CASE WHEN SUM(c.from_count) > 0 THEN 0 WHEN SUM(c.cc_count) > 0 THEN 1 ELSE 2 END,
+                SUM(c.from_count + c.cc_count + c.sent_count) DESC, MAX(c.last_used) DESC`;
+
+/**
+ * Autocomplete candidates whose address starts with `query`, or whose display name has words starting
  * with it. Ordered: people who have written to you first, then people who were Cc'd on your mail, then
  * everyone else (people you've only sent to) — and within each group by how often they appear, then how
- * recently. The address range scan runs on the primary key; the name check only touches this one
- * account's rows, so the query stays a couple of milliseconds even for tens of thousands of contacts.
+ * recently. The address range scan runs on the primary key; the name check only touches the account's own
+ * rows, so the query stays a couple of milliseconds even for tens of thousands of contacts.
+ *
+ * With `includeOtherAccounts`, matches from the user's other accounts follow — ranked the same way (an
+ * address seen in several accounts counts once, with its numbers added up), never repeating an address
+ * this account already knows, and capped separately so they can't crowd out this account's own.
  */
 export function suggestContacts(db: Database, accountId: number, query: string, options: SuggestOptions = {}): Contact[] {
   const limit = Math.min(Math.max(options.limit ?? 8, 1), 25);
-  const q = query.trim().toLowerCase();
+  const match = matchCondition(query);
 
-  const rows = db
-    .query<
-      { address: string; name: string; from_count: number; cc_count: number; sent_count: number; last_used: string },
-      [number, string, string, number]
-    >(
-      `SELECT address, name, from_count, cc_count, sent_count, last_used FROM contacts
-       WHERE account_id = ?1 AND (?2 = '' OR (address >= ?2 AND address < ?3) OR instr(' ' || name_lc, ' ' || ?2) > 0)
-       ORDER BY CASE WHEN from_count > 0 THEN 0 WHEN cc_count > 0 THEN 1 ELSE 2 END,
-                (from_count + cc_count + sent_count) DESC, last_used DESC
-       LIMIT ?4`
+  const own = db
+    .query<ContactRow, (string | number)[]>(
+      `SELECT c.address, c.name, c.from_count, c.cc_count, c.sent_count, c.last_used FROM contacts c
+       WHERE c.account_id = ? AND ${match.sql}
+       GROUP BY c.address
+       ORDER BY ${RANK_BY_CLOSENESS}
+       LIMIT ?`
     )
-    .all(accountId, q, q + "\uffff", limit);
+    .all(accountId, ...match.params, limit)
+    .map(row => toContact(row));
 
-  return rows.map(r => ({
-    address: r.address,
-    name: r.name,
-    fromCount: r.from_count,
-    ccCount: r.cc_count,
-    sentCount: r.sent_count,
-    lastUsed: r.last_used,
-  }));
+  if (!options.includeOtherAccounts) return own;
+
+  const otherLimit = Math.min(Math.max(options.otherLimit ?? 5, 1), 25);
+  const others = db
+    .query<ContactRow, (string | number)[]>(
+      `SELECT c.address, MAX(c.name) AS name, SUM(c.from_count) AS from_count, SUM(c.cc_count) AS cc_count,
+              SUM(c.sent_count) AS sent_count, MAX(c.last_used) AS last_used
+       FROM contacts c JOIN accounts a ON a.id = c.account_id
+       WHERE a.user_id = (SELECT user_id FROM accounts WHERE id = ?1) AND c.account_id != ?1 AND ${match.sql}
+         AND NOT EXISTS (SELECT 1 FROM contacts mine WHERE mine.account_id = ?1 AND mine.address = c.address)
+       GROUP BY c.address
+       ORDER BY ${RANK_BY_CLOSENESS}
+       LIMIT ?`
+    )
+    .all(accountId, ...match.params, otherLimit)
+    .map(row => toContact(row, true));
+
+  return [...own, ...others];
+}
+
+/**
+ * Startup tidy-up for contacts stored before names were normalized: strips quotes wrapped around display
+ * names and rebuilds the searchable form, so an old `'First Lastname'` is found by typing "First".
+ */
+export function tidyContactNames(db: Database): void {
+  const rows = db.query<{ account_id: number; address: string; name: string; name_lc: string }, []>("SELECT account_id, address, name, name_lc FROM contacts").all();
+  const update = db.query("UPDATE contacts SET name = ?, name_lc = ? WHERE account_id = ? AND address = ?");
+  db.transaction(() => {
+    for (const row of rows) {
+      const name = tidyDisplayName(row.name);
+      const nameLc = normalizeSearchText(name);
+      if (name !== row.name || nameLc !== row.name_lc) update.run(name, nameLc, row.account_id, row.address);
+    }
+  })();
 }
 
 /**

@@ -4,7 +4,7 @@ import { getDatabasePath } from "../config/paths";
 import { SCHEMA_SQL } from "./schema";
 import { runMigrations } from "./migrations";
 import { normalizeAccountPositions } from "../models/accounts";
-import { rebuildContactsIfEmpty } from "../models/contacts";
+import { rebuildContactsIfEmpty, tidyContactNames } from "../models/contacts";
 
 let instance: Database | null = null;
 
@@ -28,6 +28,7 @@ export function getDb(path?: string): Database {
   runMigrations(instance);
   normalizeAccountPositions(instance);
   rebuildContactsIfEmpty(instance);
+  tidyContactNames(instance);
   return instance;
 }
 

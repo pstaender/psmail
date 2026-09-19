@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { api, type Contact } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
@@ -14,12 +14,13 @@ function splitCurrentToken(value: string): { head: string; token: string } {
 
 function formatContact(contact: Contact): string {
   // Commas/semicolons would be read as recipient separators by parseAddressList, so they can't stay in a name.
-  const name = contact.name.replace(/[,;<>"]/g, "").trim();
+  const name = contact.name.replace(/[,;<>"]/g, "").replace(/^'+|'+$/g, "").trim();
   return name ? `${name} <${contact.address}>` : contact.address;
 }
 
 /**
- * A comma-separated recipient field (To/Cc/Bcc) with autocomplete from the account's contacts: as you
+ * A comma-separated recipient field (To/Cc/Bcc) with autocomplete from the account's contacts, followed by
+ * matches from the user's other accounts under their own heading: as you
  * type the current recipient, suggestions come from GET /api/accounts/:email/contacts. Suggestion lookups
  * are debounced, cancelled when superseded, and remembered per query so typing/backspacing over the same
  * prefix doesn't hit the server again. A failing lookup just means no suggestions — it never blocks typing.
@@ -149,28 +150,34 @@ export function RecipientInput({
           className="absolute left-0 right-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-md border bg-popover py-1 text-popover-foreground shadow-md"
         >
           {visible.map((contact, i) => (
-            <li
-              key={contact.address}
-              id={`${listId}-${i}`}
-              role="option"
-              aria-selected={i === active}
-              // mousedown (not click) so the input keeps focus and its blur doesn't close the list first.
-              onMouseDown={e => {
-                e.preventDefault();
-                accept(contact);
-              }}
-              onMouseEnter={() => setActive(i)}
-              className={cn("cursor-pointer px-3 py-1.5 text-sm", i === active && "bg-accent")}
-            >
-              {contact.name ? (
-                <>
-                  <span className="font-medium">{contact.name}</span>{" "}
-                  <span className="text-muted-foreground">{contact.address}</span>
-                </>
-              ) : (
-                contact.address
+            <Fragment key={contact.address}>
+              {contact.other && !visible[i - 1]?.other && (
+                <li role="presentation" className="px-3 pb-0.5 pt-2 text-xs font-medium text-muted-foreground">
+                  From your other accounts
+                </li>
               )}
-            </li>
+              <li
+                id={`${listId}-${i}`}
+                role="option"
+                aria-selected={i === active}
+                // mousedown (not click) so the input keeps focus and its blur doesn't close the list first.
+                onMouseDown={e => {
+                  e.preventDefault();
+                  accept(contact);
+                }}
+                onMouseEnter={() => setActive(i)}
+                className={cn("cursor-pointer px-3 py-1.5 text-sm", i === active && "bg-accent")}
+              >
+                {contact.name ? (
+                  <>
+                    <span className="font-medium">{contact.name}</span>{" "}
+                    <span className="text-muted-foreground">{contact.address}</span>
+                  </>
+                ) : (
+                  contact.address
+                )}
+              </li>
+            </Fragment>
           ))}
         </ul>
       )}

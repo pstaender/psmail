@@ -155,6 +155,8 @@ const capturedResultPatches: Record<string, unknown>[] = [];
 // Bodies of POST /api/auth/change-password.
 const passwordChanges: Record<string, unknown>[] = [];
 // Every bulk PATCH/DELETE/move request, with the account it went to.
+// The `scope` param of every GET .../contacts call.
+const contactRequests: (string | null)[] = [];
 const bulkRequests: { account: string; method: string; move: string | null; body: Record<string, unknown> }[] = [];
 let folderRequests = 0;
 let unreadRequests = 0;
@@ -184,6 +186,8 @@ function installMockFetch(
     inboxUnread?: number;
     /** The sync job never finishes (GET job stays running at 12/340) — to look at the in-progress UI. */
     syncStaysRunning?: boolean;
+    /** Adds a contact from another account to the recipient suggestions. */
+    otherAccountContacts?: boolean;
     /** Replaces the combined Inbox's rows (default: one starred message). */
     unifiedInboxRows?: Record<string, unknown>[];
     /** Makes POST /api/auth/change-password answer with this error (status 401) instead of succeeding. */
@@ -204,6 +208,7 @@ function installMockFetch(
   capturedResultPatches.length = 0;
   passwordChanges.length = 0;
   bulkRequests.length = 0;
+  contactRequests.length = 0;
   folderRequests = 0;
   unreadRequests = 0;
   newMailRequests.length = 0;
@@ -315,11 +320,17 @@ function installMockFetch(
       ]);
     }
     if (method === "GET" && path === "/api/accounts/me%40example.com/contacts") {
-      const q = (new URL(url, "http://localhost").searchParams.get("q") ?? "").toLowerCase();
+      const params = new URL(url, "http://localhost").searchParams;
+      const q = (params.get("q") ?? "").toLowerCase();
+      contactRequests.push(params.get("scope"));
       return jsonResponse(
         [
           { address: "alice@example.com", name: "Alice Anderson", fromCount: 3, ccCount: 0, sentCount: 1, lastUsed: NOW },
           { address: "albert@example.com", name: "", fromCount: 0, ccCount: 1, sentCount: 0, lastUsed: NOW },
+          // Only served with scope=all, like the real API; the option controls whether the other account has matches.
+          ...(params.get("scope") === "all" && opts.otherAccountContacts
+            ? [{ address: "alva@other.com", name: "Alva Other", fromCount: 2, ccCount: 0, sentCount: 0, lastUsed: NOW, other: true }]
+            : []),
         ].filter(c => c.address.startsWith(q))
       );
     }
@@ -2150,6 +2161,52 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
       await userEvent.click(screen.getByTitle("Sent of all accounts"));
       await waitFor(() => expect(screen.queryByText(/\d+ selected/)).toBeNull());
+    });
+  });
+
+  describe("recipient suggestions from other accounts", () => {
+    async function openTo() {
+      installMockFetch({ otherAccountContacts: true });
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+      await userEvent.click(screen.getByRole("button", { name: /new/i }));
+      return (await screen.findByLabelText("To")) as HTMLInputElement;
+    }
+
+    test("other accounts' matches follow this account's, under their own heading", async () => {
+      const to = await openTo();
+      await userEvent.type(to, "al");
+
+      const options = await screen.findAllByRole("option");
+      expect(options.map(o => o.textContent)).toEqual(["Alice Anderson alice@example.com", "albert@example.com", "Alva Other alva@other.com"]);
+      expect(contactRequests.every(scope => scope === "all")).toBe(true);
+
+      // The heading sits between the two groups, right before the first other-account contact.
+      const heading = screen.getByText("From your other accounts");
+      expect(heading.getAttribute("role")).toBe("presentation");
+      expect(heading.nextElementSibling).toBe(options[2]!);
+      expect(options[1]!.nextElementSibling).toBe(heading);
+    });
+
+    test("arrow keys walk through both groups, and accepting one from another account fills it in", async () => {
+      const to = await openTo();
+      await userEvent.type(to, "al");
+      await screen.findAllByRole("option");
+
+      await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}"); // 1st -> 2nd -> 3rd (the other account's)
+      expect(to.value).toBe("Alva Other <alva@other.com>, ");
+    });
+
+    test("without matches elsewhere there is no heading", async () => {
+      installMockFetch();
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+      await userEvent.click(screen.getByRole("button", { name: /new/i }));
+      await userEvent.type(await screen.findByLabelText("To"), "al");
+      await screen.findAllByRole("option");
+      expect(screen.queryByText("From your other accounts")).toBeNull();
     });
   });
 });

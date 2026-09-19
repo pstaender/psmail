@@ -31,6 +31,8 @@ export interface Contact {
   ccCount: number;
   sentCount: number;
   lastUsed: string;
+  /** A suggestion from one of the user's other accounts (listed after this account's own). */
+  other?: boolean;
 }
 
 export type UnifiedKind = "inbox" | "sent";
@@ -117,8 +119,12 @@ export const api = {
     if (opts.offset) params.set("offset", String(opts.offset));
     return request<EmailRecord[]>("GET", `/api/accounts/${enc(accountEmail)}/emails?${params}`, { token });
   },
+  /** This account's matching contacts, followed by matches from the user's other accounts (marked `other`). */
   suggestContacts: (token: string, accountEmail: string, query: string, signal?: AbortSignal) =>
-    request<Contact[]>("GET", `/api/accounts/${enc(accountEmail)}/contacts?${new URLSearchParams({ q: query })}`, { token, signal }),
+    request<Contact[]>("GET", `/api/accounts/${enc(accountEmail)}/contacts?${new URLSearchParams({ q: query, scope: "all" })}`, {
+      token,
+      signal,
+    }),
   getEmail: (token: string, accountEmail: string, emailId: number) =>
     request<EmailRecord>("GET", `/api/accounts/${enc(accountEmail)}/emails/${emailId}`, { token }),
   createDraft: (token: string, accountEmail: string, input: EmailInput) =>
