@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { App } from "../../src/App";
 import { MessageHeader } from "../../src/components/mail/MessageHeader";
+import { installFakeAuthenticator, type FakeAuthenticator } from "../helpers/fakeAuthenticator";
 import type { Account } from "../../src/server/types";
 
 /**
@@ -166,6 +167,8 @@ const contactRequests: (string | null)[] = [];
 const aiRequests: [string, string, any][] = [];
 // Paths of every PATCH .../emails/:id (flags, read state, ...).
 const emailPatches: string[] = [];
+// Bodies of POST /api/auth/login.
+const loginPosts: { username: string; password: string }[] = [];
 const bulkRequests: { account: string; method: string; move: string | null; body: Record<string, unknown> }[] = [];
 let folderRequests = 0;
 let liveFolderRequests = 0;
@@ -232,6 +235,7 @@ function installMockFetch(
   capturedResultPatches.length = 0;
   passwordChanges.length = 0;
   bulkRequests.length = 0;
+  loginPosts.length = 0;
   emailPatches.length = 0;
   aiRequests.length = 0;
   let currentAiApis = [...(opts.aiApis ?? [])];
@@ -279,6 +283,7 @@ function installMockFetch(
     if (method === "GET" && path === "/api/users") return jsonResponse(opts.extraUsers ? [USER, ...opts.extraUsers] : [USER]);
     if (method === "POST" && path === "/api/auth/login") {
       const body = init?.body ? JSON.parse(init.body as string) : {};
+      loginPosts.push(body);
       // "secure" needs a real password; everyone else (in particular "default") logs in with
       // an empty one — for testing LoginView's "try an empty password first" behavior.
       if (body.username === "secure" && body.password !== "secret123") {
@@ -3087,6 +3092,138 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await waitFor(() => expect(unreadRequests).toBeGreaterThan(unreadBefore));
       await waitFor(() => expect(screen.queryByTitle(/^Syncing/)).toBeNull());
       expect(screen.getByTitle("Sync the Inboxes of all accounts")).toBeTruthy();
+    });
+  });
+
+  describe("passkey unlock of the saved password", () => {
+    let authenticator: FakeAuthenticator | null = null;
+    afterEach(() => {
+      authenticator?.uninstall();
+      authenticator = null;
+    });
+    const vaultKey = "psmail.passkeyVault.secure";
+
+    async function pickSecure() {
+      installMockFetch({ extraUsers: [{ id: 2, username: "secure" }] });
+      render(<App />);
+      await userEvent.click(await screen.findByText("secure"));
+      return screen.findByPlaceholderText("Password");
+    }
+    async function signInAndRemember() {
+      await userEvent.type(await pickSecure(), "secret123");
+      await userEvent.click(screen.getByLabelText(/remember on this device/i));
+      await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+      await openAccountInbox();
+    }
+
+    test("without passkey support the sign-in form offers nothing extra", async () => {
+      await pickSecure();
+      expect(screen.queryByLabelText(/remember on this device/i)).toBeNull();
+      expect(screen.queryByRole("button", { name: /unlock with passkey/i })).toBeNull();
+    });
+
+    test("signing in with 'Remember' stores the password encrypted, protected by a passkey", async () => {
+      authenticator = installFakeAuthenticator();
+      await signInAndRemember();
+
+      await waitFor(() => expect(localStorage.getItem(vaultKey)).toBeTruthy());
+      expect(localStorage.getItem(vaultKey)).not.toContain("secret123");
+      expect(authenticator.prompts).toEqual({ create: 1, get: 1 });
+      expect((await screen.findAllByText("Passkey unlock is set up on this device.")).length).toBeGreaterThan(0);
+    });
+
+    test("without ticking the box nothing is stored and no passkey is created", async () => {
+      authenticator = installFakeAuthenticator();
+      await userEvent.type(await pickSecure(), "secret123");
+      await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+      await openAccountInbox();
+      expect(localStorage.getItem(vaultKey)).toBeNull();
+      expect(authenticator.prompts).toEqual({ create: 0, get: 0 });
+    });
+
+    test("next time the profile offers 'Unlock with passkey', which signs in without typing the password", async () => {
+      authenticator = installFakeAuthenticator();
+      await signInAndRemember();
+      await waitFor(() => expect(localStorage.getItem(vaultKey)).toBeTruthy());
+
+      await userEvent.click(screen.getByTitle("Sign out"));
+      await userEvent.click(await screen.findByText("secure"));
+      expect(screen.queryByLabelText(/remember on this device/i)).toBeNull(); // already set up
+      loginPosts.length = 0;
+      await userEvent.click(await screen.findByRole("button", { name: /unlock with passkey/i }));
+
+      await openAccountInbox();
+      expect(loginPosts.at(-1)).toEqual({ username: "secure", password: "secret123" }); // the decrypted password was used
+      expect(authenticator.prompts.get).toBe(2); // one to set up, one to unlock
+    });
+
+    test("cancelling the passkey prompt shows why and leaves the password form usable", async () => {
+      authenticator = installFakeAuthenticator();
+      await signInAndRemember();
+      await waitFor(() => expect(localStorage.getItem(vaultKey)).toBeTruthy());
+      await userEvent.click(screen.getByTitle("Sign out"));
+      await userEvent.click(await screen.findByText("secure"));
+
+      authenticator.cancelNext();
+      await userEvent.click(await screen.findByRole("button", { name: /unlock with passkey/i }));
+      expect(await screen.findByText(/passkey prompt was cancelled/i)).toBeTruthy();
+      expect(localStorage.getItem(vaultKey)).toBeTruthy(); // kept
+
+      await userEvent.type(screen.getByPlaceholderText("Password"), "secret123");
+      await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+      await openAccountInbox();
+    });
+
+    test("a saved password that no longer works (changed elsewhere) is dropped with an explanation", async () => {
+      authenticator = installFakeAuthenticator();
+      installMockFetch({ extraUsers: [{ id: 2, username: "secure" }] });
+      // A vault for the OLD password, as it would be after the password was changed from another browser.
+      const { savePassword } = await import("../../src/lib/passkeyVault");
+      await savePassword("secure", "old-password");
+      render(<App />);
+      await userEvent.click(await screen.findByText("secure"));
+
+      await userEvent.click(await screen.findByRole("button", { name: /unlock with passkey/i }));
+      expect(await screen.findByText(/saved password no longer works/i)).toBeTruthy();
+      expect(localStorage.getItem(vaultKey)).toBeNull();
+      expect(screen.queryByRole("button", { name: /unlock with passkey/i })).toBeNull();
+    });
+
+    test("an authenticator without PRF: the sign-in works, the user is told nothing was stored", async () => {
+      authenticator = installFakeAuthenticator({ prf: false });
+      await signInAndRemember();
+      expect((await screen.findAllByText(/doesn't support the PRF extension/)).length).toBeGreaterThan(0);
+      expect(localStorage.getItem(vaultKey)).toBeNull();
+    });
+
+    test("Settings → Credentials shows the passkey unlock and can remove it; a password change removes it", async () => {
+      authenticator = installFakeAuthenticator();
+      await signInAndRemember();
+      await waitFor(() => expect(localStorage.getItem(vaultKey)).toBeTruthy());
+
+      await userEvent.click(screen.getByTitle("Settings"));
+      await userEvent.click(await screen.findByRole("tab", { name: "Credentials" }));
+      expect(await screen.findByText(/Passkey unlock is set up on this device: the sign-in screen/)).toBeTruthy();
+
+      await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+      expect(localStorage.getItem(vaultKey)).toBeNull();
+      expect(screen.queryByText(/Passkey unlock is set up on this device: the sign-in screen/)).toBeNull();
+    });
+
+    test("changing the password removes the (now stale) passkey unlock and says so", async () => {
+      authenticator = installFakeAuthenticator();
+      await signInAndRemember();
+      await waitFor(() => expect(localStorage.getItem(vaultKey)).toBeTruthy());
+
+      await userEvent.click(screen.getByTitle("Settings"));
+      await userEvent.click(await screen.findByRole("tab", { name: "Credentials" }));
+      await userEvent.type(screen.getByLabelText("Current password"), "secret123");
+      await userEvent.type(screen.getByLabelText("New password"), "new-pw");
+      await userEvent.type(screen.getByLabelText("Confirm new password"), "new-pw");
+      await userEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+      expect((await screen.findAllByText(/Passkey unlock was removed from this device/)).length).toBeGreaterThan(0);
+      expect(localStorage.getItem(vaultKey)).toBeNull();
     });
   });
 });

@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { Loader2, UserPlus } from "lucide-react";
+import { Fingerprint, Loader2, UserPlus } from "lucide-react";
+import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import { hasVault, passkeysAvailable, removeVault, savePassword, unlockPassword } from "@/lib/passkeyVault";
 import { useAuth } from "@/contexts/AuthContext";
 import type { User } from "../../server/types";
 import logoUrl from "../../../logo/psmail_logo.svg";
@@ -18,6 +20,8 @@ export function LoginView() {
   const [creatingNew, setCreatingNew] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  // Offered when the browser can do passkeys: keep the password on this device, unlockable only with the passkey.
+  const [rememberWithPasskey, setRememberWithPasskey] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,6 +38,37 @@ export function LoginView() {
     setError(null);
     try {
       await login(name, password);
+      if (rememberWithPasskey && password !== "") {
+        // The login succeeded, so the password is right; setting up the passkey may still fail or be cancelled — the
+        // user is signed in either way (this screen is already gone, hence a toast).
+        savePassword(name, password)
+          .then(() => toast.success("Passkey unlock is set up on this device."))
+          .catch(err => toast.error(err instanceof Error ? err.message : String(err)));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Signs in with the password kept on this device, unlocked by the passkey (fingerprint / face / PIN / touch). */
+  async function unlockAndLogin(name: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const saved = await unlockPassword(name);
+      try {
+        await login(name, saved);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          // The password was changed elsewhere: what is stored is stale and would only fail again.
+          removeVault(name);
+          setError("The saved password no longer works — it was probably changed. Sign in with the password; you can set up passkey unlock again.");
+        } else {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -55,6 +90,7 @@ export function LoginView() {
     }
     setSelected(user);
     setPassword("");
+    setRememberWithPasskey(false);
     setError(null);
     setBusy(true);
     try {
@@ -122,13 +158,30 @@ export function LoginView() {
                             submitLogin(user.username);
                           }}
                         >
+                          {hasVault(user.username) && (
+                            <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => unlockAndLogin(user.username)}>
+                              <Fingerprint className="size-4" />
+                              Unlock with passkey
+                            </Button>
+                          )}
                           <Input
                             type="password"
                             placeholder="Password"
-                            autoFocus
+                            autoFocus={!hasVault(user.username)}
                             value={password}
                             onChange={e => setPassword(e.target.value)}
                           />
+                          {!hasVault(user.username) && passkeysAvailable() && (
+                            <label className="flex items-start gap-2 text-xs text-muted-foreground">
+                              <input
+                                type="checkbox"
+                                className="mt-0.5"
+                                checked={rememberWithPasskey}
+                                onChange={e => setRememberWithPasskey(e.target.checked)}
+                              />
+                              <span>Remember on this device, unlocked by a passkey / Touch ID / security key</span>
+                            </label>
+                          )}
                           <Button type="submit" disabled={busy} size="sm">
                             {busy && <Loader2 className="size-4 animate-spin" />}
                             Sign in

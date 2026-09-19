@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Fingerprint } from "lucide-react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -6,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { hasVault, removeVault } from "@/lib/passkeyVault";
 
 /**
  * Changing the login password. The server re-encrypts the saved IMAP/SMTP passwords of every account
@@ -14,7 +16,9 @@ import { useAuth } from "@/contexts/AuthContext";
  * An empty new password is allowed (it makes the profile passwordless, like the built-in default one).
  */
 export function PasswordForm() {
-  const { token } = useAuth();
+  const { token, username } = useAuth();
+  // Passkey unlock on this device (set up at sign-in): shown here so it can be removed, and it goes away with a password change.
+  const [vaultPresent, setVaultPresent] = useState(() => (username ? hasVault(username) : false));
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -36,9 +40,13 @@ export function PasswordForm() {
       setCurrent("");
       setNext("");
       setConfirm("");
+      // What the passkey protects is the old password: it would only fail from now on.
+      const hadVault = !!username && hasVault(username);
+      if (username) removeVault(username);
+      setVaultPresent(false);
       const others =
         otherSessionsSignedOut > 0 ? ` ${otherSessionsSignedOut} other session${otherSessionsSignedOut === 1 ? " was" : "s were"} signed out.` : "";
-      toast.success(`${next === "" ? "Password removed." : "Password changed."}${others}`);
+      toast.success(`${next === "" ? "Password removed." : "Password changed."}${others}${hadVault ? " Passkey unlock was removed from this device; set it up again at your next sign-in." : ""}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -83,6 +91,24 @@ export function PasswordForm() {
         The saved passwords of your mail accounts are encrypted with a key derived from this password, so they are
         re-encrypted for the new one automatically. You stay signed in here; your other browsers are signed out.
       </p>
+
+      {vaultPresent && username && (
+        <div className="flex items-center gap-2 rounded-md border p-3 text-xs text-muted-foreground">
+          <Fingerprint className="size-4 shrink-0" />
+          <span className="flex-1">Passkey unlock is set up on this device: the sign-in screen can unlock your saved password with a passkey.</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              removeVault(username);
+              setVaultPresent(false);
+            }}
+          >
+            Remove
+          </Button>
+        </div>
+      )}
 
       <div className="flex justify-end">
         <Button type="submit" disabled={busy}>
