@@ -7,6 +7,31 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Change password, tabbed Settings (a3f2792)
+-----------------------------------------------------
+- The Settings dialog now has three tabs: Inboxes (sync interval, folders in the combined Inbox),
+  Notifications (browser notification, toast, sound) and Credentials (change password). Inboxes and
+  Notifications share one Save button (edits on both tabs are saved together); Credentials has its
+  own "Change password" button.
+- Changing the password needs the current one, a new one and its confirmation (the passwordless
+  default profile leaves "current" empty and can thereby set a first password).
+- The important part - the encryption: the saved IMAP/SMTP passwords of your mail accounts are
+  encrypted with a key derived from your login password and a salt. So a password change decrypts
+  every account secret with the old key and re-encrypts it with the key for the new password and a
+  fresh salt, in the same transaction as the new password hash: it is all-or-nothing. If some
+  account's secrets can't be decrypted it refuses with a message naming that account (re-enter its
+  passwords in Account settings first) and changes nothing.
+- Sessions: the key lives in server memory per session. The session you change the password in is
+  given the new key and keeps working; your other sessions/browsers are signed out (their keys would
+  be stale), and the toast says how many.
+- New endpoint POST /api/auth/change-password. The existing PATCH /api/users/:id (password) only
+  swapped the hash and would have left every saved account password undecryptable; it now needs
+  currentPassword as well and goes through the same re-encryption.
+- Tests: model (re-encryption, wrong password, all-or-nothing, default user), integration (full HTTP
+  flow incl. other session signed out and secrets readable with the new key/salt), and the tabs and
+  form in the frontend. The old model test for updateUserPassword was replaced.
+
+
 2026-09-19 - Sync tooltip, Reply all, combined Inbox on load, arrow keys (018f0eb)
 ------------------------------------------------------------------------------
 - Sync progress: the extra "Syncing n/m..." block under an account is gone. While a sync runs the
