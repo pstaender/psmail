@@ -77,6 +77,41 @@ describe("RenderPureMarkdown", () => {
     expect(root.querySelectorAll("a")).toHaveLength(2);
   });
 
+  test("a blockquote keeps its `> ` on every line, as de-emphasized marks", () => {
+    const { container } = render(<RenderPureMarkdown markdown={"On Monday, Alice wrote:\n> first quoted line\n> second quoted line\n>\n> new paragraph\n\nmy reply"} />);
+    const quote = container.querySelector("blockquote")!;
+    expect(quote).toBeTruthy();
+    expect(quote.textContent!.trim()).toBe("> first quoted line\n> second quoted line\n> new paragraph");
+    expect(quote.querySelectorAll(".md-mark")).toHaveLength(3);
+    for (const mark of quote.querySelectorAll(".md-mark")) expect(mark.textContent).toBe("> ");
+
+    // Text outside the quote is left alone.
+    const root = container.querySelector(".psmail-markdown-render")!;
+    expect(root.textContent).toContain("On Monday, Alice wrote:");
+    expect(root.textContent).toContain("my reply");
+    expect(root.querySelectorAll(".md-mark")).toHaveLength(3);
+  });
+
+  test("nested quotes get one `> ` per level, and a heading or code block inside a quote is marked too", () => {
+    const { container } = render(<RenderPureMarkdown markdown={"> outer\n>\n> > inner\n>\n> ## Title\n>\n> ```\n> code a\n> code b\n> ```"} />);
+    const text = container.querySelector(".psmail-markdown-render")!.textContent!;
+
+    expect(text).toContain("> outer");
+    expect(text).toContain("> > inner");
+    expect(text).toContain("> ## Title");
+    expect(text).toMatch(/> ```\n> code a\n> code b\n> ```/);
+  });
+
+  test("quote depth doesn't leak into the next render (or past the quote)", () => {
+    const first = render(<RenderPureMarkdown markdown={"> quoted"} />);
+    expect(first.container.querySelectorAll(".md-mark")).toHaveLength(1);
+    first.unmount();
+
+    const second = render(<RenderPureMarkdown markdown={"plain *text*"} />);
+    expect(second.container.textContent).not.toContain(">");
+    expect(second.container.querySelectorAll(".md-mark")).toHaveLength(2); // just the emphasis stars
+  });
+
   test("sanitizes the rendered HTML: no script tags, remote images blocked by default", () => {
     const { container } = render(
       <RenderPureMarkdown markdown={"<script>alert(1)</script>\n\n![pic](https://example.com/a.png)"} />

@@ -24,7 +24,26 @@ function createRenderer(): InstanceType<typeof MarkdownIt> {
   const mark = (text: string) => `<span class="md-mark">${esc(text)}</span>`;
   const rules = instance.renderer.rules;
 
-  rules.heading_open = (tokens: Token[], idx: number) => `<${tokens[idx]!.tag}>${mark(tokens[idx]!.markup)} `;
+  // Blockquotes keep their mail syntax: every line inside one starts with a de-emphasized `> ` (`> > ` when
+  // nested), like the quoted lines of a reply in the source. markdown-it renders tokens strictly in order, so a
+  // counter tracks how deep in quotes the current token is.
+  let quoteDepth = 0;
+  const quotePrefix = () => (quoteDepth > 0 ? mark("> ".repeat(quoteDepth)) : "");
+  rules.blockquote_open = (tokens: Token[], idx: number, options, _env, self) => {
+    quoteDepth += 1;
+    return self.renderToken(tokens, idx, options);
+  };
+  rules.blockquote_close = (tokens: Token[], idx: number, options, _env, self) => {
+    quoteDepth = Math.max(quoteDepth - 1, 0);
+    return self.renderToken(tokens, idx, options);
+  };
+  rules.paragraph_open = (tokens: Token[], idx: number, options, _env, self) =>
+    self.renderToken(tokens, idx, options) + (tokens[idx]!.hidden ? "" : quotePrefix());
+  // The soft/hard line breaks inside a quoted paragraph start the next quoted line.
+  rules.softbreak = () => `<br>\n${quotePrefix()}`;
+  rules.hardbreak = () => `<br>\n${quotePrefix()}`;
+
+  rules.heading_open = (tokens: Token[], idx: number) => `<${tokens[idx]!.tag}>${quotePrefix()}${mark(tokens[idx]!.markup)} `;
   rules.heading_close = (tokens: Token[], idx: number) => `</${tokens[idx]!.tag}>`;
 
   rules.strong_open = (tokens: Token[], idx: number) => `<strong>${mark(tokens[idx]!.markup)}`;
@@ -46,7 +65,12 @@ function createRenderer(): InstanceType<typeof MarkdownIt> {
     const fenceMark = token.markup || "```";
     const info = token.info.trim();
     const infoHtml = info ? ` <span class="md-info">${esc(info)}</span>` : "";
-    return `<pre>${mark(fenceMark)}${infoHtml}\n<code>${esc(token.content)}</code>${mark(fenceMark)}</pre>\n`;
+    const prefix = quotePrefix();
+    // Inside a quote every line of the fenced block carries the `> ` too.
+    const code = prefix
+      ? token.content.replace(/\n$/, "").split("\n").map(line => prefix + esc(line)).join("\n") + "\n"
+      : esc(token.content);
+    return `<pre>${prefix}${mark(fenceMark)}${infoHtml}\n<code>${code}</code>${prefix}${mark(fenceMark)}</pre>\n`;
   };
 
   // link_open and link_close are separate renderer calls, but a link's text can never contain
@@ -72,6 +96,13 @@ function createRenderer(): InstanceType<typeof MarkdownIt> {
     return `${linkIsBareUrl ? "" : mark("[")}<a href="${esc(linkHref)}">`;
   };
   rules.link_close = () => `</a>${linkIsBareUrl ? "" : mark(`](${linkHref})`)}`;
+
+  // A render that threw halfway must not leave the next one thinking it's inside a quote.
+  const render = instance.render.bind(instance);
+  instance.render = (src, env) => {
+    quoteDepth = 0;
+    return render(src, env);
+  };
 
   return instance;
 }
