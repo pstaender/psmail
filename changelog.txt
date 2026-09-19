@@ -7,6 +7,19 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Message header details (54e612d)
+---------------------------------------------
+In the details box that opens from the "to ..." line of the reading pane header:
+- The Message-ID is no longer shown by default.
+- To, Cc, Bcc (and From/Reply-To) wrap onto several lines but stop after three (max-height 4rem)
+  with an ellipsis, so a mail sent to a long list doesn't push the message off screen.
+- A subtle "Expand all details" button at the bottom of the box shows the full lists and the
+  Message-ID (monospace, wrapping); it turns into "Collapse details". The expanded state resets
+  when you open another message.
+Tests added for the hidden Message-ID, the clamp classes, expand/collapse and the reset; the README
+mentions it.
+
+
 2026-09-19 - Blockquote marks in RenderPureMarkdown (7fe3870)
 -------------------------------------------------------------
 Quoted text in the Text/MD reading views now keeps its mail syntax: every line inside a blockquote
