@@ -7,6 +7,18 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Clickable new-mail toast, monospace text (1b9b1d5)
+---------------------------------------------------------------
+- The "Open" and "Show inbox" buttons are gone from the new-mail toast: the whole toast is now the
+  click target. Clicking it (or pressing Enter/Space on it) opens that message, or the combined
+  Inbox for a "20 new mails" toast, and dismisses the toast.
+- The message text preview in the toast is shown in a monospace font, like the message views.
+- To make the whole toast clickable it is now a custom-styled sonner toast (card with border,
+  shadow and hover highlight, in the theme colors) instead of sonner's default layout, so it may
+  look slightly different from the app's other toasts.
+- Tests updated (monospace preview, no button, click opens the message and dismisses the toast).
+
+
 2026-09-19 - New-mail toast text color (76441a0)
 ------------------------------------------------
 The text in the new-mail toast (subject, message preview, date/recipients line, and the sender list
