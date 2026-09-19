@@ -17,6 +17,13 @@ const MODEL_EXAMPLES: Record<AiVendor, string> = {
   ollama: "e.g. llama3.1",
 };
 
+/** 1234 -> "1.2k", 2_500_000 -> "2.5M": token totals get big fast. */
+export function formatTokens(count: number): string {
+  if (count < 1000) return String(count);
+  if (count < 1_000_000) return `${(count / 1000).toFixed(count < 10_000 ? 1 : 0).replace(/\.0$/, "")}k`;
+  return `${(count / 1_000_000).toFixed(count < 10_000_000 ? 1 : 0).replace(/\.0$/, "")}M`;
+}
+
 const SELECT_CLASS = "h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm";
 
 interface ApiForm {
@@ -213,6 +220,11 @@ export function AiSettings({
                   {VENDOR_LABELS[record.vendor]} · {record.model}
                   {record.baseUrl ? ` · ${record.baseUrl}` : ""}
                   {record.hasKey ? " · key saved" : ""}
+                </div>
+                <div className="truncate text-xs text-muted-foreground" title={`${record.inputTokens.toLocaleString("en-US")} tokens in, ${record.outputTokens.toLocaleString("en-US")} tokens out`}>
+                  {record.calls > 0
+                    ? `${record.calls} call${record.calls === 1 ? "" : "s"} · ${formatTokens(record.inputTokens)} tokens in · ${formatTokens(record.outputTokens)} out`
+                    : "Not used yet"}
                 </div>
               </div>
               <Button type="button" variant="ghost" size="sm" title={`Test ${record.label}`} disabled={testing === record.id} onClick={() => testApi(record)}>

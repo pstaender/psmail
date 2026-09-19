@@ -7,6 +7,7 @@ describe("runMigrations", () => {
     const db = new Database(":memory:");
     db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT)");
     db.exec("CREATE TABLE emails (id INTEGER PRIMARY KEY AUTOINCREMENT)");
+    db.exec("CREATE TABLE ai_apis (id INTEGER PRIMARY KEY AUTOINCREMENT)");
     db.exec(`
       CREATE TABLE accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,6 +26,7 @@ describe("runMigrations", () => {
     const db = new Database(":memory:");
     db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT)");
     db.exec("CREATE TABLE emails (id INTEGER PRIMARY KEY AUTOINCREMENT)");
+    db.exec("CREATE TABLE ai_apis (id INTEGER PRIMARY KEY AUTOINCREMENT)");
     db.exec("CREATE TABLE accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL)");
     db.exec("INSERT INTO emails DEFAULT VALUES");
 
@@ -34,10 +36,24 @@ describe("runMigrations", () => {
     expect(row).toEqual({ taxonomy_list: null, ai_summary: null, translated_text: null, translated_language: null });
   });
 
+  test("adds the usage counters (calls, tokens) to a pre-existing ai_apis table, starting at 0", () => {
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT)");
+    db.exec("CREATE TABLE emails (id INTEGER PRIMARY KEY AUTOINCREMENT)");
+    db.exec("CREATE TABLE ai_apis (id INTEGER PRIMARY KEY AUTOINCREMENT)");
+    db.exec("CREATE TABLE accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL)");
+    db.exec("INSERT INTO ai_apis DEFAULT VALUES");
+
+    runMigrations(db);
+
+    expect(db.query("SELECT calls, input_tokens, output_tokens FROM ai_apis").get()).toEqual({ calls: 0, input_tokens: 0, output_tokens: 0 });
+  });
+
   test("adds users.settings ('{}'), accounts.position and accounts.sent_folder to pre-existing tables", () => {
     const db = new Database(":memory:");
     db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT)");
     db.exec("CREATE TABLE emails (id INTEGER PRIMARY KEY AUTOINCREMENT)");
+    db.exec("CREATE TABLE ai_apis (id INTEGER PRIMARY KEY AUTOINCREMENT)");
     db.exec("CREATE TABLE accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL)");
     db.exec("INSERT INTO users DEFAULT VALUES");
     db.exec("INSERT INTO accounts (email) VALUES ('me@example.com')");
@@ -53,6 +69,7 @@ describe("runMigrations", () => {
     const db = new Database(":memory:");
     db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT)");
     db.exec("CREATE TABLE emails (id INTEGER PRIMARY KEY AUTOINCREMENT)");
+    db.exec("CREATE TABLE ai_apis (id INTEGER PRIMARY KEY AUTOINCREMENT)");
     db.exec(`
       CREATE TABLE accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

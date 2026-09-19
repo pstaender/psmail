@@ -10,8 +10,10 @@ import {
   getAiApiConfig,
   listAiApis,
   listAiSkills,
+  recordAiUsage,
   updateAiApi,
   updateAiSkill,
+  type AiApiConfig,
   type AiApiInput,
   type AiSkillInput,
   type AiSkillRecord,
@@ -35,6 +37,13 @@ export function aiRoutes(db: Database) {
   function languageFor(userId: number, requested: unknown): string {
     if (typeof requested === "string" && requested.trim()) return requested.trim().slice(0, 60);
     return getUserSettings(db, userId).aiTargetLanguage ?? DEFAULT_LANGUAGE;
+  }
+
+  /** Runs a skill on `text`, keeps the tokens it used on the provider's record, and returns the answer. */
+  async function runCounted(skill: AiSkillRecord, api: AiApiConfig, text: string, language: string): Promise<string> {
+    const result = await runSkill(skill, api, text, language);
+    recordAiUsage(db, api.id, result.usage);
+    return result.text;
   }
 
   function requireSkill(userId: number, category: AiCategory, skillId?: unknown): AiSkillRecord {
@@ -62,7 +71,7 @@ export function aiRoutes(db: Database) {
   async function categorizeMessage(userId: number, encryptionKey: Buffer, emailId: number) {
     const skill = requireSkill(userId, "categorize");
     const email = getEmail(db, emailId);
-    const answer = await runSkill(skill, getAiApiConfig(db, userId, skill.aiApiId, encryptionKey), emailTextForAi(email), DEFAULT_LANGUAGE);
+    const answer = await runCounted(skill, getAiApiConfig(db, userId, skill.aiApiId, encryptionKey), emailTextForAi(email), DEFAULT_LANGUAGE);
     const labels = parseTaxonomy(answer);
     if (labels.length === 0) throw new ApiError(502, "The AI didn't return any categories.");
     return setEmailAiFields(db, emailId, { taxonomyList: labels });
@@ -92,8 +101,9 @@ export function aiRoutes(db: Database) {
       POST: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
         const api = getAiApiConfig(db, session.userId, parseIntParam(req.params.id, "id"), encryptionKey);
-        const answer = await complete(api, "You are a connection test. Answer with the single word: OK", "Ping");
-        return json({ ok: true, answer: answer.slice(0, 80) });
+        const result = await complete(api, "You are a connection test. Answer with the single word: OK", "Ping");
+        recordAiUsage(db, api.id, result.usage);
+        return json({ ok: true, answer: result.text.slice(0, 80) });
       }),
     },
     "/api/ai/skills": {
@@ -125,7 +135,7 @@ export function aiRoutes(db: Database) {
 
         const skill = requireSkill(session.userId, body.category, body.skillId);
         const api = getAiApiConfig(db, session.userId, skill.aiApiId, encryptionKey);
-        return json({ text: await runSkill(skill, api, body.text, languageFor(session.userId, body.language)) });
+        return json({ text: await runCounted(skill, api, body.text, languageFor(session.userId, body.language)) });
       }),
     },
     /** Summarizes a message and stores the summary; if a categorize skill exists it also stores the taxonomy (a failure there doesn't lose the summary). */
@@ -137,7 +147,7 @@ export function aiRoutes(db: Database) {
 
         const skill = requireSkill(session.userId, "summarize", body.skillId);
         const api = getAiApiConfig(db, session.userId, skill.aiApiId, encryptionKey);
-        const summary = await runSkill(skill, api, emailTextForAi(email), DEFAULT_LANGUAGE);
+        const summary = await runCounted(skill, api, emailTextForAi(email), DEFAULT_LANGUAGE);
         let updated = setEmailAiFields(db, email.id, { aiSummary: summary });
 
         let taxonomyError: string | undefined;
@@ -168,7 +178,7 @@ export function aiRoutes(db: Database) {
         const skill = requireSkill(session.userId, "translate", body.skillId);
         const language = languageFor(session.userId, body.language);
         const api = getAiApiConfig(db, session.userId, skill.aiApiId, encryptionKey);
-        const translated = await runSkill(skill, api, emailTextForAi(email), language);
+        const translated = await runCounted(skill, api, emailTextForAi(email), language);
         return json({ email: setEmailAiFields(db, email.id, { translatedText: translated, translatedLanguage: language }) });
       }),
     },

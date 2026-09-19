@@ -185,6 +185,40 @@ describe("AI endpoints", () => {
     expect((await api("POST", "/api/ai/run", { token, body: { category: "improve", text: "x" } })).status).toBe(409); // no improve skill
   });
 
+  test("every successful call adds its tokens to the provider's record; failed calls add nothing", async () => {
+    const usageOf = async () => {
+      const list = (await api("GET", "/api/ai/apis", { token })).json as { id: number; calls: number; inputTokens: number; outputTokens: number }[];
+      const mine = list.find(a => a.id === apiId)!;
+      return [mine.calls, mine.inputTokens, mine.outputTokens];
+    };
+    const before = await usageOf();
+
+    // The vendor reports usage: those numbers are added.
+    aiHttp.fetch = async () => new Response(JSON.stringify({ content: [{ type: "text", text: "fixed" }], usage: { input_tokens: 200, output_tokens: 40 } }));
+    await api("POST", "/api/ai/run", { token, body: { category: "grammar", text: "teh text" } });
+    expect(await usageOf()).toEqual([before[0]! + 1, before[1]! + 200, before[2]! + 40]);
+
+    // Summarize + categorize together are two calls.
+    aiHttp.fetch = async (_url, init) => {
+      const categorize = String(JSON.parse(String(init!.body)).system).includes("categorize");
+      return new Response(JSON.stringify({ content: [{ type: "text", text: categorize ? '["a", "b"]' : "sum" }], usage: { input_tokens: 10, output_tokens: 5 } }));
+    };
+    const mid = await usageOf();
+    await api("POST", `${emailPath()}/${emailId}/ai/summarize`, { token });
+    expect(await usageOf()).toEqual([mid[0]! + 2, mid[1]! + 20, mid[2]! + 10]);
+
+    // The connection test counts as a call too.
+    const beforeTest = await usageOf();
+    await api("POST", `/api/ai/apis/${apiId}/test`, { token });
+    expect((await usageOf())[0]).toBe(beforeTest[0]! + 1);
+
+    // An error from the vendor costs nothing here.
+    const beforeFail = await usageOf();
+    aiHttp.fetch = async () => new Response(JSON.stringify({ error: { message: "overloaded" } }), { status: 529 });
+    await api("POST", "/api/ai/run", { token, body: { category: "grammar", text: "x" } });
+    expect(await usageOf()).toEqual(beforeFail);
+  });
+
   test("an AI error is passed on as a 502 with the vendor's message", async () => {
     aiHttp.fetch = async () => new Response(JSON.stringify({ error: { message: "invalid x-api-key" } }), { status: 401 });
     const res = await api("POST", "/api/ai/run", { token, body: { category: "grammar", text: "x" } });

@@ -10,6 +10,7 @@ import {
   getAiApiConfig,
   listAiApis,
   listAiSkills,
+  recordAiUsage,
   updateAiApi,
   updateAiSkill,
 } from "../../src/server/models/ai";
@@ -45,7 +46,7 @@ describe("AI APIs", () => {
     const stored = db.query<{ api_key_encrypted: string }, []>("SELECT api_key_encrypted FROM ai_apis").get()!.api_key_encrypted;
     expect(stored).not.toContain("sk-secret");
     expect(decryptSecret(stored, key)).toBe("sk-secret");
-    expect(getAiApiConfig(db, user.id, api.id, key)).toEqual({ vendor: "anthropic", model: "claude-opus-5", baseUrl: null, apiKey: "sk-secret" });
+    expect(getAiApiConfig(db, user.id, api.id, key)).toEqual({ id: api.id, vendor: "anthropic", model: "claude-opus-5", baseUrl: null, apiKey: "sk-secret" });
   });
 
   test("validates vendor, model, key (not needed for Ollama) and address", async () => {
@@ -86,6 +87,27 @@ describe("AI APIs", () => {
     expect(defaultApiLabel("openai", "gpt-5")).toBe("OpenAI.gpt-5");
     expect(defaultApiLabel("google", "gemini-2.5-pro")).toBe("Google.gemini-2.5-pro");
     expect(defaultApiLabel("ollama", "llama3")).toBe("Ollama.llama3");
+  });
+
+  test("usage is added up on the provider's record, survives edits, and stays per provider", async () => {
+    const { db, user } = await setup();
+    const a = createAiApi(db, user.id, { vendor: "openai", model: "gpt", apiKey: "k" }, key);
+    const b = createAiApi(db, user.id, { vendor: "ollama", model: "llama3" }, key);
+    expect(a).toMatchObject({ calls: 0, inputTokens: 0, outputTokens: 0 });
+
+    recordAiUsage(db, a.id, { inputTokens: 100, outputTokens: 20 });
+    recordAiUsage(db, a.id, { inputTokens: 50, outputTokens: 5 });
+    recordAiUsage(db, b.id, { inputTokens: 7, outputTokens: 3 });
+
+    const list = listAiApis(db, user.id);
+    expect(list.map(x => [x.calls, x.inputTokens, x.outputTokens])).toEqual([[2, 150, 25], [1, 7, 3]]);
+
+    // Editing the provider keeps its totals.
+    updateAiApi(db, user.id, a.id, { model: "gpt-b", name: "Renamed" }, key);
+    expect(listAiApis(db, user.id)[0]).toMatchObject({ calls: 2, inputTokens: 150, outputTokens: 25 });
+    // Nonsense (negative/fractional) never makes a total go down.
+    recordAiUsage(db, a.id, { inputTokens: -5, outputTokens: 2.6 });
+    expect(listAiApis(db, user.id)[0]).toMatchObject({ calls: 3, inputTokens: 150, outputTokens: 28 });
   });
 
   test("users only see and touch their own", async () => {
@@ -180,9 +202,9 @@ describe("talking to the vendors", () => {
 
   test("Anthropic: messages API with the key header, system prompt and user text", async () => {
     const calls = stub({ content: [{ type: "text", text: "Hello" }, { type: "text", text: " world" }] });
-    const answer = await complete({ vendor: "anthropic", model: "claude-opus-5", baseUrl: null, apiKey: "sk-a" }, "SYS", "USER");
+    const answer = await complete({ id: 1, vendor: "anthropic", model: "claude-opus-5", baseUrl: null, apiKey: "sk-a" }, "SYS", "USER");
 
-    expect(answer).toBe("Hello world");
+    expect(answer.text).toBe("Hello world");
     expect(calls[0]!.url).toBe("https://api.anthropic.com/v1/messages");
     expect((calls[0]!.init.headers as Record<string, string>)["x-api-key"]).toBe("sk-a");
     expect(calls[0]!.body).toMatchObject({ model: "claude-opus-5", system: "SYS", messages: [{ role: "user", content: "USER" }] });
@@ -190,7 +212,7 @@ describe("talking to the vendors", () => {
 
   test("OpenAI (and compatible services via the address): chat completions with a bearer token", async () => {
     const calls = stub({ choices: [{ message: { content: "Hi" } }] });
-    expect(await complete({ vendor: "openai", model: "gpt-x", baseUrl: "https://llm.example.com/v1", apiKey: "sk-o" }, "SYS", "USER")).toBe("Hi");
+    expect((await complete({ id: 1, vendor: "openai", model: "gpt-x", baseUrl: "https://llm.example.com/v1", apiKey: "sk-o" }, "SYS", "USER")).text).toBe("Hi");
     expect(calls[0]!.url).toBe("https://llm.example.com/v1/chat/completions");
     expect((calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer sk-o");
     expect(calls[0]!.body.messages).toEqual([{ role: "system", content: "SYS" }, { role: "user", content: "USER" }]);
@@ -198,7 +220,7 @@ describe("talking to the vendors", () => {
 
   test("Google: generateContent with the model in the path and the key in a header", async () => {
     const calls = stub({ candidates: [{ content: { parts: [{ text: "Gem" }, { text: "ini" }] } }] });
-    expect(await complete({ vendor: "google", model: "gemini-2.5-pro", baseUrl: null, apiKey: "g-key" }, "SYS", "USER")).toBe("Gemini");
+    expect((await complete({ id: 1, vendor: "google", model: "gemini-2.5-pro", baseUrl: null, apiKey: "g-key" }, "SYS", "USER")).text).toBe("Gemini");
     expect(calls[0]!.url).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent");
     expect((calls[0]!.init.headers as Record<string, string>)["x-goog-api-key"]).toBe("g-key");
     expect(calls[0]!.body).toMatchObject({ systemInstruction: { parts: [{ text: "SYS" }] }, contents: [{ role: "user", parts: [{ text: "USER" }] }] });
@@ -206,28 +228,48 @@ describe("talking to the vendors", () => {
 
   test("Ollama: a local chat call, no key, not streamed", async () => {
     const calls = stub({ message: { content: "Llama says hi" } });
-    expect(await complete({ vendor: "ollama", model: "llama3", baseUrl: null, apiKey: null }, "SYS", "USER")).toBe("Llama says hi");
+    expect((await complete({ id: 1, vendor: "ollama", model: "llama3", baseUrl: null, apiKey: null }, "SYS", "USER")).text).toBe("Llama says hi");
     expect(calls[0]!.url).toBe("http://localhost:11434/api/chat");
     expect(calls[0]!.body).toMatchObject({ model: "llama3", stream: false });
     expect((calls[0]!.init.headers as Record<string, string>).authorization).toBeUndefined();
   });
 
+  test("token usage is read from each vendor's answer", async () => {
+    stub({ content: [{ type: "text", text: "x" }], usage: { input_tokens: 120, output_tokens: 30 } });
+    expect((await complete({ id: 1, vendor: "anthropic", model: "m", baseUrl: null, apiKey: "k" }, "s", "u")).usage).toEqual({ inputTokens: 120, outputTokens: 30 });
+
+    stub({ choices: [{ message: { content: "x" } }], usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 } });
+    expect((await complete({ id: 1, vendor: "openai", model: "m", baseUrl: null, apiKey: "k" }, "s", "u")).usage).toEqual({ inputTokens: 11, outputTokens: 7 });
+
+    stub({ candidates: [{ content: { parts: [{ text: "x" }] } }], usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2, totalTokenCount: 7 } });
+    expect((await complete({ id: 1, vendor: "google", model: "m", baseUrl: null, apiKey: "k" }, "s", "u")).usage).toEqual({ inputTokens: 5, outputTokens: 2 });
+
+    stub({ message: { content: "x" }, prompt_eval_count: 42, eval_count: 9 });
+    expect((await complete({ id: 1, vendor: "ollama", model: "m", baseUrl: null, apiKey: null }, "s", "u")).usage).toEqual({ inputTokens: 42, outputTokens: 9 });
+  });
+
+  test("without a usage report the tokens are estimated at about 4 characters each", async () => {
+    stub({ choices: [{ message: { content: "y".repeat(40) } }] }); // no usage field (some compatible services)
+    const result = await complete({ id: 1, vendor: "openai", model: "m", baseUrl: null, apiKey: "k" }, "s".repeat(20), "u".repeat(60));
+    expect(result.usage).toEqual({ inputTokens: 20, outputTokens: 10 }); // (20+60)/4 and 40/4
+  });
+
   test("failures become readable errors: the vendor's message, unreachable servers, empty answers", async () => {
     stub({ error: { message: "invalid x-api-key" } }, 401);
-    await expect(complete({ vendor: "anthropic", model: "m", baseUrl: null, apiKey: "bad" }, "s", "u")).rejects.toThrow(/Anthropic answered with an error \(401\): invalid x-api-key/);
+    await expect(complete({ id: 1, vendor: "anthropic", model: "m", baseUrl: null, apiKey: "bad" }, "s", "u")).rejects.toThrow(/Anthropic answered with an error \(401\): invalid x-api-key/);
 
     aiHttp.fetch = async () => {
       throw new TypeError("fetch failed");
     };
-    await expect(complete({ vendor: "ollama", model: "m", baseUrl: null, apiKey: null }, "s", "u")).rejects.toThrow(/Ollama \(local\): it couldn't be reached \(is Ollama running/);
+    await expect(complete({ id: 1, vendor: "ollama", model: "m", baseUrl: null, apiKey: null }, "s", "u")).rejects.toThrow(/Ollama \(local\): it couldn't be reached \(is Ollama running/);
 
     stub({ choices: [{ message: { content: "  " } }] });
-    await expect(complete({ vendor: "openai", model: "m", baseUrl: null, apiKey: "k" }, "s", "u")).rejects.toThrow(/empty answer/);
+    await expect(complete({ id: 1, vendor: "openai", model: "m", baseUrl: null, apiKey: "k" }, "s", "u")).rejects.toThrow(/empty answer/);
   });
 
   test("a very long text is cut before it is sent", async () => {
     const calls = stub({ choices: [{ message: { content: "ok" } }] });
-    await complete({ vendor: "openai", model: "m", baseUrl: null, apiKey: "k" }, "s", "x".repeat(200_000));
+    await complete({ id: 1, vendor: "openai", model: "m", baseUrl: null, apiKey: "k" }, "s", "x".repeat(200_000));
     expect(calls[0]!.body.messages[1].content.length).toBe(60_000);
   });
 });

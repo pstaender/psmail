@@ -206,7 +206,7 @@ function installMockFetch(
     /** Categories the user has AI skills for (all on one provider); they show up in GET /api/ai/skills. */
     aiSkillCategories?: string[];
     /** Provider records GET /api/ai/apis starts with. */
-    aiApis?: { id: number; name: string; vendor: string; model: string; baseUrl: string | null; hasKey: boolean }[];
+    aiApis?: { id: number; name: string; vendor: string; model: string; baseUrl: string | null; hasKey: boolean; calls?: number; inputTokens?: number; outputTokens?: number }[];
     /** What GET .../downloads (the account's job history) lists: a sync already underway when the page loads. */
     earlierSyncJob?: "running" | "completed";
     /** Adds a contact from another account to the recipient suggestions. */
@@ -242,6 +242,9 @@ function installMockFetch(
   });
   // A provider's label is its name, or Vendor.model when it has none (the server computes it).
   const withLabel = <T extends { name: string; vendor: string; model: string }>(record: T) => ({
+    calls: 0,
+    inputTokens: 0,
+    outputTokens: 0,
     ...record,
     label: record.name || `${({ anthropic: "Anthropic", openai: "OpenAI", google: "Google", ollama: "Ollama" } as Record<string, string>)[record.vendor]}.${record.model}`,
   });
@@ -2536,6 +2539,24 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await waitFor(() => expect(calls("DELETE", "/api/ai/apis/1")).toHaveLength(1));
       await waitFor(() => expect(screen.queryByText(/Summarize · Work/)).toBeNull());
       expect(screen.getByRole("button", { name: /add skill/i }).hasAttribute("disabled")).toBe(true);
+    });
+
+    test("the provider list shows how much each provider has been used: calls and tokens in/out", async () => {
+      installMockFetch({
+        aiApis: [
+          { id: 1, name: "Work", vendor: "anthropic", model: "claude-opus-5", baseUrl: null, hasKey: true, calls: 8, inputTokens: 12_345, outputTokens: 4_560 },
+          { id: 2, name: "Local", vendor: "ollama", model: "llama3", baseUrl: null, hasKey: false, calls: 1, inputTokens: 950, outputTokens: 2_500_000 },
+          { id: 3, name: "Idle", vendor: "openai", model: "gpt-5", baseUrl: null, hasKey: true },
+        ],
+      });
+      await login();
+      await openAiTab();
+
+      expect(await screen.findByText("8 calls · 12k tokens in · 4.6k out")).toBeTruthy();
+      expect(screen.getByText("1 call · 950 tokens in · 2.5M out")).toBeTruthy();
+      expect(screen.getByText("Not used yet")).toBeTruthy();
+      // The exact numbers are on hover.
+      expect(screen.getByText("8 calls · 12k tokens in · 4.6k out").getAttribute("title")).toBe("12,345 tokens in, 4,560 tokens out");
     });
 
     test("the translation language is saved to the user settings", async () => {

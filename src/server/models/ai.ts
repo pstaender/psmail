@@ -15,6 +15,10 @@ export interface AiApiRecord {
   baseUrl: string | null;
   /** Whether a key is stored. The key itself is never returned. */
   hasKey: boolean;
+  /** Successful calls so far, and the tokens they used (as reported by the vendor; estimated at ~4 characters per token when it reports none). */
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -27,6 +31,9 @@ interface AiApiRow {
   model: string;
   base_url: string | null;
   api_key_encrypted: string | null;
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
   created_at: string;
   updated_at: string;
 }
@@ -49,6 +56,9 @@ function toApi(row: AiApiRow): AiApiRecord {
     model: row.model,
     baseUrl: row.base_url,
     hasKey: row.api_key_encrypted !== null,
+    calls: row.calls,
+    inputTokens: row.input_tokens,
+    outputTokens: row.output_tokens,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -133,6 +143,7 @@ export function deleteAiApi(db: Database, userId: number, id: number): void {
 }
 
 export interface AiApiConfig {
+  id: number;
   vendor: AiVendor;
   model: string;
   baseUrl: string | null;
@@ -143,6 +154,7 @@ export interface AiApiConfig {
 export function getAiApiConfig(db: Database, userId: number, id: number, encryptionKey: Buffer): AiApiConfig {
   const row = getApiRow(db, userId, id);
   return {
+    id: row.id,
     vendor: row.vendor as AiVendor,
     model: row.model,
     baseUrl: row.base_url,
@@ -258,4 +270,18 @@ export function findSkillForCategory(db: Database, userId: number, category: AiC
   }
   const row = db.query<AiSkillRow, [number, string]>(`${SKILL_SELECT} WHERE s.user_id = ? AND s.category = ? ORDER BY s.id LIMIT 1`).get(userId, category);
   return row ? toSkill(row) : null;
+}
+
+export interface AiUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/** Adds one successful call and its tokens to the provider's running totals (not touching updated_at: this isn't an edit). */
+export function recordAiUsage(db: Database, apiId: number, usage: AiUsage): void {
+  db.query("UPDATE ai_apis SET calls = calls + 1, input_tokens = input_tokens + ?, output_tokens = output_tokens + ? WHERE id = ?").run(
+    Math.max(0, Math.round(usage.inputTokens)),
+    Math.max(0, Math.round(usage.outputTokens)),
+    apiId
+  );
 }

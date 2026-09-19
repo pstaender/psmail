@@ -1,5 +1,5 @@
 import { VENDOR_LABELS, type AiCategory } from "../../ai/categories";
-import type { AiApiConfig, AiSkillRecord } from "../models/ai";
+import type { AiApiConfig, AiSkillRecord, AiUsage } from "../models/ai";
 import { ApiError } from "../types";
 
 /**
@@ -30,7 +30,15 @@ function describeFailure(vendor: string, status: number, body: string): string {
  * every one of them is a single non-streaming request. The mail text leaves this server for that service,
  * which is why nothing here runs unless the user set up an API and pressed a button for it.
  */
-export async function complete(api: AiApiConfig, system: string, user: string): Promise<string> {
+export interface AiResult {
+  text: string;
+  /** Tokens the call used: as the vendor reports them, else an estimate (~4 characters per token). */
+  usage: AiUsage;
+}
+
+const CHARS_PER_TOKEN = 4;
+
+export async function complete(api: AiApiConfig, system: string, user: string): Promise<AiResult> {
   const vendorLabel = VENDOR_LABELS[api.vendor];
   const input = user.length > MAX_INPUT_CHARS ? user.slice(0, MAX_INPUT_CHARS) : user;
 
@@ -38,6 +46,8 @@ export async function complete(api: AiApiConfig, system: string, user: string): 
   let headers: Record<string, string> = { "content-type": "application/json" };
   let body: unknown;
   let extract: (data: any) => unknown;
+  // The vendor's own token counts, when its answer has them.
+  let usageOf: (data: any) => { input?: unknown; output?: unknown } = () => ({});
 
   switch (api.vendor) {
     case "anthropic":
@@ -45,23 +55,27 @@ export async function complete(api: AiApiConfig, system: string, user: string): 
       headers = { ...headers, "x-api-key": api.apiKey ?? "", "anthropic-version": "2023-06-01" };
       body = { model: api.model, max_tokens: 4096, system, messages: [{ role: "user", content: input }] };
       extract = data => (data?.content ?? []).map((part: { text?: string }) => part.text ?? "").join("");
+      usageOf = data => ({ input: data?.usage?.input_tokens, output: data?.usage?.output_tokens });
       break;
     case "openai":
       url = `${api.baseUrl ?? "https://api.openai.com/v1"}/chat/completions`;
       headers = { ...headers, authorization: `Bearer ${api.apiKey ?? ""}` };
       body = { model: api.model, messages: [{ role: "system", content: system }, { role: "user", content: input }] };
       extract = data => data?.choices?.[0]?.message?.content;
+      usageOf = data => ({ input: data?.usage?.prompt_tokens, output: data?.usage?.completion_tokens });
       break;
     case "google":
       url = `${api.baseUrl ?? "https://generativelanguage.googleapis.com"}/v1beta/models/${encodeURIComponent(api.model)}:generateContent`;
       headers = { ...headers, "x-goog-api-key": api.apiKey ?? "" };
       body = { systemInstruction: { parts: [{ text: system }] }, contents: [{ role: "user", parts: [{ text: input }] }] };
       extract = data => (data?.candidates?.[0]?.content?.parts ?? []).map((part: { text?: string }) => part.text ?? "").join("");
+      usageOf = data => ({ input: data?.usageMetadata?.promptTokenCount, output: data?.usageMetadata?.candidatesTokenCount });
       break;
     case "ollama":
       url = `${api.baseUrl ?? "http://localhost:11434"}/api/chat`;
       body = { model: api.model, stream: false, messages: [{ role: "system", content: system }, { role: "user", content: input }] };
       extract = data => data?.message?.content;
+      usageOf = data => ({ input: data?.prompt_eval_count, output: data?.eval_count });
       break;
   }
 
@@ -84,7 +98,14 @@ export async function complete(api: AiApiConfig, system: string, user: string): 
   }
   const answer = extract(data);
   if (typeof answer !== "string" || !answer.trim()) throw new ApiError(502, `${vendorLabel} sent an empty answer.`);
-  return answer.trim();
+
+  const reported = usageOf(data);
+  const count = (value: unknown, fallbackChars: number) =>
+    typeof value === "number" && Number.isFinite(value) ? value : Math.ceil(fallbackChars / CHARS_PER_TOKEN);
+  return {
+    text: answer.trim(),
+    usage: { inputTokens: count(reported.input, system.length + input.length), outputTokens: count(reported.output, answer.length) },
+  };
 }
 
 /** Fills a skill's prompt placeholders. */
@@ -93,7 +114,7 @@ export function renderPrompt(prompt: string, language: string): string {
 }
 
 /** Runs a skill's prompt over `text` on the API it belongs to. */
-export async function runSkill(skill: AiSkillRecord, api: AiApiConfig, text: string, language: string): Promise<string> {
+export async function runSkill(skill: AiSkillRecord, api: AiApiConfig, text: string, language: string): Promise<AiResult> {
   return complete(api, renderPrompt(skill.prompt, language), text);
 }
 
