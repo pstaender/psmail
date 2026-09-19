@@ -7,6 +7,31 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Passkey unlock of the saved password (bd48f3f)
+------------------------------------------------------------
+Verdict first: the idea is sound only when the encryption key comes out of the authenticator. "Ask for a
+passkey, then decrypt with a key that is stored next to the data" would be security theatre, so that is
+deliberately NOT built. What is built uses the WebAuthn PRF extension (FIDO2 hmac-secret): the authenticator
+derives a secret from a random salt only after user verification (fingerprint/face/PIN/touch), the page turns
+it into an AES-GCM key, and localStorage holds only ciphertext. Without the authenticator the blob is useless;
+XSS can at most trigger a prompt you would have to pass. Where PRF isn't supported nothing is stored.
+- Sign-in screen: for a profile that needs a password and a browser with passkeys, a checkbox "Remember on
+  this device, unlocked by a passkey / Touch ID / security key" (two prompts: create the passkey, use it once
+  to derive the key; nothing stored if that fails or the authenticator has no PRF - the user is told, and is
+  signed in regardless). Next time the profile shows "Unlock with passkey": one touch, then it signs in with
+  the decrypted password. Cancelling shows why and leaves the password form; a saved password that the server
+  rejects (changed elsewhere) is dropped with an explanation.
+- Settings > Credentials shows when it is set up on this device and has a Remove button; changing the password
+  removes it (it would be stale) and the toast says so.
+- The blob is bound to the profile name (AES-GCM associated data), uses a fresh salt/IV on every save and is
+  per profile. Client-side only: no server change.
+- Tests: the vault with a fake PRF authenticator (round trip, no plaintext, fresh salts, cancel, no-PRF refusal,
+  tampering, moved blob, wiped passkey) and the UI flows. Real authenticators could not be tried here - worth a
+  manual check with Touch ID / a YubiKey (PRF support varies by browser and authenticator).
+- Not done: enabling it later from Settings (it needs the password, so it is offered at sign-in), and
+  syncing it across devices (it is per device by design).
+
+
 2026-09-19 - AI usage per provider (7d4bbac)
 --------------------------------------------
 Every AI call is now counted on the provider (ai_apis) it went through: new columns calls, input_tokens and
