@@ -1,6 +1,10 @@
 # P.S.Mail
+### A minimal, markdown-first webmail client
 
-A minimal, fast webmail client: React/shadcn webclient + Bun API server (IMAP/SMTP sync, sqlite storage, CLI).
+Uses react/shadcn UI + Bun API server (IMAP/SMTP sync, sqlite storage, CLI).
+
+<img width="2700" height="2130" alt="desktop-frame-export (2)" src="https://github.com/user-attachments/assets/9f2ea863-71c9-4e35-ab28-9be7fe8e816b" />
+
 
 ## Install
 
