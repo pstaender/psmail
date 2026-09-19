@@ -196,7 +196,7 @@ A read-only account never tells the IMAP server about a delete (or move), so the
 
 ## Passkey unlock of the saved password
 
-After a server restart or when a session expires you have to sign in again. To make that a touch instead of typing, the sign-in screen can keep your password **on this device, encrypted, unlockable only with a passkey / Touch ID / security key**: tick "Remember on this device…" when signing in (only offered when the browser supports passkeys), and the next time the profile shows "Unlock with passkey". It is client-side only (`src/lib/passkeyVault.ts`); the server knows nothing about it.
+After a server restart or when a session expires you have to sign in again. To make that a touch instead of typing, the sign-in screen can keep your password **on this device, encrypted, unlockable only with a passkey / Touch ID / security key**: switch on "Remember on this device" when signing in (only offered when the browser supports passkeys), and the next time the profile shows "Unlock with passkey". It is client-side only (`src/lib/passkeyVault.ts`); the server knows nothing about it.
 
 Is this sensible security? Yes — *in this form*, and only then:
 - The key is derived by the authenticator itself with the WebAuthn **PRF extension** (FIDO2 `hmac-secret`), and only after user verification (fingerprint, face, PIN or touch). It never exists in the page beforehand, so localStorage holds just ciphertext (AES-GCM, bound to the profile name) that is useless without the authenticator.

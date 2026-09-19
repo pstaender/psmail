@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { api, ApiError } from "@/lib/api";
 import { hasVault, passkeysAvailable, removeVault, savePassword, unlockPassword } from "@/lib/passkeyVault";
 import { useAuth } from "@/contexts/AuthContext";
@@ -172,15 +173,12 @@ export function LoginView() {
                             onChange={e => setPassword(e.target.value)}
                           />
                           {!hasVault(user.username) && passkeysAvailable() && (
-                            <label className="flex items-start gap-2 text-xs text-muted-foreground">
-                              <input
-                                type="checkbox"
-                                className="mt-0.5"
-                                checked={rememberWithPasskey}
-                                onChange={e => setRememberWithPasskey(e.target.checked)}
-                              />
-                              <span>Remember on this device, unlocked by a passkey / Touch ID / security key</span>
-                            </label>
+                            <div className="flex items-center gap-2 text-sm">
+                              <Switch id="remember-with-passkey" checked={rememberWithPasskey} onCheckedChange={setRememberWithPasskey} />
+                              <Label htmlFor="remember-with-passkey" className="font-normal">
+                                Remember on this device
+                              </Label>
+                            </div>
                           )}
                           <Button type="submit" disabled={busy} size="sm">
                             {busy && <Loader2 className="size-4 animate-spin" />}

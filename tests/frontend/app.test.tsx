@@ -3111,14 +3111,14 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     }
     async function signInAndRemember() {
       await userEvent.type(await pickSecure(), "secret123");
-      await userEvent.click(screen.getByLabelText(/remember on this device/i));
+      await userEvent.click(screen.getByLabelText("Remember on this device"));
       await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
       await openAccountInbox();
     }
 
     test("without passkey support the sign-in form offers nothing extra", async () => {
       await pickSecure();
-      expect(screen.queryByLabelText(/remember on this device/i)).toBeNull();
+      expect(screen.queryByLabelText("Remember on this device")).toBeNull();
       expect(screen.queryByRole("button", { name: /unlock with passkey/i })).toBeNull();
     });
 
@@ -3148,7 +3148,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
       await userEvent.click(screen.getByTitle("Sign out"));
       await userEvent.click(await screen.findByText("secure"));
-      expect(screen.queryByLabelText(/remember on this device/i)).toBeNull(); // already set up
+      expect(screen.queryByLabelText("Remember on this device")).toBeNull(); // already set up
       loginPosts.length = 0;
       await userEvent.click(await screen.findByRole("button", { name: /unlock with passkey/i }));
 
