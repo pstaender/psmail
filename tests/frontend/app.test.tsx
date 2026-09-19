@@ -154,6 +154,7 @@ const capturedSettingsPatches: Record<string, unknown>[] = [];
 let capturedAccountPatch: Record<string, unknown> | null = null;
 // Bodies of POST .../downloads (sync) calls, and how often the folder list / unread count were fetched.
 const downloadPosts: Record<string, unknown>[] = [];
+const downloadAccounts: string[] = []; // the account of each of those POSTs
 // Bodies of PATCH .../emails/20 (the combined Sent list's message).
 const capturedResultPatches: Record<string, unknown>[] = [];
 // Bodies of POST /api/auth/change-password.
@@ -196,6 +197,8 @@ function installMockFetch(
     inboxUnread?: number;
     /** The sync job never finishes (GET job stays running at 12/340) — to look at the in-progress UI. */
     syncStaysRunning?: boolean;
+    /** More accounts next to me@example.com (for tests that sync several at once): e.g. { email: "you@example.com" }. */
+    extraAccounts?: Partial<Account>[];
     /** What GET .../folders?live=1 (the slow IMAP read) answers: a folder list, or "fail" for a 502. Default: the same as the cached list. */
     liveFolders?: Record<string, unknown>[] | "fail";
     /** GET .../folders answers with the stored folders and this reason in x-folders-warning (the mail server can't be reached). */
@@ -225,6 +228,7 @@ function installMockFetch(
   capturedSettingsPatches.length = 0;
   capturedAccountPatch = null;
   downloadPosts.length = 0;
+  downloadAccounts.length = 0;
   capturedResultPatches.length = 0;
   passwordChanges.length = 0;
   bulkRequests.length = 0;
@@ -279,7 +283,9 @@ function installMockFetch(
       }
       return jsonResponse({ token: "test-token", expiresAt: NOW, user: { id: 1, username: body.username } });
     }
-    if (method === "GET" && path === "/api/accounts") return jsonResponse([currentAccount]);
+    if (method === "GET" && path === "/api/accounts") {
+      return jsonResponse([currentAccount, ...(opts.extraAccounts ?? []).map((extra, i) => ({ ...ACCOUNT, id: 10 + i, position: 2 + i, ...extra }))]);
+    }
     if (method === "PATCH" && path === "/api/accounts/me%40example.com") {
       const body = init?.body ? JSON.parse(init.body as string) : {};
       capturedAccountPatch = body;
@@ -304,15 +310,18 @@ function installMockFetch(
       if (folderDelayMs > 0) await new Promise(resolve => setTimeout(resolve, folderDelayMs));
       return warned(jsonResponse(FOLDERS));
     }
-    if (method === "POST" && path === "/api/accounts/me%40example.com/downloads") {
-      downloadPosts.push(init?.body ? JSON.parse(init.body as string) : {});
+    const downloadPost = /^\/api\/accounts\/([^/]+)\/downloads$/.exec(path);
+    if (method === "POST" && downloadPost) {
+      const body = init?.body ? JSON.parse(init.body as string) : {};
+      downloadPosts.push(body);
+      downloadAccounts.push(decodeURIComponent(downloadPost[1]!));
       return jsonResponse(SYNC_JOB("running"), 202);
     }
-    if (method === "GET" && path === "/api/accounts/me%40example.com/downloads") {
+    if (method === "GET" && /^\/api\/accounts\/[^/]+\/downloads$/.test(path)) {
       if (!opts.earlierSyncJob) return jsonResponse([]);
       return jsonResponse([{ ...SYNC_JOB(opts.earlierSyncJob), progressCurrent: 5, progressTotal: 10 }]);
     }
-    if (method === "GET" && path === "/api/accounts/me%40example.com/downloads/1") {
+    if (method === "GET" && /^\/api\/accounts\/[^/]+\/downloads\/1$/.test(path)) {
       return jsonResponse(opts.syncStaysRunning ? { ...SYNC_JOB("running"), progressCurrent: 12, progressTotal: 340 } : SYNC_JOB("completed"));
     }
     if (method === "GET" && path === "/api/unified/inbox/new") {
@@ -2987,6 +2996,53 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await waitFor(() => expect(folderRequests).toBeGreaterThan(1)); // the post-sync refresh…
       await new Promise(resolve => setTimeout(resolve, 50));
       expect(liveFolderRequests).toBe(before); // …used the cache, not another live read
+    });
+  });
+
+  describe("syncing all Inboxes from the combined Inbox", () => {
+    async function login() {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await screen.findByText("Unified hello"); // the combined Inbox
+    }
+
+    test("the combined Inbox has a sync button that syncs the Inbox (only) of every account", async () => {
+      installMockFetch({ extraAccounts: [{ email: "you@example.com" }, { email: "third@example.com" }] });
+      await login();
+
+      await userEvent.click(screen.getByTitle("Sync the Inboxes of all accounts"));
+      await waitFor(() => expect(downloadAccounts.sort()).toEqual(["me@example.com", "third@example.com", "you@example.com"]));
+      expect(downloadPosts).toEqual([{ folder: "INBOX" }, { folder: "INBOX" }, { folder: "INBOX" }]); // just the Inboxes, not every folder
+    });
+
+    test("disabled accounts are left out", async () => {
+      installMockFetch({ extraAccounts: [{ email: "off@example.com", disabled: true }] });
+      await login();
+
+      await userEvent.click(screen.getByTitle("Sync the Inboxes of all accounts"));
+      await waitFor(() => expect(downloadAccounts).toEqual(["me@example.com"]));
+    });
+
+    test("while accounts are syncing the button is a spinner with the count, and can't be pressed again", async () => {
+      installMockFetch({ extraAccounts: [{ email: "you@example.com" }], syncStaysRunning: true });
+      await login();
+
+      await userEvent.click(screen.getByTitle("Sync the Inboxes of all accounts"));
+      const spinner = await screen.findByTitle("Syncing 2 accounts…");
+      expect(spinner.querySelector(".animate-spin")).toBeTruthy();
+      expect(screen.queryByTitle("Sync the Inboxes of all accounts")).toBeNull();
+      expect(downloadAccounts).toHaveLength(2); // no second round
+    });
+
+    test("when the syncs finish the app refreshes like after any sync, and the button is back", async () => {
+      installMockFetch({ extraAccounts: [{ email: "you@example.com" }] });
+      await login();
+      const unreadBefore = unreadRequests;
+
+      await userEvent.click(screen.getByTitle("Sync the Inboxes of all accounts"));
+      await waitFor(() => expect(unreadRequests).toBeGreaterThan(unreadBefore));
+      await waitFor(() => expect(screen.queryByTitle(/^Syncing/)).toBeNull());
+      expect(screen.getByTitle("Sync the Inboxes of all accounts")).toBeTruthy();
     });
   });
 });

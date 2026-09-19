@@ -1,4 +1,4 @@
-import { Inbox, Loader2, PanelLeftClose, Send } from "lucide-react";
+import { Inbox, Loader2, PanelLeftClose, RefreshCw, Send } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -21,6 +21,8 @@ export function AccountTree({
   unifiedView,
   onSelectUnified,
   unifiedInboxUnread,
+  onSyncAllInboxes,
+  syncingAccounts,
   syncJobs,
   onSync,
 }: {
@@ -44,6 +46,10 @@ export function AccountTree({
   onSelectUnified: (kind: UnifiedKind) => void;
   /** Unread messages across all Inboxes, shown as a badge on the combined Inbox. */
   unifiedInboxUnread: number;
+  /** Syncs the Inbox of every account (the combined Inbox's refresh button). */
+  onSyncAllInboxes: () => void;
+  /** How many accounts have a sync running right now (drives the button's spinner). */
+  syncingAccounts: number;
   syncJobs: Record<string, DownloadJob>;
   onSync: (accountEmail: string) => void;
 }) {
@@ -63,23 +69,43 @@ export function AccountTree({
             { kind: "sent", label: "Sent", Icon: Send },
           ] as const
         ).map(({ kind, label, Icon }) => (
-          <button
+          <div
             key={kind}
-            onClick={() => onSelectUnified(kind)}
-            title={`${label} of all accounts`}
-            className={cn(
-              "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent",
-              unifiedView === kind && "bg-accent font-medium"
-            )}
+            className={cn("group flex items-center rounded-md hover:bg-accent", unifiedView === kind && "bg-accent font-medium")}
           >
-            <Icon className="size-4 shrink-0 text-muted-foreground" />
-            <span className="flex-1 truncate">{label}</span>
-            {kind === "inbox" && unifiedInboxUnread > 0 && (
-              <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                {unifiedInboxUnread}
-              </Badge>
+            <button
+              onClick={() => onSelectUnified(kind)}
+              title={`${label} of all accounts`}
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm"
+            >
+              <Icon className="size-4 shrink-0 text-muted-foreground" />
+              <span className="flex-1 truncate">{label}</span>
+              {kind === "inbox" && unifiedInboxUnread > 0 && (
+                <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                  {unifiedInboxUnread}
+                </Badge>
+              )}
+            </button>
+            {kind === "inbox" && (
+              // While any account syncs, the spinner stays visible (with the count as its tooltip); the wrapper carries the
+              // title because a disabled button gets no hover events.
+              <span
+                title={syncingAccounts > 0 ? `Syncing ${syncingAccounts} account${syncingAccounts === 1 ? "" : "s"}…` : undefined}
+                className={cn("mr-1 shrink-0", syncingAccounts > 0 && "cursor-progress")}
+              >
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn("size-6", syncingAccounts > 0 ? "pointer-events-none opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100")}
+                  disabled={syncingAccounts > 0}
+                  title={syncingAccounts > 0 ? undefined : "Sync the Inboxes of all accounts"}
+                  onClick={onSyncAllInboxes}
+                >
+                  {syncingAccounts > 0 ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+                </Button>
+              </span>
             )}
-          </button>
+          </div>
         ))}
       </div>
 

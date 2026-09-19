@@ -282,6 +282,12 @@ export function AppShell() {
     return () => clearInterval(timer);
   }, [syncIntervalMinutes, startSync]);
 
+  // The combined Inbox's refresh button: sync the Inbox of every account at once (disabled accounts can't be synced; an
+  // account that is already syncing is left alone by startSync). Only the Inboxes — "Sync now" on an account does all its folders.
+  function syncAllInboxes() {
+    for (const account of accounts) if (!account.disabled) startSync(account.email, { folder: "INBOX" });
+  }
+
   async function saveSettings(patch: SettingsPatch) {
     if (!token) return;
     const includeChanged = (settings.combinedInboxIncludesFolders === true) !== patch.combinedInboxIncludesFolders;
@@ -898,6 +904,8 @@ export function AppShell() {
                 onSync={email => startSync(email)}
                 unifiedView={unifiedView}
                 onSelectUnified={selectUnified}
+                onSyncAllInboxes={syncAllInboxes}
+                syncingAccounts={Object.values(syncJobs).filter(job => job.status === "pending" || job.status === "running").length}
                 onCollapse={() => setSidebarCollapsed(true)}
                 sharedFolders={{
                   accountEmail: selectedAccountEmail,
