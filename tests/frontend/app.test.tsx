@@ -1606,7 +1606,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
       expect(await screen.findByText("Alice Anderson")).toBeTruthy();
       expect(screen.getByText("Lunch on Friday?")).toBeTruthy();
-      expect(screen.getByText(/Are you free on Friday for lunch/)).toBeTruthy();
+      const snippet = screen.getByText(/Are you free on Friday for lunch/);
+      // The preview reads as normal text, not sonner's muted description grey.
+      expect(snippet.closest(".text-foreground")).toBeTruthy();
       expect(screen.getByText(/To: me@example.com/).textContent).toContain("Cc: Bob");
       expect(newMailRequests.at(-1)).toBe("100"); // asked for everything after the starting point
       expect(played).toHaveLength(1);

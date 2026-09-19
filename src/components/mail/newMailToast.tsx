@@ -22,7 +22,7 @@ export function showNewMailToast(result: NewMailResult, handlers: NewMailHandler
   const single = result.total === 1 ? result.messages[0] : undefined;
   if (!single) {
     toast(newMailsTitle(result.total), {
-      description: `From ${sendersSummary(result)}`,
+      description: <div className="text-foreground">From {sendersSummary(result)}</div>,
       duration: TOAST_MS,
       action: { label: "Show inbox", onClick: handlers.openInbox },
     });
@@ -32,10 +32,11 @@ export function showNewMailToast(result: NewMailResult, handlers: NewMailHandler
   const details = [formatFullDate(single.date), recipients("To", single.to), recipients("Cc", single.cc)].filter(Boolean).join(" · ");
   toast(senderLabel(single.from), {
     description: (
-      <div className="space-y-1">
-        <div className="font-medium text-foreground">{single.subject || "(no subject)"}</div>
+      // sonner shows a toast's description in a muted grey; the mail's text should read as normal text.
+      <div className="space-y-1 text-foreground">
+        <div className="font-medium">{single.subject || "(no subject)"}</div>
         {single.snippet && <div className="line-clamp-3 text-xs">{single.snippet}</div>}
-        <div className="text-[11px] opacity-80">{details}</div>
+        <div className="text-[11px]">{details}</div>
       </div>
     ),
     duration: TOAST_MS,
