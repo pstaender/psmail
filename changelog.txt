@@ -7,6 +7,25 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-19 - Stored folders when the server is unreachable (9667ebe)
+--------------------------------------------------------------------
+If an account's IMAP server can't be reached (or is throttling us, like Gmail's "Account exceeded command or
+bandwidth limits"), the folder list no longer turns into an error: the folders known locally are listed
+anyway, so mail that was already downloaded can still be read.
+- Which folders: the remembered folder structure from the last successful listing, plus every folder that
+  holds stored mail (from the message counts); with neither cache the latter alone, with a guessed special
+  use (Sent, Drafts, Trash) for the icons. It applies both to a plain request and to the background live
+  refresh (which keeps the cached tree).
+- Says why: the response has x-folders-source: local and the reason in x-folders-warning; the sidebar shows
+  "Server not reachable - showing the stored folders." under the account, the reason on hover, and the note
+  goes away as soon as a listing succeeds.
+- Only when nothing at all is stored (a new account that never synced) it is still an error (502 with the
+  reason).
+- Checked against the real Gmail account: 20 folders with their stored counts instead of the error.
+- Tests: the route (cache + failing live read, no cache with stored mail, nothing stored) and the tree note
+  (shown with a warning, absent otherwise).
+
+
 2026-09-19 - Gmail folder list that never answered (7dd7bfa)
 -----------------------------------------------------------
 Diagnosis (done against the real Gmail account, with a separate diagnostic server on another port; only
