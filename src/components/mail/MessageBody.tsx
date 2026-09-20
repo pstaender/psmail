@@ -150,8 +150,8 @@ export function MessageBody({
         )}
         {hasSummaryTab && (
           <TabsTrigger value="summary">
-            {/* The sparkles mark the AI feature while there is nothing yet; a summary that exists needs no icon. */}
-            {!email.aiSummary && <Sparkles className="size-3.5" />} Summary
+            {/* The sparkles show that a summary exists; without one the tab is plain text. */}
+            {email.aiSummary && <Sparkles className="size-3.5" />} Summary
           </TabsTrigger>
         )}
       </TabsList>

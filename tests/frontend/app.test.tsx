@@ -2998,7 +2998,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(screen.queryByRole("tab", { name: "Summary" })).toBeNull();
     });
 
-    test("Summary is an extra tab after HTML, with the AI icon; it is offered only with a Summarize skill (or an existing summary)", async () => {
+    test("Summary is an extra tab after HTML; it is offered only with a Summarize skill (or an existing summary)", async () => {
       installMockFetch();
       await login();
       await userEvent.click(await screen.findByText("Hello there"));
@@ -3015,7 +3015,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       const names = screen.getAllByRole("tab").map(t => t.textContent!.trim());
       expect(names.at(-1)).toBe("Summary"); // the last one
       expect(names.indexOf("HTML")).toBeLessThan(names.indexOf("Summary"));
-      expect(tab.querySelector("svg")).toBeTruthy(); // the sparkles icon marks it as AI
+      expect(tab.querySelector("svg")).toBeNull(); // no summary yet: no sparkles (they show once there is one)
     });
 
     test("the Summary tab offers to summarize; the result (with the categories) shows in the tab, which opens by itself", async () => {
@@ -3107,17 +3107,17 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(await screen.findAllByRole("menuitem")).toHaveLength(1);
     });
 
-    test("the Summary tab has the sparkles icon only while there is no summary", async () => {
+    test("the Summary tab has the sparkles icon only once a summary exists", async () => {
       installMockFetch({ aiSkillCategories: ["summarize"] });
       await login();
       await userEvent.click(await screen.findByText("Hello there"));
       const tab = await screen.findByRole("tab", { name: "Summary" });
-      expect(tab.querySelector("svg.lucide-sparkles")).toBeTruthy();
+      expect(tab.querySelector("svg")).toBeNull();
 
-      await userEvent.click(await screen.findByRole("tab", { name: "Summary" }));
+      await userEvent.click(tab);
       await userEvent.click(await screen.findByRole("button", { name: "Summarize with AI" }));
       await screen.findByText(/Alice says hello/);
-      expect(screen.getByRole("tab", { name: "Summary" }).querySelector("svg")).toBeNull();
+      expect(screen.getByRole("tab", { name: "Summary" }).querySelector("svg.lucide-sparkles")).toBeTruthy();
     });
 
     test("in the Summary tab it sits between the categories and the Summarize again button", async () => {
