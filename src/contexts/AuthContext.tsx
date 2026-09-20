@@ -58,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     if (session) api.logout(session.token).catch(() => {});
     localStorage.removeItem(STORAGE_KEY);
+    window.history.replaceState(null, "", "/"); // the next sign-in shouldn't land on this profile's deep link
     setSession(null);
   }, [session]);
 

@@ -18,6 +18,7 @@ import { AccountTree } from "@/components/sidebar/AccountTree";
 import { SettingsDialog, type SettingsPatch } from "@/components/layout/SettingsDialog";
 import { showNewMailToast } from "@/components/mail/newMailToast";
 import { hasFinePointer } from "@/lib/pointer";
+import { buildPath, parsePath } from "@/lib/routes";
 import type { AiSkillRecord } from "../../server/models/ai";
 import { DEFAULT_NOTIFICATION_SOUND, playNotificationSound, showBrowserNotification, type NewMailPreview } from "@/lib/notifications";
 import { EditAccountDialog } from "@/components/sidebar/EditAccountDialog";
@@ -76,7 +77,9 @@ export function AppShell() {
   const { token, username, logout } = useAuth();
   const { accounts, loading: accountsLoading, refresh: refreshAccounts } = useAccounts();
 
-  const [selectedAccountEmail, setSelectedAccountEmail] = useState<string | null>(null);
+  // Deep link: the URL the app was opened on decides where it starts (see lib/routes.ts).
+  const [initialRoute] = useState(() => parsePath(window.location.pathname));
+  const [selectedAccountEmail, setSelectedAccountEmail] = useState<string | null>(initialRoute.accountEmail);
   const selectedAccount = accounts.find(a => a.email === selectedAccountEmail) ?? null;
   // A disabled account is frozen (the server refuses every change): the UI doesn't even try.
   const isDisabledAccount = (email: string | null) => !!accounts.find(a => a.email === email)?.disabled;
@@ -85,8 +88,8 @@ export function AppShell() {
     toast.error(`Account "${email}" is disabled — enable it in its account settings to change it.`);
     return true;
   }
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
-  const [selectedEmailId, setSelectedEmailId] = useState<number | null>(null);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(initialRoute.folder);
+  const [selectedEmailId, setSelectedEmailId] = useState<number | null>(initialRoute.emailId);
   // Checked via Cmd/Ctrl+click, for bulk actions — independent of selectedEmailId (the reading pane).
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   // The reference point a Shift+click range is measured from — the last plain- or Cmd/Ctrl-clicked message.
@@ -171,7 +174,7 @@ export function AppShell() {
   // A cross-account mailbox (all Inboxes / all Sents) shown instead of one account's folder. The app
   // opens on the combined Inbox; picking a real folder in the sidebar leaves it, and a running search
   // takes precedence over it.
-  const [unifiedView, setUnifiedView] = useState<UnifiedKind | null>("inbox");
+  const [unifiedView, setUnifiedView] = useState<UnifiedKind | null>(initialRoute.unified);
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
   const {
@@ -196,6 +199,50 @@ export function AppShell() {
     240,
     640
   );
+
+  // The address bar follows the view: a folder, or a message in it, gets its own URL (a message opened from the
+  // combined lists or a search counts as being in its folder). Moving pushes a history entry; the first sync only
+  // normalizes the URL the app was opened on, and Back/Forward apply the URL they land on to the state again.
+  const urlSynced = useRef(false);
+  useEffect(() => {
+    const desired = buildPath({ unified: unifiedView, accountEmail: selectedAccountEmail, folder: selectedFolder, emailId: selectedEmailId });
+    const openInFolder = selectedEmailId !== null || unifiedView === null;
+    const path = openInFolder ? desired : buildPath({ unified: unifiedView, accountEmail: null, folder: null, emailId: null });
+    if (path !== window.location.pathname) {
+      if (urlSynced.current) window.history.pushState(null, "", path);
+      else window.history.replaceState(null, "", path);
+    }
+    urlSynced.current = true;
+  }, [unifiedView, selectedAccountEmail, selectedFolder, selectedEmailId]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const route = parsePath(window.location.pathname);
+      setUnifiedView(route.unified);
+      if (route.accountEmail) {
+        setSelectedAccountEmail(route.accountEmail);
+        setSelectedFolder(route.folder);
+      }
+      setSelectedEmailId(route.emailId);
+      setSearchQuery("");
+      setCursorId(null);
+      setSelectedIds(new Set());
+      setSelectionAnchorId(null);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  // A link to an account that isn't (or is no longer) yours falls back to the combined Inbox.
+  useEffect(() => {
+    if (accountsLoading || unifiedView !== null || !selectedAccountEmail) return;
+    if (accounts.some(a => a.email === selectedAccountEmail)) return;
+    toast.error(`Account "${selectedAccountEmail}" was not found.`);
+    setUnifiedView("inbox");
+    setSelectedAccountEmail(null);
+    setSelectedFolder(null);
+    setSelectedEmailId(null);
+  }, [accountsLoading, accounts, unifiedView, selectedAccountEmail]);
 
   useEffect(() => {
     if (!selectedAccountEmail && accounts.length > 0) {

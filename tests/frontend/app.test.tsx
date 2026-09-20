@@ -504,12 +504,71 @@ function installMockFetch(
 describe("frontend smoke test (headless render, mocked backend)", () => {
   beforeEach(() => {
     localStorage.clear();
+    window.history.replaceState(null, "", "/");
     installMockFetch();
   });
 
   afterEach(() => {
     cleanup();
     global.fetch = originalFetch;
+  });
+
+  describe("deep links (URL paths)", () => {
+    async function signIn() {
+      await userEvent.click(await screen.findByText("default"));
+    }
+
+    test("the app starts on the combined Inbox at /, and picking a folder and a message moves the URL", async () => {
+      render(<App />);
+      await signIn();
+      await openAccountInbox();
+      expect(window.location.pathname).toBe("/a/me@example.com/inbox/");
+
+      await userEvent.click(await screen.findByText("Hello there"));
+      expect(window.location.pathname).toBe("/a/me@example.com/inbox/10");
+    });
+
+    test("opening a message's URL shows that message in its folder", async () => {
+      window.history.replaceState(null, "", "/a/me@example.com/inbox/11");
+      render(<App />);
+      await signIn();
+
+      expect((await screen.findAllByText("Second message")).length).toBeGreaterThan(1); // list row + reading pane
+      expect(window.location.pathname).toBe("/a/me@example.com/inbox/11");
+      expect(screen.getAllByText("INBOX").length).toBeGreaterThan(0);
+    });
+
+    test("Back returns to the previous view", async () => {
+      render(<App />);
+      await signIn();
+      await openAccountInbox();
+      await userEvent.click(await screen.findByText("Hello there"));
+      expect(window.location.pathname).toBe("/a/me@example.com/inbox/10");
+
+      // happy-dom's history.back() would try to navigate the test window, so do what the browser does: the URL changes, popstate fires.
+      window.history.replaceState(null, "", "/a/me@example.com/inbox/");
+      act(() => {
+        window.dispatchEvent(new Event("popstate"));
+      });
+      await waitFor(() => expect(window.location.pathname).toBe("/a/me@example.com/inbox/"));
+      await waitFor(() => expect(screen.queryByText("Reply")).toBeNull());
+    });
+
+    test("a link to an account that doesn't exist falls back to the combined Inbox", async () => {
+      window.history.replaceState(null, "", "/a/nobody@example.com/inbox/");
+      render(<App />);
+      await signIn();
+
+      expect((await screen.findAllByText(/nobody@example.com" was not found/)).length).toBeGreaterThan(0);
+      await waitFor(() => expect(window.location.pathname).toBe("/"));
+    });
+
+    test("an unrecognized path is normalized to /", async () => {
+      window.history.replaceState(null, "", "/whatever");
+      render(<App />);
+      await signIn();
+      await waitFor(() => expect(window.location.pathname).toBe("/"));
+    });
   });
 
   test("renders login, signs in, and opens a message end to end", async () => {
