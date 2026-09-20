@@ -122,7 +122,7 @@ export function MessageBody({
     hadTranslation.current = !!email.translatedText;
     hadSummary.current = !!email.aiSummary;
   }, [email.id, email.translatedText, email.aiSummary]);
-  const hasSummaryTab = !!email.aiSummary || (email.taxonomyList ?? []).length > 0 || summarizeSkills.length > 0;
+  const hasSummaryTab = !!email.aiSummary || (email.taxonomyList ?? []).length > 0 || (email.calendarEvents ?? []).length > 0 || summarizeSkills.length > 0;
 
   if (!hasHtml && !hasPlain) {
     return <p className="p-4 text-sm text-muted-foreground">This message has no readable body.</p>;
@@ -150,7 +150,8 @@ export function MessageBody({
         )}
         {hasSummaryTab && (
           <TabsTrigger value="summary">
-            <Sparkles className="size-3.5" /> Summary
+            {/* The sparkles mark the AI feature while there is nothing yet; a summary that exists needs no icon. */}
+            {!email.aiSummary && <Sparkles className="size-3.5" />} Summary
           </TabsTrigger>
         )}
       </TabsList>

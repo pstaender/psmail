@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { App } from "../../src/App";
 import { MessageHeader } from "../../src/components/mail/MessageHeader";
-import { EventList } from "../../src/components/mail/EventList";
+import { EventsButton } from "../../src/components/mail/EventsButton";
 import { MessageList } from "../../src/components/mail/MessageList";
 import { MessageToolbar } from "../../src/components/mail/MessageToolbar";
 import { installFakeAuthenticator, type FakeAuthenticator } from "../helpers/fakeAuthenticator";
@@ -3041,57 +3041,39 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       URL.createObjectURL = realCreate;
     });
 
-    test("nothing is shown for a message without events", async () => {
-      render(<EventList events={[]} />);
-      expect(screen.queryByLabelText("Dates and events")).toBeNull();
+    test("nothing is shown for a message without events", () => {
+      render(<EventsButton events={[]} />);
+      expect(screen.queryByRole("button", { name: /found/i })).toBeNull();
     });
 
-    test("it is collapsed to a line with the number found; a click opens it (and pins it) and another closes it", async () => {
-      render(<EventList events={[TEST_ICS_DEADLINE, TEST_ICS_CALL]} />);
-      const trigger = screen.getByRole("button", { name: /2 dates and events/ });
-      expect(trigger.getAttribute("aria-expanded")).toBe("false");
-      expect(screen.queryByText("Submit documents")).toBeNull();
-      expect(screen.queryByTitle("Download all as one .ics file")).toBeNull();
-
-      await userEvent.click(trigger);
-      expect(await screen.findByText("Submit documents")).toBeTruthy();
-      fireEvent.mouseLeave(screen.getByLabelText("Dates and events")); // pinned by the click: leaving doesn't close it
-      expect(screen.getByText("Submit documents")).toBeTruthy();
-
-      await userEvent.click(trigger); // the pointer is still over it, and it closes anyway
-      await waitFor(() => expect(screen.queryByText("Submit documents")).toBeNull());
-      expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    });
-
-    test("hovering opens it, and moving away closes it again", async () => {
-      render(<EventList events={[TEST_ICS_DEADLINE]} />);
-      const box = screen.getByLabelText("Dates and events");
-      expect(screen.getByRole("button", { name: /1 date or event/ })).toBeTruthy(); // singular
-      fireEvent.mouseEnter(box);
-      expect(await screen.findByText("Submit documents")).toBeTruthy();
-      fireEvent.mouseLeave(box);
-      await waitFor(() => expect(screen.queryByText("Submit documents")).toBeNull());
+    test("the button says how many were found — dates, or one date", () => {
+      const { unmount } = render(<EventsButton events={[TEST_ICS_DEADLINE, TEST_ICS_CALL]} />);
+      expect(screen.getByRole("button", { name: /^Found 2 dates$/ }).querySelector("svg.lucide-calendar-plus")).toBeTruthy();
+      unmount();
+      render(<EventsButton events={[TEST_ICS_DEADLINE]} />);
+      expect(screen.getByRole("button", { name: /^Found 1 date$/ })).toBeTruthy();
     });
 
     test("each event is listed with its title, date and place, and downloads as its own .ics", async () => {
-      render(<EventList events={[TEST_ICS_DEADLINE, TEST_ICS_CALL]} />);
-      await userEvent.click(screen.getByRole("button", { name: /dates and events/ }));
-      const list = screen.getByLabelText("Dates and events");
-      expect(within(list).getByText("Submit documents")).toBeTruthy();
-      expect(within(list).getByText("Call with Alice, Bob")).toBeTruthy(); // the escaped comma reads normally
-      expect(within(list).getByText(/Phone; Berlin/)).toBeTruthy();
-      expect(list.textContent).toContain("2026"); // the dates
+      render(<EventsButton events={[TEST_ICS_DEADLINE, TEST_ICS_CALL]} />);
+      expect(screen.queryByText("Submit documents")).toBeNull(); // closed until asked
+      await userEvent.click(screen.getByRole("button", { name: /found 2 dates/i }));
 
-      await userEvent.click(within(list).getByText("Call with Alice, Bob"));
+      const items = await screen.findAllByRole("menuitem");
+      expect(items.map(item => item.textContent)).toEqual([expect.stringContaining("Submit documents"), expect.stringContaining("Call with Alice, Bob"), expect.stringContaining("All 2 in one file")]);
+      expect(items[1]!.textContent).toContain("Phone; Berlin");
+      expect(items[1]!.textContent).toContain("2026");
+
+      await userEvent.click(items[1]!);
       await waitFor(() => expect(saved).toHaveLength(1));
       expect(saved[0]!.name).toBe("Call with Alice, Bob.ics");
       expect(await saved[0]!.text).toBe(TEST_ICS_CALL);
     });
 
-    test("with several, one button downloads all of them in a single .ics", async () => {
-      render(<EventList events={[TEST_ICS_DEADLINE, TEST_ICS_CALL]} />);
-      await userEvent.click(screen.getByRole("button", { name: /dates and events/ }));
-      await userEvent.click(screen.getByTitle("Download all as one .ics file"));
+    test("with several, the last entry downloads all of them in a single .ics", async () => {
+      render(<EventsButton events={[TEST_ICS_DEADLINE, TEST_ICS_CALL]} />);
+      await userEvent.click(screen.getByRole("button", { name: /found 2 dates/i }));
+      await userEvent.click(await screen.findByRole("menuitem", { name: /all 2 in one file/i }));
       await waitFor(() => expect(saved).toHaveLength(1));
       const text = await saved[0]!.text;
       expect(saved[0]!.name).toBe("events.ics");
@@ -3102,24 +3084,37 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(text.trimEnd().endsWith("END:VCALENDAR")).toBe(true);
     });
 
-    test("a single event has no 'All' button", async () => {
-      render(<EventList events={[TEST_ICS_DEADLINE]} />);
-      await userEvent.click(screen.getByRole("button", { name: /date or event/ }));
-      expect(screen.queryByTitle("Download all as one .ics file")).toBeNull();
+    test("a single event has no 'all in one file' entry", async () => {
+      render(<EventsButton events={[TEST_ICS_DEADLINE]} />);
+      await userEvent.click(screen.getByRole("button", { name: /found 1 date/i }));
+      expect(await screen.findAllByRole("menuitem")).toHaveLength(1);
     });
 
-    test("summarizing with an events skill shows the found events below the attachments", async () => {
-      installMockFetch({ aiSkillCategories: ["summarize", "events"] });
+    test("the Summary tab has the sparkles icon only while there is no summary", async () => {
+      installMockFetch({ aiSkillCategories: ["summarize"] });
+      await login();
+      await userEvent.click(await screen.findByText("Hello there"));
+      const tab = await screen.findByRole("tab", { name: "Summary" });
+      expect(tab.querySelector("svg.lucide-sparkles")).toBeTruthy();
+
+      await userEvent.click(await screen.findByRole("button", { name: "Summarize this message with AI" }));
+      await screen.findByText(/Alice says hello/);
+      expect(screen.getByRole("tab", { name: "Summary" }).querySelector("svg")).toBeNull();
+    });
+
+    test("in the Summary tab it sits between the categories and the Summarize again button", async () => {
+      installMockFetch({ aiSkillCategories: ["summarize", "categorize", "events"] });
       await login();
       await userEvent.click(await screen.findByText("Hello there"));
       await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
-      expect(screen.queryByLabelText("Dates and events")).toBeNull();
+      expect(screen.queryByRole("button", { name: /found/i })).toBeNull();
 
       await userEvent.click(await screen.findByRole("button", { name: "Summarize this message with AI" }));
-      const list = await screen.findByLabelText("Dates and events");
-      expect(within(list).queryByText("Submit documents")).toBeNull(); // collapsed: just the count
-      await userEvent.click(within(list).getByRole("button", { name: /2 dates and events/ }));
-      expect(await within(list).findByText("Submit documents")).toBeTruthy();
+      const found = await screen.findByRole("button", { name: /found 2 dates/i });
+      const categories = screen.getByLabelText("Categories");
+      const again = screen.getByRole("button", { name: "Summarize again" });
+      expect(categories.compareDocumentPosition(found) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(found.compareDocumentPosition(again) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
   });
 

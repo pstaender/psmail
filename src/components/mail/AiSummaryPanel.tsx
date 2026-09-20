@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import type { EmailRecord } from "../../server/types";
 import type { AiSkillRecord } from "../../server/models/ai";
 import { AiSkillButton } from "./AiSkillButton";
+import { EventsButton } from "./EventsButton";
 import { RenderPureMarkdown } from "./RenderPureMarkdown";
 
 /**
@@ -42,14 +43,18 @@ export function AiSummaryPanel({
         </ul>
       )}
 
-      <AiSkillButton
-        skills={skills}
-        busy={busy}
-        icon={<Sparkles className="size-3.5" />}
-        label={email.aiSummary ? "Summarize again" : "Summarize with AI"}
-        variant="outline"
-        onRun={onSummarize}
-      />
+      {/* Between the categories and the button to summarize again: what was found in the message. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <EventsButton events={email.calendarEvents ?? []} />
+        <AiSkillButton
+          skills={skills}
+          busy={busy}
+          icon={<Sparkles className="size-3.5" />}
+          label={email.aiSummary ? "Summarize again" : "Summarize with AI"}
+          variant="outline"
+          onRun={onSummarize}
+        />
+      </div>
     </div>
   );
 }
