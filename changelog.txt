@@ -7,6 +7,21 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Lists show their hyphens (AI summaries and Text/MD tabs) (3270cbc)
+--------------------------------------------------------------------------------
+Why the hyphens of an AI summary were missing: the summary is markdown ("- item" lines) and is rendered as HTML lists, but
+Tailwind's reset sets list-style: none on every ul/ol, and the stylesheet only tried to colour the (never drawn) ::marker.
+So the items showed as bare lines.
+- RenderPureMarkdown now writes the marker itself as a de-emphasized mark, like it already does for #, **, > and links:
+  "- ", "* " or "+ " as the source had it, "1. "/"1) " with the item's own number. So a summary reads as
+  "- Frist ... rueckt naeher" with the hyphen in the muted colour. This also applies wherever else that component renders
+  markdown: the Text and MD tabs, the translation.
+- CSS: no browser bullets, wrapped lines hang under the item's text (a small text-indent), nested lists step in.
+- A list inside a quote gets the "> " in front, like the other quoted lines.
+- Tests: the summary from the report, marker kinds and numbers, nesting with bold, list in a quote.
+  Not looked at in a browser (the hanging indent especially).
+
+
 2026-09-20 - verboseAiApiCalls: AI API calls on the console (bfe5398)
 --------------------------------------------------------------------
 With "verboseAiApiCalls": true in settings.json every AI API call is written to the server's console (the terminal running
