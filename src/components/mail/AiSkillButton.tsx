@@ -9,7 +9,7 @@ import type { AiSkillRecord } from "../../server/models/ai";
  * from. Renders nothing without a skill: no skill, no button.
  */
 export function AiSkillButton({
-  skills,
+  skills = [],
   busy,
   icon,
   label,
@@ -18,7 +18,7 @@ export function AiSkillButton({
   disabled = false,
   onRun,
 }: {
-  skills: AiSkillRecord[];
+  skills?: AiSkillRecord[];
   busy: boolean;
   icon: React.ReactNode;
   label: string;

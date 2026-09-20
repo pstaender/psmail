@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { App } from "../../src/App";
 import { MessageHeader } from "../../src/components/mail/MessageHeader";
+import { MessageToolbar } from "../../src/components/mail/MessageToolbar";
 import { installFakeAuthenticator, type FakeAuthenticator } from "../helpers/fakeAuthenticator";
 import type { Account } from "../../src/server/types";
 
@@ -200,6 +201,8 @@ function installMockFetch(
     inboxUnread?: number;
     /** The sync job never finishes (GET job stays running at 12/340) — to look at the in-progress UI. */
     syncStaysRunning?: boolean;
+    /** Replaces what GET /api/ai/skills answers (to check that an odd answer doesn't break the app). */
+    aiSkillsResponse?: unknown;
     /** More accounts next to me@example.com (for tests that sync several at once): e.g. { email: "you@example.com" }. */
     extraAccounts?: Partial<Account>[];
     /** What GET .../folders?live=1 (the slow IMAP read) answers: a folder list, or "fail" for a 502. Default: the same as the cached list. */
@@ -381,7 +384,7 @@ function installMockFetch(
         return new Response(null, { status: 204 });
       }
       if (/^\/api\/ai\/apis\/\d+\/test$/.test(path)) return jsonResponse({ ok: true, answer: "OK" });
-      if (path === "/api/ai/skills" && method === "GET") return jsonResponse(currentAiSkills);
+      if (path === "/api/ai/skills" && method === "GET") return jsonResponse(opts.aiSkillsResponse !== undefined ? opts.aiSkillsResponse : currentAiSkills);
       if (path === "/api/ai/skills" && method === "POST") {
         const record = { id: currentAiSkills.length + 10, createdAt: NOW, updatedAt: NOW, ...body };
         currentAiSkills = [...currentAiSkills, record];
@@ -3231,5 +3234,41 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect((await screen.findAllByText(/Passkey unlock was removed from this device/)).length).toBeGreaterThan(0);
       expect(localStorage.getItem(vaultKey)).toBeNull();
     });
+  });
+
+  describe("AI is optional", () => {
+    test("the reading-pane toolbar renders without any AI props at all", () => {
+      const noop = () => {};
+      render(
+        <MessageToolbar
+          email={EMAIL as never}
+          folders={[]}
+          onReply={noop}
+          onReplyAll={noop}
+          onForward={noop}
+          onDelete={noop}
+          onMove={noop}
+          onToggleRead={noop}
+          onEditDraft={noop}
+          accountDisabled={false}
+        />
+      );
+      expect(screen.getByRole("button", { name: /^reply$/i })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /translate/i })).toBeNull();
+    });
+
+    for (const [label, response] of [["null", null], ["an object", { error: "boom" }], ["a string", "<html>"]] as const) {
+      test(`an odd skills answer (${label}) just means no skills: messages open, no AI buttons`, async () => {
+        installMockFetch({ aiSkillsResponse: response });
+        render(<App />);
+        await userEvent.click(await screen.findByText("default"));
+        await openAccountInbox();
+        await userEvent.click(await screen.findByText("Hello there"));
+        await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+        expect(screen.getByRole("button", { name: /^reply$/i })).toBeTruthy();
+        expect(screen.queryByRole("tab", { name: "Summary" })).toBeNull();
+        expect(screen.queryByRole("button", { name: /translate/i })).toBeNull();
+      });
+    }
   });
 });

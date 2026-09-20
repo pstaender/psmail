@@ -25,10 +25,10 @@ export function MessageToolbar({
   onToggleRead,
   onEditDraft,
   accountDisabled,
-  aiSkills,
-  aiBusy,
-  onSummarize,
-  onTranslate,
+  aiSkills = [],
+  aiBusy = null,
+  onSummarize = () => {},
+  onTranslate = () => {},
 }: {
   email: EmailRecord;
   folders: FolderInfo[];
@@ -41,11 +41,11 @@ export function MessageToolbar({
   onEditDraft: () => void;
   /** The account is disabled (frozen): everything that would change it — replying, forwarding, moving, deleting, marking, AI results — is off. Reading stays. */
   accountDisabled: boolean;
-  /** The user's AI skills: Summarize/Translate are only shown for categories that have one (set up in Settings → AI), and offer a choice when there are several. */
-  aiSkills: AiSkillRecord[];
-  aiBusy: "summarize" | "translate" | null;
-  onSummarize: (skillId: number) => void;
-  onTranslate: (skillId: number) => void;
+  /** The user's AI skills — optional: with none (nobody has to set AI up) there are simply no AI buttons. Translate is only shown for a category that has a skill, and offers a choice when there are several. */
+  aiSkills?: AiSkillRecord[];
+  aiBusy?: "summarize" | "translate" | null;
+  onSummarize?: (skillId: number) => void;
+  onTranslate?: (skillId: number) => void;
 }) {
   const translators = aiSkills.filter(skill => skill.category === "translate");
   const frozen = accountDisabled ? "This account is disabled" : undefined;

@@ -43,8 +43,8 @@ export function ComposeDialog({
   onOpenChange,
   initial,
   onSent,
-  aiSkills,
-  aiLanguage,
+  aiSkills = [],
+  aiLanguage = "English",
 }: {
   accountEmail: string;
   /** Used as the From display name on outgoing mail, instead of the bare address. */
@@ -57,9 +57,9 @@ export function ComposeDialog({
   /** `sent` is true when the draft was actually sent, false when it was just saved. */
   onSent: (sent: boolean) => void;
   /** The user's AI skills — the Refine button and its items exist only for those, one entry per skill when a category has several. */
-  aiSkills: AiSkillRecord[];
+  aiSkills?: AiSkillRecord[];
   /** The language Translate starts with (the user's setting). */
-  aiLanguage: string;
+  aiLanguage?: string;
 }) {
   const { token } = useAuth();
   const editorRef = useRef<MarkdownEditorHandle>(null);

@@ -20,10 +20,10 @@ export function MessageView({
   onToggleRead,
   onEditDraft,
   accountDisabled,
-  aiSkills,
-  aiBusy,
-  onSummarize,
-  onTranslate,
+  aiSkills = [],
+  aiBusy = null,
+  onSummarize = () => {},
+  onTranslate = () => {},
 }: {
   accountEmail: string;
   email: EmailRecord;
@@ -39,10 +39,11 @@ export function MessageView({
   onEditDraft: () => void;
   /** The message's account is disabled: read-only for good — every button that would change something is off. */
   accountDisabled: boolean;
-  aiSkills: AiSkillRecord[];
-  aiBusy: "summarize" | "translate" | null;
-  onSummarize: (skillId: number) => void;
-  onTranslate: (skillId: number) => void;
+  /** Optional: without AI skills there are no AI buttons or Summary tab. */
+  aiSkills?: AiSkillRecord[];
+  aiBusy?: "summarize" | "translate" | null;
+  onSummarize?: (skillId: number) => void;
+  onTranslate?: (skillId: number) => void;
 }) {
   return (
     <div className="flex h-full flex-col overflow-hidden">

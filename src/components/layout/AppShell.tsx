@@ -121,7 +121,8 @@ export function AppShell() {
   const [aiSkills, setAiSkills] = useState<AiSkillRecord[]>([]);
   const refreshAiSkills = useCallback(() => {
     if (!token) return;
-    api.listAiSkills(token).then(setAiSkills).catch(() => {});
+    // Whatever comes back, a list: AI is optional and a missing/odd answer just means "no skills".
+    api.listAiSkills(token).then(list => setAiSkills(Array.isArray(list) ? list : [])).catch(() => {});
   }, [token]);
   useEffect(() => {
     refreshAiSkills();
