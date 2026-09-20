@@ -7,6 +7,17 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Reading pane: Download button (a9ae44b)
+----------------------------------------------------
+The open message's toolbar has a Download button that saves the message as its .eml file (the same download as the bulk
+action). It sits in a group of its own, between separator lines, just before Move:
+Reply | Forward | (Translate) | Mark read | Download | Move | Delete.
+- It only reads, so it stays enabled on a disabled account (the other buttons are greyed out there).
+- Shares the download code with the bulk button (one helper: download, then a toast with the file name or the reason).
+- Tests: the button's place (separators either side, Move right after), saving under the server's name, and staying
+  enabled on a disabled account. The toolbar fixture test got the new prop.
+
+
 2026-09-20 - Accounts: exclude_from_auto_sync (fa9758d)
 -------------------------------------------------------
 New account option to keep an account out of the syncs that cover all accounts, because servers like Gmail throttle or
