@@ -7,6 +7,21 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - AI answers with typographic quotes are read (e97653e)
+------------------------------------------------------------------
+A model answered the categories as ["veranstaltung", "weiterleitung", ...] written with curly quotes, which is not JSON, so
+the strict parse failed and the loose fallback had to guess. Now the JSON array is read by one tolerant function
+(services/jsonAnswer.ts), used for the categories and for the events skill:
+- The text is tried AS WRITTEN first, so valid JSON is never touched (a curly quote inside a proper string stays as it is).
+- Only if that fails: typographic double quotes (curly, German low-high, guillemets, ...) become plain ones; then typographic
+  and plain single quotes too (['a', 'b']). The array is found inside prose or a code fence as before.
+- The loose fallback (labels split at commas/lines) also trims typographic quotes off the ends of a label now.
+- The suggested prompts for Categorize and Find dates and events now ask for plain straight double quotes. That is only
+  the suggestion for new skills - existing skills keep their prompt; the tolerant reading covers them.
+- Tests: the exact answer from the report, other quote styles, prose and code fences, valid JSON left alone, objects with
+  curly-quoted keys (events), garbage giving null.
+
+
 2026-09-20 - Summary tab: the sparkles icon means "a summary exists" (8bff5d2)
 -------------------------------------------------------------------------
 Reversed, as asked: the "Summary" tab now shows the sparkles icon only once the message has a summary (to indicate that it
