@@ -7,6 +7,12 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Summary tab: the sparkles icon means "a summary exists" (8bff5d2)
+-------------------------------------------------------------------------
+Reversed, as asked: the "Summary" tab now shows the sparkles icon only once the message has a summary (to indicate that it
+exists); without one the tab is plain "Summary" text. (The commit before had it the other way round.) Tests adjusted.
+
+
 2026-09-20 - Search: falls back to the message text (739cb7a)
 -----------------------------------------------------------
 When a search finds nothing in subjects and senders, it now also searches the plain text of the messages: each word must be
