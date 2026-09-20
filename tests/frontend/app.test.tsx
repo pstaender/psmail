@@ -2080,6 +2080,65 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     }
   });
 
+  describe("search options: full text search", () => {
+    const lastSearch = () => listRequests.filter(r => r.list === "search").at(-1)!.params;
+    async function openApp() {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+      await screen.findByText("Hello there");
+    }
+
+    test("the options button shows while the search box is in use, next to the close button, and not otherwise", async () => {
+      await openApp();
+      expect(screen.queryByRole("button", { name: "Search options" })).toBeNull();
+
+      const box = screen.getByPlaceholderText(/search all mail/i);
+      await userEvent.click(box);
+      expect(await screen.findByRole("button", { name: "Search options" })).toBeTruthy();
+
+      await userEvent.type(box, "second");
+      const options = screen.getByRole("button", { name: "Search options" });
+      const clear = screen.getByTitle("Clear search");
+      expect(options.compareDocumentPosition(clear) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // options left of the x
+
+      await userEvent.click(document.body);
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Search options" })).toBeNull());
+    });
+
+    test("the Full text search toggle re-runs the search with fulltext=1, and the choice is remembered", async () => {
+      await openApp();
+      const box = screen.getByPlaceholderText(/search all mail/i);
+      await userEvent.type(box, "second");
+      await waitFor(() => expect(listRequests.some(r => r.list === "search")).toBe(true));
+      expect(lastSearch().has("fulltext")).toBe(false);
+      expect(localStorage.getItem("psmail.fullTextSearch")).toBeNull();
+
+      await userEvent.click(screen.getByRole("button", { name: "Search options" }));
+      const toggle = await screen.findByRole("menuitemcheckbox", { name: "Full text search" });
+      expect(toggle.getAttribute("aria-checked")).toBe("false");
+      await userEvent.click(toggle);
+
+      await waitFor(() => expect(lastSearch().get("fulltext")).toBe("1"));
+      expect(lastSearch().get("q")).toBe("second");
+      expect(localStorage.getItem("psmail.fullTextSearch")).toBe("true");
+      expect(screen.getByRole("menuitemcheckbox", { name: "Full text search" }).getAttribute("aria-checked")).toBe("true"); // the menu stays open
+      expect(await screen.findByText('Search: "second" · full text')).toBeTruthy();
+
+      await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "Full text search" })); // and off again
+      await waitFor(() => expect(lastSearch().has("fulltext")).toBe(false));
+      expect(localStorage.getItem("psmail.fullTextSearch")).toBe("false");
+    });
+
+    test("a stored 'on' is used from the start", async () => {
+      localStorage.setItem("psmail.fullTextSearch", "true");
+      await openApp();
+      await userEvent.type(screen.getByPlaceholderText(/search all mail/i), "second");
+      await waitFor(() => expect(listRequests.some(r => r.list === "search")).toBe(true));
+      expect(lastSearch().get("fulltext")).toBe("1");
+    });
+  });
+
   test("hits found only in the message text are said to be, in the results header", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));

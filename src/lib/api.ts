@@ -302,8 +302,9 @@ export const api = {
     return request<SearchResult[]>("GET", `/api/unified/${kind}?${params}`, { token });
   },
   /** Searches across every account the user owns. See src/server/models/search.ts for query syntax. */
-  search: (token: string, query: string, opts: { limit?: number; offset?: number; after?: string; before?: string } = {}) => {
+  search: (token: string, query: string, opts: { limit?: number; offset?: number; after?: string; before?: string; fullText?: boolean } = {}) => {
     const params = new URLSearchParams({ q: query });
+    if (opts.fullText) params.set("fulltext", "1");
     if (opts.after) params.set("after", opts.after);
     if (opts.before) params.set("before", opts.before);
     if (opts.limit) params.set("limit", String(opts.limit));

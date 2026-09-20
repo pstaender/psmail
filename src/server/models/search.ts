@@ -220,6 +220,8 @@ function searchBodies(
 export interface SearchOptions extends DateBounds {
   limit?: number;
   offset?: number;
+  /** Always search the message text too, not only when subject and sender found nothing. */
+  fullText?: boolean;
 }
 
 /**
@@ -268,9 +270,19 @@ export function searchEmails(db: Database, userId: number, query: string, option
     if (results.length >= offset + limit) break;
   }
 
-  // Nothing matched subject or sender: look in the message text too.
-  if (results.length === 0 && generalTerms.length > 0) {
-    results.push(...searchBodies(db, userId, { generalTerms, generalRegexes, fromRegexes, favsOnly, window }, offset + limit));
+  if (generalTerms.length > 0) {
+    if (options.fullText) {
+      // Full text search: the message text is always part of it. Each term still has to be in the subject, the sender or
+      // the text, so the text pass finds everything the subject/sender pass did (and more): merge the two, newest first.
+      const inText = searchBodies(db, userId, { generalTerms, generalRegexes, fromRegexes, favsOnly, window }, offset + limit);
+      const byId = new Map<number, SearchResult>();
+      for (const result of [...inText, ...results]) byId.set(result.id, result); // a header match wins over "in the text"
+      results.length = 0;
+      results.push(...[...byId.values()].sort((a, b) => ((a.date ?? "") === (b.date ?? "") ? b.id - a.id : (a.date ?? "") < (b.date ?? "") ? 1 : -1)));
+    } else if (results.length === 0) {
+      // Nothing matched subject or sender: look in the message text too.
+      results.push(...searchBodies(db, userId, { generalTerms, generalRegexes, fromRegexes, favsOnly, window }, offset + limit));
+    }
   }
 
   const page = results.slice(offset, offset + limit);

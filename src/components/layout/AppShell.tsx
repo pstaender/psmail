@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, LogOut, Mail, MoreHorizontal, PanelLeftOpen, PenSquare, Search, Settings, X } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 import { DateFilterDialog } from "@/components/mail/DateFilterDialog";
 import { boundsOf, describeFilter, type DateFilter } from "@/lib/dateFilter";
 import {
@@ -182,6 +183,10 @@ export function AppShell() {
   // takes precedence over it.
   const [unifiedView, setUnifiedView] = useState<UnifiedKind | null>(initialRoute.unified);
   const [searchQuery, setSearchQuery] = useState("");
+  // Full text search: the message text is always searched too (otherwise only when subject and sender found nothing). Remembered.
+  const [fullTextSearch, setFullTextSearch] = useLocalStorageState("psmail.fullTextSearch", false);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [searchMenuOpen, setSearchMenuOpen] = useState(false);
   // Show only the messages of a day or period. It belongs to the list it was set on: another folder or mailbox starts without.
   const [dateFilter, setDateFilter] = useState<DateFilter | null>(null);
   const [dateFilterOpen, setDateFilterOpen] = useState(false);
@@ -198,7 +203,7 @@ export function AppShell() {
     refresh: refreshSearchResults,
     patchLocal: patchSearchResult,
     removeLocal: removeSearchResult,
-  } = useSearchResults(searchQuery, unifiedView, dateBounds);
+  } = useSearchResults(searchQuery, unifiedView, dateBounds, fullTextSearch);
   const isSearching = searchQuery.trim().length > 0;
   // The cross-account result list (search hits or a unified mailbox) replaces the folder's message list.
   const showingResults = isSearching || unifiedView !== null;
@@ -926,15 +931,43 @@ export function AppShell() {
           <span className="font-semibold">P.S.Mail</span>
         </div>
 
-        <div className="relative w-full max-w-md">
+        <div
+          className="relative w-full max-w-md"
+          onFocus={() => setSearchFocused(true)}
+          onBlur={e => setSearchFocused(e.currentTarget.contains(e.relatedTarget as Node | null))}
+        >
           <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             ref={searchInputRef}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder='Search all mail…'
-            className="h-8 pl-8 pr-8"
+            className="h-8 pl-8 pr-14"
           />
+          {/* Options of the search, there while the box is in use (it would only be in the way otherwise). */}
+          {(searchFocused || searchMenuOpen) && (
+            <DropdownMenu open={searchMenuOpen} onOpenChange={setSearchMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className={cn("absolute top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground", searchQuery ? "right-7" : "right-2")}
+                  title="Search options"
+                  aria-label="Search options"
+                >
+                  <MoreHorizontal className="size-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuCheckboxItem
+                  checked={fullTextSearch}
+                  onCheckedChange={setFullTextSearch}
+                  onSelect={e => e.preventDefault()}
+                  title="Also search the text of the messages, not only when subject and sender find nothing"
+                >
+                  Full text search
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           {searchQuery && (
             <button
               onClick={() => setSearchQuery("")}
@@ -1032,7 +1065,7 @@ export function AppShell() {
             <div className="flex items-center justify-between border-b px-3 py-2">
               <span className="truncate text-sm font-medium">
                 {isSearching
-                  ? `Search: "${searchQuery.trim()}"${searchResults.length > 0 && searchResults.every(r => r.matchedInBody) ? " · in message text" : ""}`
+                  ? `Search: "${searchQuery.trim()}"${fullTextSearch ? " · full text" : searchResults.length > 0 && searchResults.every(r => r.matchedInBody) ? " · in message text" : ""}`
                   : unifiedView
                     ? `${unifiedView === "inbox" ? "Inbox" : "Sent"} · all accounts`
                     : selectedFolder ?? "—"}

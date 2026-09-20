@@ -15,7 +15,7 @@ export function searchRoutes(db: Database) {
         const limit = Number(url.searchParams.get("limit") ?? 50);
         const offset = Number(url.searchParams.get("offset") ?? 0);
 
-        return json(searchEmails(db, session.userId, q, { limit, offset, ...readDateBounds(url.searchParams) }));
+        return json(searchEmails(db, session.userId, q, { limit, offset, fullText: url.searchParams.get("fulltext") === "1", ...readDateBounds(url.searchParams) }));
       }),
     },
   };

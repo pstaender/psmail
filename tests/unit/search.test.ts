@@ -386,3 +386,56 @@ describe("search: falling back to the message text", () => {
     expect(searchEmails(db, other.id, "shared")).toEqual([]);
   });
 });
+
+describe("search: full text (the message text is always searched)", () => {
+  async function box() {
+    const db = createTestDb();
+    const user = await createUser(db, "alice", "pw");
+    const key = deriveEncryptionKey("pw", generateSalt());
+    const account = createAccount(
+      db,
+      user.id,
+      { email: "a@x.com", imapHost: "h", imapPort: 993, imapSecure: true, imapUsername: "a", imapPassword: "x", smtpHost: "h", smtpPort: 465, smtpSecure: true, smtpUsername: "a", smtpPassword: "x" },
+      key
+    );
+    const mail = (subject: string, plainText: string | null, date: string) =>
+      createEmail(db, account.id, { folder: "INBOX", isDraft: false, subject, plainText, date, from: [{ name: "Sender", address: "s@y.com" }] });
+    return { db, user, mail };
+  }
+
+  test("without it the text is only searched when subject and sender found nothing; with it, always", async () => {
+    const { db, user, mail } = await box();
+    mail("Invoice May", "irrelevant", "2026-01-01T00:00:00.000Z");
+    mail("Reminder", "please pay the invoice today", "2026-01-02T00:00:00.000Z");
+
+    expect(searchEmails(db, user.id, "invoice").map(r => r.subject)).toEqual(["Invoice May"]);
+    expect(searchEmails(db, user.id, "invoice", { fullText: true }).map(r => r.subject)).toEqual(["Reminder", "Invoice May"]);
+  });
+
+  test("a message found by both is listed once, as a subject hit; only text hits are marked as such", async () => {
+    const { db, user, mail } = await box();
+    mail("Invoice", "the invoice text", "2026-01-01T00:00:00.000Z");
+    mail("Other", "an invoice too", "2026-01-02T00:00:00.000Z");
+
+    const results = searchEmails(db, user.id, "invoice", { fullText: true });
+    expect(results.map(r => [r.subject, r.matchedInBody])).toEqual([["Other", true], ["Invoice", undefined]]);
+  });
+
+  test("terms are ANDed across subject, sender and text; a message without plain text can still match by its subject", async () => {
+    const { db, user, mail } = await box();
+    mail("Termin", "Treffen am Marktplatz", "2026-01-02T00:00:00.000Z");
+    mail("Termin HTML only", null, "2026-01-01T00:00:00.000Z");
+
+    expect(searchEmails(db, user.id, "termin marktplatz", { fullText: true }).map(r => r.subject)).toEqual(["Termin"]);
+    expect(searchEmails(db, user.id, "termin", { fullText: true }).map(r => r.subject)).toEqual(["Termin", "Termin HTML only"]);
+  });
+
+  test("paging over the merged list, and the date window", async () => {
+    const { db, user, mail } = await box();
+    for (let i = 1; i <= 6; i++) mail(i % 2 ? `Note ${i}` : `Other ${i}`, `a note about ${i}`, `2026-01-0${i}T00:00:00.000Z`);
+
+    expect(searchEmails(db, user.id, "note", { fullText: true }).map(r => r.subject)).toEqual(["Other 6", "Note 5", "Other 4", "Note 3", "Other 2", "Note 1"]);
+    expect(searchEmails(db, user.id, "note", { fullText: true, limit: 2, offset: 2 }).map(r => r.subject)).toEqual(["Other 4", "Note 3"]);
+    expect(searchEmails(db, user.id, "note", { fullText: true, before: "2026-01-04T00:00:00.000Z" }).map(r => r.subject)).toEqual(["Note 3", "Other 2", "Note 1"]);
+  });
+});
