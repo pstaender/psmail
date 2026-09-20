@@ -7,6 +7,29 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Several passkeys per profile (6b5030c)
+-------------------------------------------------
+The passkey unlock of the saved password (browser-local, WebAuthn PRF) now supports more than one passkey per
+profile on a device - Touch ID plus a security key as a backup, for instance.
+- Every passkey holds its own copy of the same password, encrypted with a key only that passkey can produce
+  (its own salt and IV), so they are independent: any one signs you in, and removing one leaves the others
+  working. The sign-in prompt offers all of the profile's passkeys and the browser lets you use whichever
+  authenticator is at hand (with several, the PRF salts are passed per credential, evalByCredential).
+- Settings > Credentials lists the passkeys ("Passkey 1 . added <date>", each with Remove) and has "Add another
+  passkey": it unlocks the stored password with an existing passkey (one prompt), creates the new passkey and
+  derives its key (two more) - no retyping of the password. The passkeys already registered are excluded, so the
+  same authenticator can't be added twice (explained in the UI); a failed or cancelled add changes nothing.
+  Removing the last one removes the feature for the profile; a password change still removes everything.
+- Storage format v2 (a list of entries); the single-passkey format written before is still read, unlocked and
+  can be extended.
+- What this does not do (by decision): share a passkey's vault between browsers/devices. Each browser keeps its
+  own, so a new device sets it up once at its next password sign-in. Sharing would mean storing the encrypted
+  copy on the server; not done.
+- Tests: the vault with a fake that models separate authenticators (adding, either one opening it, unplugged
+  devices, duplicates, cancels, removal, the old format) and the Settings UI, including signing in with only the
+  second passkey at hand. Still not tried with real hardware.
+
+
 2026-09-20 - Crash "aiSkills is undefined" fixed: AI really is optional (38e4264)
 --------------------------------------------------------------------------------
 Opening a message could fail with "TypeError: can't access property "filter", aiSkills is undefined" in
