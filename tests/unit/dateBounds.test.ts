@@ -5,6 +5,7 @@ import { deriveEncryptionKey, generateSalt } from "../../src/server/crypto/secre
 import { createAccount } from "../../src/server/models/accounts";
 import { createEmail, listEmails } from "../../src/server/models/emails";
 import { listUnifiedEmails } from "../../src/server/models/unified";
+import { searchEmails } from "../../src/server/models/search";
 import { dateBoundsSql, readDateBounds } from "../../src/server/models/dateBounds";
 import { ApiError } from "../../src/server/types";
 
@@ -128,5 +129,35 @@ describe("the queries stay on the index", () => {
     expect(rows).toHaveLength(100);
     expect(rows[0]!.date! < day.before && rows.at(-1)!.date! >= day.after).toBe(true);
     expect(ms).toBeLessThan(200); // typically a few ms; the bound is loose on purpose
+  });
+});
+
+describe("search within a date window", () => {
+  test("the same query, but only over the messages in the window — by subject/sender and by text", async () => {
+    const { db, user, a, b, mail } = await setup();
+    mail(a.id, "Invoice old", "2011-09-01T10:00:00.000Z");
+    mail(b.id, "Invoice mid", "2011-09-19T10:00:00.000Z");
+    mail(a.id, "Invoice new", "2026-03-02T10:00:00.000Z");
+    mail(a.id, "Other", "2011-09-10T10:00:00.000Z");
+
+    const before = { before: "2011-09-20T00:00:00.000Z" };
+    expect(searchEmails(db, user.id, "invoice").map(r => r.subject)).toEqual(["Invoice new", "Invoice mid", "Invoice old"]);
+    expect(searchEmails(db, user.id, "invoice", before).map(r => r.subject)).toEqual(["Invoice mid", "Invoice old"]);
+    expect(searchEmails(db, user.id, "invoice", { after: "2011-09-19T00:00:00.000Z", ...before }).map(r => r.subject)).toEqual(["Invoice mid"]);
+    expect(searchEmails(db, user.id, "invoice", { after: "2027-01-01T00:00:00.000Z" })).toEqual([]);
+    expect(searchEmails(db, user.id, "from:s@y.com other", before).map(r => r.subject)).toEqual(["Other"]); // from: and window together
+  });
+
+  test("the text fallback stays inside the window too", async () => {
+    const { db, user, a } = await setup();
+    const text = (subject: string, plainText: string, date: string) =>
+      createEmail(db, a.id, { folder: "INBOX", isDraft: false, subject, plainText, date, from: [{ address: "s@y.com" }] });
+    text("Old", "the needle is here", "2011-09-01T10:00:00.000Z");
+    text("New", "the needle is here too", "2026-03-02T10:00:00.000Z");
+
+    expect(searchEmails(db, user.id, "needle").map(r => r.subject)).toEqual(["New", "Old"]);
+    const inWindow = searchEmails(db, user.id, "needle", { before: "2011-09-20T00:00:00.000Z" });
+    expect(inWindow.map(r => r.subject)).toEqual(["Old"]);
+    expect(inWindow[0]!.matchedInBody).toBe(true);
   });
 });

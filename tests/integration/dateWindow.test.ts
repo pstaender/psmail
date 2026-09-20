@@ -49,6 +49,13 @@ describe("date windows over HTTP (after inclusive, before exclusive)", () => {
     expect((await call("GET", `/api/unified/inbox?${window}`, { token })).json.map((e: { subject: string }) => e.subject)).toEqual(["mar 2"]);
   });
 
+  test("search takes the window too", async () => {
+    const found = async (query: string) => (await call("GET", `/api/search?q=mar&${query}`, { token })).json.map((e: { subject: string }) => e.subject);
+    expect(await found("")).toEqual(["mar 3", "mar 2", "mar 1"]);
+    expect(await found("after=2026-03-02T00:00:00.000Z&before=2026-03-03T00:00:00.000Z")).toEqual(["mar 2"]);
+    expect((await call("GET", "/api/search?q=mar&after=nope", { token })).status).toBe(400);
+  });
+
   test("a bad window is a 400 with the reason, not an empty list", async () => {
     for (const query of ["after=yesterday", "before=nope", "after=2026-03-03T00:00:00Z&before=2026-03-02T00:00:00Z"]) {
       const res = await list(query);

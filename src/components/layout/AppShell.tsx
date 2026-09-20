@@ -1038,6 +1038,19 @@ export function AppShell() {
                     : selectedFolder ?? "—"}
               </span>
               <div className="flex shrink-0 items-center gap-1">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="size-8" title="More" aria-label="More">
+                      <MoreHorizontal className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onSelect={() => setDateFilterOpen(true)}>
+                      <CalendarDays className="size-4" /> Filter by date…
+                    </DropdownMenuItem>
+                    {dateFilter && <DropdownMenuItem onSelect={() => setDateFilter(null)}>Clear date filter</DropdownMenuItem>}
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <Button
                   size="sm"
                   disabled={!selectedAccountEmail || isDisabledAccount(selectedAccountEmail)}
@@ -1046,25 +1059,10 @@ export function AppShell() {
                 >
                   <PenSquare className="size-4" /> New
                 </Button>
-                {!isSearching && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="size-8" title="More" aria-label="More">
-                        <MoreHorizontal className="size-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onSelect={() => setDateFilterOpen(true)}>
-                        <CalendarDays className="size-4" /> Filter by date…
-                      </DropdownMenuItem>
-                      {dateFilter && <DropdownMenuItem onSelect={() => setDateFilter(null)}>Clear date filter</DropdownMenuItem>}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
               </div>
             </div>
           )}
-          {dateFilter && !isSearching && selectionItems.length === 0 && (
+          {dateFilter && selectionItems.length === 0 && (
             <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-1 text-xs text-muted-foreground">
               <CalendarDays className="size-3.5 shrink-0" />
               <button className="min-w-0 flex-1 truncate text-left hover:text-foreground" title="Change the date filter" onClick={() => setDateFilterOpen(true)}>

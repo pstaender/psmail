@@ -21,9 +21,10 @@ export function useSearchResults(query: string, unified: UnifiedKind | null = nu
   const [error, setError] = useState<string | null>(null);
 
   const trimmed = query.trim();
-  // A date filter belongs to a mailbox list; a search has its own way to narrow things.
-  const window = trimmed ? {} : bounds;
-  const sourceKey = trimmed ? `search:${trimmed}` : unified ? `unified:${unified}:${window.after ?? ""}:${window.before ?? ""}` : "";
+  // A date filter narrows a search too: the same query, within the window.
+  const window = bounds;
+  const windowKey = `${window.after ?? ""}:${window.before ?? ""}`;
+  const sourceKey = trimmed ? `search:${trimmed}:${windowKey}` : unified ? `unified:${unified}:${windowKey}` : "";
   const sourceKeyRef = useRef(sourceKey);
   sourceKeyRef.current = sourceKey;
   const loadedCountRef = useRef(0);
@@ -31,7 +32,7 @@ export function useSearchResults(query: string, unified: UnifiedKind | null = nu
 
   const fetchPage = useCallback(
     (limit: number, offset: number) =>
-      trimmed ? api.search(token!, trimmed, { limit, offset }) : api.listUnified(token!, unified!, { limit, offset, ...window }),
+      trimmed ? api.search(token!, trimmed, { limit, offset, ...window }) : api.listUnified(token!, unified!, { limit, offset, ...window }),
     [token, trimmed, unified, window.after, window.before]
   );
 

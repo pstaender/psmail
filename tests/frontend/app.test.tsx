@@ -156,7 +156,7 @@ let capturedCreateDraftBody: Record<string, unknown> | null = null;
 /** POST .../emails/download requests (account + ids) of the mock server. */
 let messageDownloads: { account: string; ids: number[] }[] = [];
 /** Query strings of the GET requests for a folder's messages / the combined lists, in order. */
-let listRequests: { list: "folder" | "inbox" | "sent"; params: URLSearchParams }[] = [];
+let listRequests: { list: "folder" | "inbox" | "sent" | "search"; params: URLSearchParams }[] = [];
 let createFolderPosts: { name: string; parent?: string }[] = [];
 let createFolderError: string | null = null;
 // Same, for PATCH .../emails/13 (DRAFT_EMAIL) — asserts that editing an existing draft updates
@@ -537,7 +537,9 @@ function installMockFetch(
     if (method === "GET" && path === "/api/search") {
       // The mock doesn't replicate real matching (that's covered by backend tests) —
       // it just returns a canned hit so the UI wiring (fetch -> render -> select) is exercised.
-      const inBody = new URL(url, "http://localhost").searchParams.get("q") === "only-in-the-text";
+      const searchParams = new URL(url, "http://localhost").searchParams;
+      listRequests.push({ list: "search", params: searchParams });
+      const inBody = searchParams.get("q") === "only-in-the-text";
       return jsonResponse([
         {
           ...(inBody ? { matchedInBody: true } : {}),
@@ -1042,7 +1044,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
   describe("filtering the list by date", () => {
     const localDay = (y: number, m: number, d: number) => new Date(y, m - 1, d);
-    const last = (list: "folder" | "inbox" | "sent") => listRequests.filter(r => r.list === list).at(-1)!.params;
+    const last = (list: "folder" | "inbox" | "sent" | "search") => listRequests.filter(r => r.list === list).at(-1)!.params;
 
     async function openFolder() {
       render(<App />);
@@ -1144,11 +1146,60 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(last("sent").has("after")).toBe(false);
     });
 
-    test("there is no filter button while searching", async () => {
+    test("More sits to the left of New", async () => {
       await openFolder();
+      const more = screen.getByRole("button", { name: "More" });
+      const create = screen.getByRole("button", { name: /^new$/i });
+      expect(more.compareDocumentPosition(create) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    test("a search is combined with the date filter: the same query, within the dates", async () => {
+      await openFolder();
+      const dialog = await openDialog();
+      await userEvent.click(dialog.getByRole("radio", { name: "Before a date" }));
+      setDay(dialog, "Before", "2011-09-20");
+      await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
+      await screen.findByTitle("Change the date filter");
+
       await userEvent.type(screen.getByPlaceholderText(/search all mail/i), "second");
       await waitFor(() => expect(screen.getByText(/Search: "second"/)).toBeTruthy());
-      expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+      await waitFor(() => expect(listRequests.some(r => r.list === "search")).toBe(true));
+      expect(last("search").get("q")).toBe("second");
+      expect(last("search").get("before")).toBe(localDay(2011, 9, 20).toISOString());
+      expect(last("search").has("after")).toBe(false);
+      expect(screen.getByTitle("Change the date filter")).toBeTruthy(); // the chip stays while searching
+      expect(screen.getByRole("button", { name: "More" })).toBeTruthy();
+    });
+
+    test("changing or clearing the filter re-runs the search; without a filter the search has no window", async () => {
+      await openFolder();
+      await userEvent.type(screen.getByPlaceholderText(/search all mail/i), "second");
+      await waitFor(() => expect(listRequests.some(r => r.list === "search")).toBe(true));
+      expect(last("search").has("before")).toBe(false);
+
+      const dialog = await openDialog();
+      setDay(dialog, "Day", "2026-03-02");
+      await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
+      await waitFor(() => expect(last("search").get("after")).toBe(localDay(2026, 3, 2).toISOString()));
+      expect(last("search").get("q")).toBe("second");
+
+      await userEvent.click(screen.getByLabelText("Clear the date filter"));
+      await waitFor(() => expect(last("search").has("after")).toBe(false));
+    });
+
+    test("the filter survives typing and closing a search", async () => {
+      await openFolder();
+      const dialog = await openDialog();
+      setDay(dialog, "Day", "2026-03-02");
+      await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
+      await screen.findByTitle("Change the date filter");
+
+      const box = screen.getByPlaceholderText(/search all mail/i);
+      await userEvent.type(box, "second");
+      await userEvent.clear(box);
+      await waitFor(() => expect(screen.queryByText(/Search:/)).toBeNull());
+      expect(screen.getByTitle("Change the date filter")).toBeTruthy();
+      await waitFor(() => expect(last("folder").get("after")).toBe(localDay(2026, 3, 2).toISOString()));
     });
   });
 

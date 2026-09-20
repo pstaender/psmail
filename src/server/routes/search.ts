@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { json, requireAuth, withErrorHandling } from "../http";
+import { readDateBounds } from "../models/dateBounds";
 import { searchEmails } from "../models/search";
 
 /** Searches across every account the authenticated user owns — see models/search.ts for query syntax. */
@@ -14,7 +15,7 @@ export function searchRoutes(db: Database) {
         const limit = Number(url.searchParams.get("limit") ?? 50);
         const offset = Number(url.searchParams.get("offset") ?? 0);
 
-        return json(searchEmails(db, session.userId, q, { limit, offset }));
+        return json(searchEmails(db, session.userId, q, { limit, offset, ...readDateBounds(url.searchParams) }));
       }),
     },
   };

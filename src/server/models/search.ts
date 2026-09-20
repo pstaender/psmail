@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import type { EmailAddress } from "../types";
 import { emailIdsWithAttachments, taxonomyListsFor } from "./emails";
+import { dateBoundsSql, type DateBounds } from "./dateBounds";
 
 export interface SearchResult {
   id: number;
@@ -170,21 +171,22 @@ const BODY_CHUNK = 200;
 function searchBodies(
   db: Database,
   userId: number,
-  { generalTerms, generalRegexes, fromRegexes, favsOnly }: { generalTerms: string[]; generalRegexes: RegExp[]; fromRegexes: RegExp[]; favsOnly: boolean },
+  { generalTerms, generalRegexes, fromRegexes, favsOnly, window }: { generalTerms: string[]; generalRegexes: RegExp[]; fromRegexes: RegExp[]; favsOnly: boolean; window: DateBounds },
   wanted: number
 ): SearchResult[] {
   // The newest messages first, without their texts: sorting rows that carry long bodies is what made this slow.
+  const dates = dateBoundsSql(window, "emails.date");
   const headers = db
-    .query<SearchRow, [number, number]>(
+    .query<SearchRow, (string | number)[]>(
       `SELECT emails.id, accounts.email as account_email, emails.folder, emails.uid,
               emails.is_read, emails.is_flagged, emails.subject, emails.from_addr, emails.date
        FROM emails
        JOIN accounts ON accounts.id = emails.account_id
-       WHERE accounts.user_id = ? AND emails.plain_text IS NOT NULL${favsOnly ? " AND emails.is_flagged = 1" : ""}
+       WHERE accounts.user_id = ? AND emails.plain_text IS NOT NULL${favsOnly ? " AND emails.is_flagged = 1" : ""}${dates.sql}
        ORDER BY emails.date DESC
        LIMIT ?`
     )
-    .all(userId, BODY_SEARCH_MAX_MESSAGES);
+    .all(userId, ...dates.params, BODY_SEARCH_MAX_MESSAGES);
 
   // Then the texts, a chunk at a time, so that a query that has enough hits stops after reading only as many as it needed.
   const bodyMatchers = generalTerms.map(wildcardTextMatcher);
@@ -215,7 +217,7 @@ function searchBodies(
   return found;
 }
 
-export interface SearchOptions {
+export interface SearchOptions extends DateBounds {
   limit?: number;
   offset?: number;
 }
@@ -237,16 +239,19 @@ export function searchEmails(db: Database, userId: number, query: string, option
   const generalRegexes = generalTerms.map(wildcardToRegExp);
   const fromRegexes = fromTerms.map(wildcardToRegExp);
 
+  // A date window (the list's date filter) narrows what is looked at in the first place: search "as before", but only there.
+  const window: DateBounds = { after: options.after, before: options.before };
+  const dates = dateBoundsSql(window, "emails.date");
   const rows = db
-    .query<SearchRow, [number]>(
+    .query<SearchRow, (string | number)[]>(
       `SELECT emails.id, accounts.email as account_email, emails.folder, emails.uid,
               emails.is_read, emails.is_flagged, emails.subject, emails.from_addr, emails.date
        FROM emails
        JOIN accounts ON accounts.id = emails.account_id
-       WHERE accounts.user_id = ?${favsOnly ? " AND emails.is_flagged = 1" : ""}
+       WHERE accounts.user_id = ?${favsOnly ? " AND emails.is_flagged = 1" : ""}${dates.sql}
        ORDER BY emails.date DESC`
     )
-    .all(userId);
+    .all(userId, ...dates.params);
 
   const limit = options.limit ?? 50;
   const offset = options.offset ?? 0;
@@ -265,7 +270,7 @@ export function searchEmails(db: Database, userId: number, query: string, option
 
   // Nothing matched subject or sender: look in the message text too.
   if (results.length === 0 && generalTerms.length > 0) {
-    results.push(...searchBodies(db, userId, { generalTerms, generalRegexes, fromRegexes, favsOnly }, offset + limit));
+    results.push(...searchBodies(db, userId, { generalTerms, generalRegexes, fromRegexes, favsOnly, window }, offset + limit));
   }
 
   const page = results.slice(offset, offset + limit);
