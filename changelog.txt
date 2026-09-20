@@ -7,6 +7,18 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - "Found n dates" button in the Summary tab; Summary tab icon only until there is a summary (d10751f)
+--------------------------------------------------------------------------------------------------------------
+- The found dates and events are no longer a strip under the attachments: they are a button with the calendar icon,
+  "Found 2 dates" / "Found 1 date", in the Summary tab between the categories and the "Summarize again" button. It opens a
+  menu with each event (title, date, place; a click downloads its .ics) and, with several, "All n in one file". The
+  hover/collapse behaviour of the strip is gone with the strip. The Summary tab also appears when a message has events
+  but no summary or categories.
+- The Summary tab shows the sparkles icon only while the message has no summary; once it has one, the tab is plain "Summary".
+- Tests: the button's wording (many/one), the menu and its downloads, its place between categories and "Summarize again",
+  the tab's icon. Not looked at in a browser.
+
+
 2026-09-20 - Dates and events: collapsed by default (1605e24)
 --------------------------------------------------------------
 The "Dates and events" strip under the attachments is now a collapsed line saying how many were found ("2 dates and
