@@ -1,4 +1,8 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { resetSettingsCache, updateSettings } from "../../src/server/config/settings";
 import { createTestDb } from "../helpers/db";
 import { createUser } from "../../src/server/models/users";
 import { decryptSecret, deriveEncryptionKey, generateSalt } from "../../src/server/crypto/secrets";
@@ -14,7 +18,7 @@ import {
   updateAiApi,
   updateAiSkill,
 } from "../../src/server/models/ai";
-import { aiHttp, complete, emailTextForAi, parseTaxonomy, renderPrompt } from "../../src/server/services/ai";
+import { aiHttp, aiLog, complete, emailTextForAi, parseTaxonomy, renderPrompt } from "../../src/server/services/ai";
 import { SKILL_DEFAULTS, AI_CATEGORIES, defaultApiLabel } from "../../src/ai/categories";
 
 const key = deriveEncryptionKey("pw", generateSalt());
@@ -297,5 +301,98 @@ describe("helpers", () => {
     expect(fromHtml).toContain("Hello you & co");
     expect(fromHtml).toContain("Bye");
     expect(fromHtml.split("\n\n").slice(1).join("\n\n")).not.toContain("<"); // no tags left in the body
+  });
+});
+
+
+describe("verbose AI logging (verboseAiApiCalls in settings.json)", () => {
+  const originalFetch = aiHttp.fetch;
+  const originalWrite = aiLog.write;
+  const originalDir = process.env.PSMAIL_CONFIG_DIR;
+  let dir = "";
+  let lines: string[] = [];
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "psmail-verbose-ai-"));
+    process.env.PSMAIL_CONFIG_DIR = dir;
+    resetSettingsCache();
+    lines = [];
+    aiLog.write = line => lines.push(line);
+  });
+  afterEach(() => {
+    aiHttp.fetch = originalFetch;
+    aiLog.write = originalWrite;
+    if (originalDir === undefined) delete process.env.PSMAIL_CONFIG_DIR;
+    else process.env.PSMAIL_CONFIG_DIR = originalDir;
+    resetSettingsCache();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const api = { id: 1, vendor: "anthropic", model: "claude-opus-5", baseUrl: null, apiKey: "sk-secret-key" } as const;
+  const answers = (data: unknown, status = 200) => {
+    aiHttp.fetch = async () => new Response(typeof data === "string" ? data : JSON.stringify(data), { status });
+  };
+  const ok = { content: [{ type: "text", text: "The summary" }], usage: { input_tokens: 120, output_tokens: 9 } };
+
+  test("off by default: nothing is logged", async () => {
+    await updateSettings({}); // a settings.json without the option
+    answers(ok);
+    await complete(api, "SYSTEM PROMPT", "USER TEXT");
+    expect(lines).toEqual([]);
+  });
+
+  test("on: the request, the answer, the time and the tokens are logged — and never the API key", async () => {
+    await updateSettings({ verboseAiApiCalls: true });
+    answers(ok);
+    await complete(api, "SYSTEM PROMPT", "USER TEXT");
+
+    const log = lines.join("\n");
+    expect(log).toContain("[ai] → anthropic claude-opus-5  POST https://api.anthropic.com/v1/messages");
+    expect(log).toContain("SYSTEM PROMPT");
+    expect(log).toContain("USER TEXT");
+    expect(log).toMatch(/\[ai\] ← anthropic claude-opus-5  HTTP 200 in \d+ ms · 120 tokens in, 9 out\n?/);
+    expect(log).not.toContain("(estimated)");
+    expect(log).toContain("The summary");
+    expect(log).not.toContain("sk-secret-key");
+  });
+
+  test("tokens the vendor didn't report are marked as estimated", async () => {
+    await updateSettings({ verboseAiApiCalls: true });
+    answers({ content: [{ type: "text", text: "Answer" }] });
+    await complete(api, "S", "U");
+    expect(lines.join("\n")).toContain("(estimated)");
+  });
+
+  test("failures are logged with what the service said", async () => {
+    await updateSettings({ verboseAiApiCalls: true });
+    answers({ error: { message: "rate limited" } }, 429);
+    await expect(complete(api, "S", "U")).rejects.toThrow("rate limited");
+    expect(lines.join("\n")).toContain("[ai] ✗ anthropic claude-opus-5  HTTP 429");
+    expect(lines.join("\n")).toContain("rate limited");
+
+    lines.length = 0;
+    aiHttp.fetch = async () => {
+      throw new Error("connect ECONNREFUSED");
+    };
+    await expect(complete(api, "S", "U")).rejects.toThrow("couldn't be reached");
+    expect(lines.join("\n")).toContain("no answer after");
+    expect(lines.join("\n")).toContain("ECONNREFUSED");
+
+    lines.length = 0;
+    answers("<html>not json</html>");
+    await expect(complete(api, "S", "U")).rejects.toThrow("isn't JSON");
+    expect(lines.join("\n")).toContain("the answer isn't JSON");
+  });
+
+  test("very long texts are cut in the log (with how much), but not in the call", async () => {
+    await updateSettings({ verboseAiApiCalls: true });
+    let sent = "";
+    aiHttp.fetch = async (_url, init) => {
+      sent = JSON.parse(String(init!.body)).messages[0].content;
+      return new Response(JSON.stringify(ok));
+    };
+    await complete(api, "S", "x".repeat(10_000));
+    expect(sent.length).toBe(10_000);
+    expect(lines.join("\n")).toContain("… (6000 more characters)");
   });
 });

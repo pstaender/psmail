@@ -1,5 +1,6 @@
 import { VENDOR_LABELS, type AiCategory } from "../../ai/categories";
 import type { AiApiConfig, AiSkillRecord, AiUsage } from "../models/ai";
+import { peekSettings } from "../config/settings";
 import { ApiError } from "../types";
 
 /**
@@ -9,6 +10,22 @@ import { ApiError } from "../types";
 export const aiHttp: { fetch: (input: string, init?: RequestInit) => Promise<Response> } = {
   fetch: (input, init) => fetch(input, init),
 };
+
+/** Where verbose AI logging goes (the server's console) — replaceable so tests can read it. */
+export const aiLog: { write: (line: string) => void } = { write: line => console.log(line) };
+
+/** With `verboseAiApiCalls: true` in settings.json every AI call is written to the console; the API key never is. */
+const verbose = () => peekSettings()?.verboseAiApiCalls === true;
+
+/** A long text cut to what a console can carry, saying how much was left out. */
+function clip(text: string, max = 4000): string {
+  return text.length > max ? `${text.slice(0, max)}… (${text.length - max} more characters)` : text;
+}
+
+/** Indents a (possibly multi-line) text under a log line. */
+function block(label: string, text: string): string {
+  return `[ai]   ${label}:\n${clip(text).split("\n").map(line => `[ai]     ${line}`).join("\n")}`;
+}
 
 const TIMEOUT_MS = 90_000;
 const MAX_INPUT_CHARS = 60_000;
@@ -79,33 +96,51 @@ export async function complete(api: AiApiConfig, system: string, user: string): 
       break;
   }
 
+  const started = Date.now();
+  const log = verbose();
+  const callId = `${api.vendor} ${api.model}`;
+  if (log) {
+    aiLog.write(`[ai] → ${callId}  POST ${url}  (system prompt ${system.length} characters, input ${input.length}${input.length < user.length ? ` of ${user.length}, cut` : ""})`);
+    aiLog.write(block("system prompt", system));
+    aiLog.write(block("input", input));
+  }
+
   let response: Response;
   try {
     response = await aiHttp.fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch (error) {
+    if (log) aiLog.write(`[ai] ✗ ${callId}  no answer after ${Date.now() - started} ms: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`);
     const reason = error instanceof Error && error.name === "TimeoutError" ? "it didn't answer in time" : "it couldn't be reached";
     throw new ApiError(502, `${vendorLabel}: ${reason}${api.vendor === "ollama" ? ` (is Ollama running at ${api.baseUrl ?? "http://localhost:11434"}?)` : ""}.`);
   }
 
   const text = await response.text();
-  if (!response.ok) throw new ApiError(502, describeFailure(vendorLabel, response.status, text));
+  if (!response.ok) {
+    if (log) aiLog.write(`[ai] ✗ ${callId}  HTTP ${response.status} after ${Date.now() - started} ms\n${block("response", text)}`);
+    throw new ApiError(502, describeFailure(vendorLabel, response.status, text));
+  }
 
   let data: unknown;
   try {
     data = JSON.parse(text);
   } catch {
+    if (log) aiLog.write(`[ai] ✗ ${callId}  the answer isn't JSON (after ${Date.now() - started} ms)\n${block("response", text)}`);
     throw new ApiError(502, `${vendorLabel} sent an answer that isn't JSON.`);
   }
   const answer = extract(data);
+  if (log && (typeof answer !== "string" || !answer.trim())) aiLog.write(`[ai] ✗ ${callId}  an empty answer (after ${Date.now() - started} ms)\n${block("response", text)}`);
   if (typeof answer !== "string" || !answer.trim()) throw new ApiError(502, `${vendorLabel} sent an empty answer.`);
 
   const reported = usageOf(data);
   const count = (value: unknown, fallbackChars: number) =>
     typeof value === "number" && Number.isFinite(value) ? value : Math.ceil(fallbackChars / CHARS_PER_TOKEN);
-  return {
-    text: answer.trim(),
-    usage: { inputTokens: count(reported.input, system.length + input.length), outputTokens: count(reported.output, answer.length) },
-  };
+  const usage = { inputTokens: count(reported.input, system.length + input.length), outputTokens: count(reported.output, answer.length) };
+  if (log) {
+    const estimated = typeof reported.input === "number" && typeof reported.output === "number" ? "" : " (estimated)";
+    aiLog.write(`[ai] ← ${callId}  HTTP ${response.status} in ${Date.now() - started} ms · ${usage.inputTokens} tokens in, ${usage.outputTokens} out${estimated}`);
+    aiLog.write(block("answer", answer.trim()));
+  }
+  return { text: answer.trim(), usage };
 }
 
 /** Fills a skill's prompt placeholders. */

@@ -5,6 +5,8 @@ export interface Settings {
   port: number;
   /** Session lifetime in seconds. */
   sessionTtlSeconds: number;
+  /** Log every AI API call (what is sent, what comes back, how long it took, the tokens) to the server's console. Off by default. */
+  verboseAiApiCalls?: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -42,6 +44,11 @@ export async function updateSettings(patch: Partial<Settings>): Promise<Settings
   const next = { ...current, ...patch };
   await saveSettings(next);
   return next;
+}
+
+/** The settings as already loaded (the server loads them at start), or null — for code that must not touch the disk. */
+export function peekSettings(): Settings | null {
+  return cached;
 }
 
 /** For tests: force settings to be reloaded from disk on next access. */

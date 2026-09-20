@@ -73,6 +73,8 @@ Override with `PSMAIL_CONFIG_DIR` (used by the test suite to avoid touching your
 }
 ```
 
+Optional: `"verboseAiApiCalls": true` makes every AI API call (summaries, categories, translations, Refine, the provider *Test*) verbose on the server's console — the one running `bun run dev`/`bun run start`: the request (vendor, model, URL, the system prompt and the text sent, cut after 4000 characters in the log), then the answer with its HTTP status, the time it took, the tokens ("(estimated)" when the service reported none) and the answer text, or what went wrong (HTTP error and body, no answer, not JSON, empty). The API key is never logged. Mail text ends up in the console with it, so it is off by default; settings are read at start, so restart the server after changing it.
+
 ## API overview
 
 All routes except `/api/auth/login`, `/api/users` (list/create) and `/api/health` require `Authorization: Bearer <token>` from `/api/auth/login`.
