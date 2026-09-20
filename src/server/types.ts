@@ -72,6 +72,8 @@ export interface EmailRecord {
   size: number | null;
   /** 2-6 short category labels from the categorize skill (empty until run). */
   taxonomyList: string[];
+  /** Events the "find dates and events" skill found, each a complete VCALENDAR (.ics) text; empty until run (or when there were none). */
+  calendarEvents: string[];
   /** Summary from the summarize skill, kept once computed. */
   aiSummary: string | null;
   /** Translation from the translate skill, and the language it is in. */

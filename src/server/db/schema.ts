@@ -88,6 +88,8 @@ CREATE TABLE IF NOT EXISTS emails (
   ai_summary TEXT,
   translated_text TEXT,
   translated_language TEXT,
+  -- Calendar events the AI found in the message: a JSON array of VCALENDAR texts (one .ics per event); NULL = never searched, [] = searched, none found.
+  calendar_events TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   UNIQUE(account_id, folder, uid)

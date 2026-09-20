@@ -23,6 +23,7 @@ const MIGRATIONS = [
   "ALTER TABLE emails ADD COLUMN ai_summary TEXT",
   "ALTER TABLE emails ADD COLUMN translated_text TEXT",
   "ALTER TABLE emails ADD COLUMN translated_language TEXT",
+  "ALTER TABLE emails ADD COLUMN calendar_events TEXT",
   "ALTER TABLE ai_apis ADD COLUMN calls INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE ai_apis ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE ai_apis ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0",

@@ -35,6 +35,7 @@ function draftFixture(overrides: Partial<EmailRecord> = {}): EmailRecord {
     headersRaw: null,
     size: null,
     taxonomyList: [],
+    calendarEvents: [],
     aiSummary: null,
     translatedText: null,
     translatedLanguage: null,

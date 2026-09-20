@@ -1,7 +1,7 @@
 import defaults from "./skillDefaults.json";
 
 /** The kinds of AI skill, in display order. The suggested prompts live in skillDefaults.json. */
-export const AI_CATEGORIES = ["summarize", "categorize", "translate", "grammar", "improve"] as const;
+export const AI_CATEGORIES = ["summarize", "categorize", "events", "translate", "grammar", "improve"] as const;
 export type AiCategory = (typeof AI_CATEGORIES)[number];
 
 export interface SkillDefault {

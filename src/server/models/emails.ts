@@ -41,6 +41,7 @@ interface EmailRow {
   ai_summary?: string | null;
   translated_text?: string | null;
   translated_language?: string | null;
+  calendar_events?: string | null;
 }
 
 interface AttachmentRow {
@@ -102,6 +103,7 @@ function toEmail(row: EmailRow, attachments?: AttachmentRow[]): EmailRecord {
     headersRaw: row.headers_raw,
     size: row.size,
     taxonomyList: parseStringList(row.taxonomy_list ?? null),
+    calendarEvents: parseStringList(row.calendar_events ?? null),
     aiSummary: row.ai_summary ?? null,
     translatedText: row.translated_text ?? null,
     translatedLanguage: row.translated_language ?? null,
@@ -480,16 +482,18 @@ export interface AiFieldsPatch {
   taxonomyList?: string[];
   translatedText?: string | null;
   translatedLanguage?: string | null;
+  calendarEvents?: string[];
 }
 
 /** Stores AI results on a message (and nothing else: updated_at stays, so a summary doesn't reorder anything). */
 export function setEmailAiFields(db: Database, id: number, patch: AiFieldsPatch): EmailRecord {
   const existing = getEmailRow(db, id);
-  db.query("UPDATE emails SET ai_summary = ?, taxonomy_list = ?, translated_text = ?, translated_language = ? WHERE id = ?").run(
+  db.query("UPDATE emails SET ai_summary = ?, taxonomy_list = ?, translated_text = ?, translated_language = ?, calendar_events = ? WHERE id = ?").run(
     patch.aiSummary !== undefined ? patch.aiSummary : existing.ai_summary ?? null,
     patch.taxonomyList !== undefined ? JSON.stringify(patch.taxonomyList) : existing.taxonomy_list ?? null,
     patch.translatedText !== undefined ? patch.translatedText : existing.translated_text ?? null,
     patch.translatedLanguage !== undefined ? patch.translatedLanguage : existing.translated_language ?? null,
+    patch.calendarEvents !== undefined ? JSON.stringify(patch.calendarEvents) : existing.calendar_events ?? null,
     id
   );
   return getEmail(db, id);

@@ -321,7 +321,7 @@ export function AiSettings({
 
         {skills.length === 0 && !skillForm && (
           <p className="text-xs text-muted-foreground">
-            A skill is a prompt for one job — summarize, categorize, translate, fix spelling and grammar, or improve wording — run through one of your providers.
+            A skill is a prompt for one job — summarize, categorize, find dates and events, translate, fix spelling and grammar, or improve wording — run through one of your providers.
           </p>
         )}
         <ul className="space-y-1.5">

@@ -63,7 +63,8 @@ export interface BulkResult {
   softDeleted?: boolean;
 }
 
-function saveBlob(blob: Blob, filename: string) {
+/** Hands a file to the browser as a download. */
+export function saveBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -267,11 +268,11 @@ export const api = {
   updateAiSkill: (token: string, id: number, input: AiSkillInput) => request<AiSkillRecord>("PATCH", `/api/ai/skills/${id}`, { token, body: input }),
   deleteAiSkill: (token: string, id: number) => request<void>("DELETE", `/api/ai/skills/${id}`, { token }),
   /** Composing: the user's skill of `category` applied to `text`; nothing is stored. */
-  aiRun: (token: string, category: Exclude<AiCategory, "categorize">, text: string, language?: string, skillId?: number) =>
+  aiRun: (token: string, category: Exclude<AiCategory, "categorize" | "events">, text: string, language?: string, skillId?: number) =>
     request<{ text: string }>("POST", "/api/ai/run", { token, body: { category, text, language, skillId } }),
-  /** Summarizes a message (and categorizes it if that skill exists); both are stored on the message. */
+  /** Summarizes a message (and categorizes it, and looks for dates and events, if those skills exist); all are stored on the message. */
   aiSummarize: (token: string, accountEmail: string, emailId: number, skillId?: number) =>
-    request<{ email: EmailRecord; taxonomyError?: string }>("POST", `/api/accounts/${enc(accountEmail)}/emails/${emailId}/ai/summarize`, {
+    request<{ email: EmailRecord; taxonomyError?: string; eventsError?: string }>("POST", `/api/accounts/${enc(accountEmail)}/emails/${emailId}/ai/summarize`, {
       token,
       body: { skillId },
     }),

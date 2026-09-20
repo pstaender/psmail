@@ -262,3 +262,77 @@ describe("AI endpoints", () => {
     expect((await api("GET", "/api/ai/apis", { token })).json).toEqual([]);
   });
 });
+
+describe("dates and events (the \"events\" skill)", () => {
+  let token: string;
+  let emailId: number;
+  const account = "bea@example.com";
+  const summarize = () => api("POST", `/api/accounts/${encodeURIComponent(account)}/emails/${emailId}/ai/summarize`, { token });
+
+  const ANSWER = JSON.stringify([
+    { title: "Submit documents", start: "2026-09-30", description: "Send the missing receipts." },
+    { title: "Call with Alice", start: "2026-10-02T14:00", end: "2026-10-02T14:30", location: "Phone, +49 2443 911 406" },
+    { title: "Broken", start: "next week" },
+  ]);
+
+  test("set up: a user with a message, an AI API and a summarize and an events skill", async () => {
+    await api("POST", "/api/users", { body: { username: "bea", password: "pw" } });
+    token = (await api("POST", "/api/auth/login", { body: { username: "bea", password: "pw" } })).json.token;
+    const acc = await api("POST", "/api/accounts", {
+      token,
+      body: { email: account, imapHost: "h", imapPort: 993, imapUsername: account, imapPassword: "x", smtpHost: "h", smtpPort: 465, smtpUsername: account, smtpPassword: "y" },
+    });
+    emailId = createEmail(db, acc.json.id, {
+      folder: "INBOX", isDraft: false, subject: "Unterlagen", from: [{ name: "Steuerberater", address: "stb@x.com" }],
+      date: "2026-09-01T00:00:00.000Z", plainText: "Bitte Unterlagen bis 30.09.2026. Anruf am 2.10. um 14 Uhr.",
+    }).id;
+    const apiId = (await api("POST", "/api/ai/apis", { token, body: { vendor: "anthropic", model: "claude-opus-5", apiKey: "sk-x" } })).json.id;
+    expect((await api("POST", "/api/ai/skills", { token, body: { aiApiId: apiId, category: "summarize", prompt: "You summarize." } })).status).toBe(201);
+    expect((await api("POST", "/api/ai/skills", { token, body: { aiApiId: apiId, category: "events", prompt: "You find events. JSON." } })).status).toBe(201);
+  });
+
+  test("summarize also looks for dates and events and stores each as its own .ics", async () => {
+    const sent = fakeAi(system => (system.includes("find events") ? ANSWER : "- Unterlagen bis 30.09."));
+    const res = await summarize();
+
+    expect(res.status).toBe(200);
+    expect(sent.map(s => s.system)).toEqual(["You summarize.", "You find events. JSON."]);
+    expect(sent[1]!.user).toContain("Date: 2026-09-01"); // the message's date is sent, so relative dates can be resolved
+
+    const events: string[] = res.json.email.calendarEvents;
+    expect(events).toHaveLength(2); // the entry without a real date is dropped
+    expect(events[0]).toContain("BEGIN:VCALENDAR");
+    expect(events[0]).toContain("SUMMARY:Submit documents");
+    expect(events[0]).toContain("DTSTART;VALUE=DATE:20260930");
+    expect(events[1]).toContain("DTSTART:20261002T140000");
+    expect(events[1]).toContain("LOCATION:Phone\\, +49 2443 911 406");
+    expect(res.json.eventsError).toBeUndefined();
+
+    // Stored on the message, and back with it.
+    expect(getEmail(db, emailId).calendarEvents).toEqual(events);
+    expect((await api("GET", `/api/accounts/${encodeURIComponent(account)}/emails/${emailId}`, { token })).json.calendarEvents).toEqual(events);
+  });
+
+  test("a message without events stores an empty list; a failing search doesn't lose the summary or the earlier events", async () => {
+    fakeAi(system => (system.includes("find events") ? "[]" : "New summary"));
+    let res = await summarize();
+    expect(res.json.email.aiSummary).toBe("New summary");
+    expect(res.json.email.calendarEvents).toEqual([]);
+
+    fakeAi(system => (system.includes("find events") ? ANSWER : "Newest summary"));
+    await summarize();
+    aiHttp.fetch = async (_url, init) => {
+      if (String(JSON.parse(String(init!.body)).system).includes("find events")) return new Response(JSON.stringify({ error: { message: "overloaded" } }), { status: 529 });
+      return new Response(JSON.stringify({ content: [{ type: "text", text: "Last summary" }] }));
+    };
+    res = await summarize();
+    expect(res.status).toBe(200);
+    expect(res.json.email.aiSummary).toBe("Last summary");
+    expect(res.json.eventsError).toContain("overloaded");
+    expect(res.json.email.calendarEvents).toHaveLength(2);
+  });
+
+  test("the compose endpoint doesn't offer the events category", async () => {
+    expect((await api("POST", "/api/ai/run", { token, body: { category: "events", text: "x" } })).status).toBe(400);
+  });
+});

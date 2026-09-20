@@ -2,6 +2,7 @@ import { AttachmentList } from "./AttachmentList";
 import { MessageBody, type BodyView } from "./MessageBody";
 import { MessageHeader } from "./MessageHeader";
 import { MessageToolbar } from "./MessageToolbar";
+import { EventList } from "./EventList";
 import type { EmailRecord } from "../../server/types";
 import type { FolderInfo } from "@/lib/api";
 import type { AiSkillRecord } from "../../server/models/ai";
@@ -73,6 +74,7 @@ export function MessageView({
         onSummarize={onSummarize}
       />
       <AttachmentList accountEmail={accountEmail} emailId={email.id} attachments={email.attachments ?? []} />
+      <EventList events={email.calendarEvents ?? []} />
       <div className="flex-1 overflow-y-auto">
         <MessageBody
           email={email}

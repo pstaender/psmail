@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { App } from "../../src/App";
 import { MessageHeader } from "../../src/components/mail/MessageHeader";
+import { EventList } from "../../src/components/mail/EventList";
 import { MessageList } from "../../src/components/mail/MessageList";
 import { MessageToolbar } from "../../src/components/mail/MessageToolbar";
 import { installFakeAuthenticator, type FakeAuthenticator } from "../helpers/fakeAuthenticator";
@@ -51,6 +52,9 @@ const FOLDERS = [
   // named "Drafts" on the server, exercising the specialUse-based lookup in ComposeDialog.
   { path: "Entwürfe", name: "Entwürfe", delimiter: "/", specialUse: "\\Drafts", flags: [], total: 0, unread: 0 },
 ];
+const ics = (...lines: string[]) => ["BEGIN:VCALENDAR", "VERSION:2.0", "BEGIN:VEVENT", ...lines, "END:VEVENT", "END:VCALENDAR"].join("\r\n") + "\r\n";
+const TEST_ICS_DEADLINE = ics("UID:a@psmail", "DTSTART;VALUE=DATE:20260930", "DTEND;VALUE=DATE:20261001", "SUMMARY:Submit documents");
+const TEST_ICS_CALL = ics("UID:b@psmail", "DTSTART:20261002T140000", "SUMMARY:Call with Alice\\, Bob", "LOCATION:Phone\\; Berlin");
 const EMAIL = {
   id: 10,
   accountId: 1,
@@ -429,7 +433,15 @@ function installMockFetch(
       if (path === "/api/ai/run") return jsonResponse({ text: "Corrected text" });
       if (path.endsWith("/ai/summarize")) {
         if (opts.aiSummarizeDelayMs) await new Promise(resolve => setTimeout(resolve, opts.aiSummarizeDelayMs));
-        return jsonResponse({ email: { ...EMAIL, aiSummary: "- Alice says hello\n- No action needed", taxonomyList: ["greeting", "personal"] } });
+        const withEvents = currentAiSkills.some(skill => skill.category === "events");
+        return jsonResponse({
+          email: {
+            ...EMAIL,
+            aiSummary: "- Alice says hello\n- No action needed",
+            taxonomyList: ["greeting", "personal"],
+            ...(withEvents ? { calendarEvents: [TEST_ICS_DEADLINE, TEST_ICS_CALL] } : {}),
+          },
+        });
       }
       if (path.endsWith("/ai/translate")) {
         return jsonResponse({ email: { ...EMAIL, translatedText: "Hallo, Welt", translatedLanguage: body?.language ?? "English" } });
@@ -3009,7 +3021,77 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(aiRequests.some(([m, p]) => m === "POST" && p === "/api/accounts/me%40example.com/emails/10/ai/summarize")).toBe(true);
     });
 
-    describe("the sparkles icon next to the subject", () => {
+    describe("dates and events found by the AI", () => {
+    const saved: { name: string; text: Promise<string> }[] = [];
+    const realClick = HTMLAnchorElement.prototype.click;
+    const realCreate = URL.createObjectURL;
+    beforeEach(() => {
+      saved.length = 0;
+      URL.createObjectURL = (blob: Blob) => {
+        saved.push({ name: "", text: blob.text() });
+        return "blob:test";
+      };
+      URL.revokeObjectURL = () => {};
+      HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+        saved[saved.length - 1]!.name = this.download;
+      };
+    });
+    afterEach(() => {
+      HTMLAnchorElement.prototype.click = realClick;
+      URL.createObjectURL = realCreate;
+    });
+
+    test("nothing is shown for a message without events", async () => {
+      render(<EventList events={[]} />);
+      expect(screen.queryByLabelText("Dates and events")).toBeNull();
+    });
+
+    test("each event is listed with its title, date and place, and downloads as its own .ics", async () => {
+      render(<EventList events={[TEST_ICS_DEADLINE, TEST_ICS_CALL]} />);
+      const list = screen.getByLabelText("Dates and events");
+      expect(within(list).getByText("Submit documents")).toBeTruthy();
+      expect(within(list).getByText("Call with Alice, Bob")).toBeTruthy(); // the escaped comma reads normally
+      expect(within(list).getByText(/Phone; Berlin/)).toBeTruthy();
+      expect(list.textContent).toContain("2026"); // the dates
+
+      await userEvent.click(within(list).getByText("Call with Alice, Bob"));
+      await waitFor(() => expect(saved).toHaveLength(1));
+      expect(saved[0]!.name).toBe("Call with Alice, Bob.ics");
+      expect(await saved[0]!.text).toBe(TEST_ICS_CALL);
+    });
+
+    test("with several, one button downloads all of them in a single .ics", async () => {
+      render(<EventList events={[TEST_ICS_DEADLINE, TEST_ICS_CALL]} />);
+      await userEvent.click(screen.getByTitle("Download all as one .ics file"));
+      await waitFor(() => expect(saved).toHaveLength(1));
+      const text = await saved[0]!.text;
+      expect(saved[0]!.name).toBe("events.ics");
+      expect(text.match(/BEGIN:VCALENDAR/g)).toHaveLength(1);
+      expect(text.match(/BEGIN:VEVENT/g)).toHaveLength(2);
+      expect(text).toContain("SUMMARY:Submit documents");
+      expect(text).toContain("SUMMARY:Call with Alice");
+      expect(text.trimEnd().endsWith("END:VCALENDAR")).toBe(true);
+    });
+
+    test("a single event has no 'All' button", () => {
+      render(<EventList events={[TEST_ICS_DEADLINE]} />);
+      expect(screen.queryByTitle("Download all as one .ics file")).toBeNull();
+    });
+
+    test("summarizing with an events skill shows the found events below the attachments", async () => {
+      installMockFetch({ aiSkillCategories: ["summarize", "events"] });
+      await login();
+      await userEvent.click(await screen.findByText("Hello there"));
+      await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+      expect(screen.queryByLabelText("Dates and events")).toBeNull();
+
+      await userEvent.click(await screen.findByRole("button", { name: "Summarize this message with AI" }));
+      const list = await screen.findByLabelText("Dates and events");
+      expect(within(list).getByText("Submit documents")).toBeTruthy();
+    });
+  });
+
+  describe("the sparkles icon next to the subject", () => {
       const icon = () => screen.queryByRole("button", { name: "Summarize this message with AI" });
       async function openHello(opts: Parameters<typeof installMockFetch>[0]) {
         installMockFetch(opts);

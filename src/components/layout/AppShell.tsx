@@ -160,6 +160,7 @@ export function AppShell() {
           : await api.aiTranslate(token, selectedAccountEmail, id, undefined, skillId);
       if (openEmailId.current === id) setSelectedEmailDetail(result.email);
       if ("taxonomyError" in result && result.taxonomyError) toast.error(`Categorizing failed: ${result.taxonomyError}`);
+      if ("eventsError" in result && result.eventsError) toast.error(`Looking for dates and events failed: ${result.eventsError}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1147,7 +1148,7 @@ export function AppShell() {
             <AlertDialogDescription>
               {confirmAi?.kind === "translate"
                 ? "This message has already been translated. Translating it again asks the AI once more and replaces the stored translation."
-                : "This message has already been summarized. Summarizing it again asks the AI once more and replaces the stored summary (and categories)."}
+                : "This message has already been summarized. Summarizing it again asks the AI once more and replaces the stored summary (and the categories, dates and events)."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

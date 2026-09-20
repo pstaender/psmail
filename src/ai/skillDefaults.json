@@ -11,6 +11,11 @@
       "description": "2-6 short category labels per message, stored with the message.",
       "prompt": "You are a helpful assistant that categorizes e-mail messages. Give the message between 2 and 6 short taxonomy labels that describe its topic, type and required action (for example: invoice, meeting, newsletter, travel, support, action needed, personal). Use one or two lowercase words per label, in the language of the mail. Answer ONLY with a JSON array of strings, for example [\"invoice\", \"action needed\"], without any other text."
     },
+    "events": {
+      "label": "Find dates and events",
+      "description": "Finds appointments, meetings, deadlines and other dates in a message and offers them as .ics files (calendar events). Runs together with Summarize.",
+      "prompt": "You find dates and events in e-mail messages, to be offered to the user as calendar entries. Look for appointments, meetings, calls, deadlines, due dates, trips, flights, reservations, deliveries and other things that happen on a date. Ignore the date the mail itself was sent, dates in quoted earlier mails, and events that already lie in the past. Resolve relative dates (\"next Friday\", \"tomorrow\") from the Date of the message. Answer ONLY with a JSON array, without any other text; use [] when there is nothing. Each entry is an object with: \"title\" (short, in the language of the mail), \"start\" (\"YYYY-MM-DD\" for a whole day, or \"YYYY-MM-DDTHH:MM\" with a time; add a UTC offset like +02:00 only if the mail names a time zone), \"end\" (optional, same form, only if the mail says it), \"location\" (optional) and \"description\" (optional, one or two sentences with what the user needs to know). Example: [{\"title\":\"Submit documents\",\"start\":\"2026-09-30\",\"description\":\"Send the missing receipts.\"},{\"title\":\"Call with Alice\",\"start\":\"2026-10-02T14:00\",\"end\":\"2026-10-02T14:30\"}]"
+    },
     "translate": {
       "label": "Translate",
       "description": "Translates a message (reading) or your draft (composing) into the chosen language.",

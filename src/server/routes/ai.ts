@@ -22,6 +22,7 @@ import { assertAccountEnabled } from "../models/accounts";
 import { getEmail, getEmailRow, setEmailAiFields } from "../models/emails";
 import { getUserSettings } from "../models/userSettings";
 import { complete, emailTextForAi, parseTaxonomy, runSkill } from "../services/ai";
+import { icsFromAnswer } from "../services/ics";
 import { ApiError, NotFoundError } from "../types";
 import { getOwnedAccountByEmailParam } from "./accounts";
 
@@ -77,6 +78,14 @@ export function aiRoutes(db: Database) {
     return setEmailAiFields(db, emailId, { taxonomyList: labels });
   }
 
+  /** Finds dates and events in a message and stores each as a .ics text. Finding none is a result too (an empty list is stored). */
+  async function findEvents(userId: number, encryptionKey: Buffer, emailId: number) {
+    const skill = requireSkill(userId, "events");
+    const email = getEmail(db, emailId);
+    const answer = await runCounted(skill, getAiApiConfig(db, userId, skill.aiApiId, encryptionKey), emailTextForAi(email), DEFAULT_LANGUAGE);
+    return setEmailAiFields(db, emailId, { calendarEvents: icsFromAnswer(answer, emailId) });
+  }
+
   return {
     "/api/ai/apis": {
       GET: withErrorHandling(async req => json(listAiApis(db, requireAuth(req, db).session.userId))),
@@ -129,7 +138,7 @@ export function aiRoutes(db: Database) {
       POST: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
         const body = await readJsonBody<{ category?: unknown; text?: unknown; language?: unknown; skillId?: unknown }>(req);
-        if (!isAiCategory(body.category) || body.category === "categorize") throw new ApiError(400, "category must be summarize, translate, grammar or improve");
+        if (!isAiCategory(body.category) || body.category === "categorize" || body.category === "events") throw new ApiError(400, "category must be summarize, translate, grammar or improve");
         if (typeof body.text !== "string" || !body.text.trim()) throw new ApiError(400, "text is required");
         if (body.text.length > MAX_TEXT) throw new ApiError(400, "The text is too long for the AI");
 
@@ -138,7 +147,7 @@ export function aiRoutes(db: Database) {
         return json({ text: await runCounted(skill, api, body.text, languageFor(session.userId, body.language)) });
       }),
     },
-    /** Summarizes a message and stores the summary; if a categorize skill exists it also stores the taxonomy (a failure there doesn't lose the summary). */
+    /** Summarizes a message and stores the summary; if a categorize skill exists it also stores the taxonomy, and if a "find dates and events" skill exists the events as .ics texts (a failure in either doesn't lose the summary). */
     "/api/accounts/:email/emails/:emailId/ai/summarize": {
       POST: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
@@ -158,7 +167,16 @@ export function aiRoutes(db: Database) {
             taxonomyError = error instanceof Error ? error.message : String(error);
           }
         }
-        return json({ email: updated, taxonomyError });
+
+        let eventsError: string | undefined;
+        if (findSkillForCategory(db, session.userId, "events")) {
+          try {
+            updated = await findEvents(session.userId, encryptionKey, email.id);
+          } catch (error) {
+            eventsError = error instanceof Error ? error.message : String(error);
+          }
+        }
+        return json({ email: updated, taxonomyError, eventsError });
       }),
     },
     "/api/accounts/:email/emails/:emailId/ai/categorize": {
