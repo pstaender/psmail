@@ -4,6 +4,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { formatListDate } from "@/lib/time";
 import type { EmailRecord } from "../../server/types";
+import { CategoryChips } from "./CategoryChips";
 import { EmptyState } from "./EmptyState";
 
 function participantLabel(email: EmailRecord, folder: string): string {
@@ -116,6 +117,7 @@ export function MessageList({
                   <Paperclip aria-label="Has attachments" className="size-3.5 shrink-0 text-muted-foreground" />
                 )}
               </div>
+              <CategoryChips labels={email.taxonomyList} />
               {email.plainText && (
                 <p className="truncate text-xs text-muted-foreground">{email.plainText.replace(/\s+/g, " ").trim()}</p>
               )}

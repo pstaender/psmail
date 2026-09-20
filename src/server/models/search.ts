@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import type { EmailAddress } from "../types";
-import { emailIdsWithAttachments } from "./emails";
+import { emailIdsWithAttachments, taxonomyListsFor } from "./emails";
 
 export interface SearchResult {
   id: number;
@@ -14,6 +14,8 @@ export interface SearchResult {
   /** Recipients — only filled by the unified Sent list, which shows who a message went to rather than who sent it. */
   to?: EmailAddress[];
   hasAttachments?: boolean;
+  /** The message's categories (AI labels), when it has any. */
+  taxonomyList?: string[];
   date: string | null;
 }
 
@@ -180,5 +182,6 @@ export function searchEmails(db: Database, userId: number, query: string, option
 
   const page = results.slice(offset, offset + limit);
   const withAttachments = emailIdsWithAttachments(db, page.map(r => r.id));
-  return page.map(r => ({ ...r, hasAttachments: withAttachments.has(r.id) }));
+  const categories = taxonomyListsFor(db, page.map(r => r.id));
+  return page.map(r => ({ ...r, hasAttachments: withAttachments.has(r.id), ...(categories.has(r.id) ? { taxonomyList: categories.get(r.id) } : {}) }));
 }

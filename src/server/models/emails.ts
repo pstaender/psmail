@@ -234,7 +234,7 @@ export function getFolderCounts(db: Database, accountId: number): FolderCount[] 
  * first 200 characters of plain_text as the snippet. The full message comes from getEmail().
  */
 const LIST_COLUMNS = `id, account_id, folder, uid, is_draft, is_read, is_flagged, message_id, in_reply_to,
-  from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject, date, size, created_at, updated_at,
+  from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject, date, size, created_at, updated_at, taxonomy_list,
   substr(plain_text, 1, 200) AS plain_text,
   (SELECT COUNT(*) FROM attachments WHERE email_id = emails.id AND is_inline = 0) AS attachment_count`;
 
@@ -441,6 +441,24 @@ export function deleteAttachment(db: Database, id: number): void {
 }
 
 export type { EmailRow, AttachmentRow };
+
+/** The categories (AI taxonomy labels) of the given messages that have any — for lists that don't load whole messages. */
+export function taxonomyListsFor(db: Database, ids: number[]): Map<number, string[]> {
+  const found = new Map<number, string[]>();
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    const rows = db
+      .query<{ id: number; taxonomy_list: string }, number[]>(
+        `SELECT id, taxonomy_list FROM emails WHERE taxonomy_list IS NOT NULL AND taxonomy_list != '[]' AND id IN (${chunk.map(() => "?").join(",")})`
+      )
+      .all(...chunk);
+    for (const row of rows) {
+      const labels = parseStringList(row.taxonomy_list).filter(label => typeof label === "string");
+      if (labels.length > 0) found.set(row.id, labels);
+    }
+  }
+  return found;
+}
 
 /** Of the given message ids, those that have at least one real (non-inline) attachment — for lists that don't load attachments themselves. */
 export function emailIdsWithAttachments(db: Database, ids: number[]): Set<number> {

@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import type { EmailAddress } from "../types";
-import { emailIdsWithAttachments } from "./emails";
+import { emailIdsWithAttachments, taxonomyListsFor } from "./emails";
 import type { SearchResult } from "./search";
 
 export type UnifiedKind = "inbox" | "sent";
@@ -132,7 +132,12 @@ export function listUnifiedEmails(
   merged.sort((a, b) => (a.sortDate === b.sortDate ? b.id - a.id : a.sortDate < b.sortDate ? 1 : -1));
   const page = merged.slice(offset, offset + limit);
   const withAttachments = emailIdsWithAttachments(db, page.map(r => r.id));
-  return page.map(({ sortDate: _sortDate, ...result }) => ({ ...result, hasAttachments: withAttachments.has(result.id) }));
+  const categories = taxonomyListsFor(db, page.map(r => r.id));
+  return page.map(({ sortDate: _sortDate, ...result }) => ({
+    ...result,
+    hasAttachments: withAttachments.has(result.id),
+    ...(categories.has(result.id) ? { taxonomyList: categories.get(result.id) } : {}),
+  }));
 }
 
 /** Unread messages across every account's Inbox (or, opt-in, its other incoming folders too) — the combined Inbox's badge. */

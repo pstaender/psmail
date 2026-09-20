@@ -3,7 +3,7 @@ import { createTestDb } from "../helpers/db";
 import { createUser } from "../../src/server/models/users";
 import { deriveEncryptionKey, generateSalt } from "../../src/server/crypto/secrets";
 import { createAccount, deleteAccount, learnSpecialFolders, listAccounts, setAccountPosition, setSentFolder, updateAccount, normalizeAccountPositions } from "../../src/server/models/accounts";
-import { addAttachment, createEmail, listEmails, updateEmail } from "../../src/server/models/emails";
+import { addAttachment, createEmail, listEmails, setEmailAiFields, updateEmail } from "../../src/server/models/emails";
 import { countUnifiedInboxUnread, listNewInboxMail, listUnifiedEmails } from "../../src/server/models/unified";
 import { searchEmails } from "../../src/server/models/search";
 import { getUserSettings, updateUserSettings } from "../../src/server/models/userSettings";
@@ -106,6 +106,29 @@ describe("listUnifiedEmails", () => {
     mail(db, accounts[0]!.id, "INBOX", "mine", "2026-01-01T00:00:00.000Z");
     mail(db, bobs.id, "INBOX", "theirs", "2026-01-02T00:00:00.000Z");
     expect(listUnifiedEmails(db, user.id, "inbox").map(r => r.subject)).toEqual(["mine"]);
+  });
+});
+
+describe("categories (AI taxonomy labels) in the lists", () => {
+  test("folder list, combined lists and search carry a message's categories — and only when it has any", async () => {
+    const { db, user, accounts } = await setup(["a@x.com"]);
+    const tagged = mail(db, accounts[0]!.id, "INBOX", "Invoice May", "2026-01-02T00:00:00.000Z");
+    mail(db, accounts[0]!.id, "INBOX", "Invoice plain", "2026-01-01T00:00:00.000Z");
+    const empty = mail(db, accounts[0]!.id, "INBOX", "Invoice empty list", "2026-01-03T00:00:00.000Z");
+    setEmailAiFields(db, tagged.id, { taxonomyList: ["finance", "invoice"] });
+    setEmailAiFields(db, empty.id, { taxonomyList: [] });
+
+    const byId = (rows: { id: number; taxonomyList?: string[] }[]) => Object.fromEntries(rows.map(r => [r.id, r.taxonomyList]));
+
+    const folder = listEmails(db, accounts[0]!.id, { folder: "INBOX" });
+    expect(folder.find(e => e.id === tagged.id)!.taxonomyList).toEqual(["finance", "invoice"]);
+    expect(folder.filter(e => e.id !== tagged.id).every(e => e.taxonomyList.length === 0)).toBe(true);
+
+    for (const rows of [listUnifiedEmails(db, user.id, "inbox"), searchEmails(db, user.id, "invoice")]) {
+      expect(rows).toHaveLength(3);
+      expect(byId(rows)[tagged.id]).toEqual(["finance", "invoice"]);
+      expect(rows.filter(r => r.id !== tagged.id).every(r => !("taxonomyList" in r))).toBe(true); // absent, not []
+    }
   });
 });
 

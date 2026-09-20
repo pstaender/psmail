@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { App } from "../../src/App";
 import { MessageHeader } from "../../src/components/mail/MessageHeader";
+import { MessageList } from "../../src/components/mail/MessageList";
 import { MessageToolbar } from "../../src/components/mail/MessageToolbar";
 import { installFakeAuthenticator, type FakeAuthenticator } from "../helpers/fakeAuthenticator";
 import type { Account } from "../../src/server/types";
@@ -3662,6 +3663,33 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
       expect((await screen.findAllByText(/Passkey unlock was removed from this device/)).length).toBeGreaterThan(0);
       expect(localStorage.getItem(vaultKey)).toBeNull();
+    });
+  });
+
+  describe("categories in the message lists", () => {
+    const labelled = { ...EMAIL, taxonomyList: ["finance", "invoice", "tax", "2024", "paid"] };
+    const listProps = { loading: false, hasMore: false, loadingMore: false, onLoadMore: () => {}, selectedId: null, selectedIds: new Set<number>(), folder: "INBOX", onSelect: () => {}, onToggleFlag: () => {}, onEditDraft: () => {} };
+
+    test("a message with categories shows the first three as chips, the rest as +N (all in the tooltip)", () => {
+      render(<MessageList {...listProps} emails={[labelled as never]} />);
+      const chips = screen.getByRole("list", { name: "Categories" });
+      expect(Array.from(chips.querySelectorAll("li")).map(li => li.textContent)).toEqual(["finance", "invoice", "tax", "+2"]);
+      expect(chips.getAttribute("title")).toBe("finance, invoice, tax, 2024, paid");
+    });
+
+    test("a message without categories shows no chips", () => {
+      render(<MessageList {...listProps} emails={[EMAIL as never, { ...EMAIL, id: 11, taxonomyList: [] } as never]} />);
+      expect(screen.queryByRole("list", { name: "Categories" })).toBeNull();
+    });
+
+    test("the combined lists (and search results) show them too", async () => {
+      const row = { id: 10, accountEmail: "me@example.com", folder: "INBOX", uid: 1, isRead: false, isFlagged: false, subject: "Tagged one", from: [{ name: "Alice", address: "alice@example.com" }], date: NOW, taxonomyList: ["finance", "invoice"] };
+      installMockFetch({ unifiedInboxRows: [row, { ...row, id: 11, subject: "Plain one", taxonomyList: undefined }] });
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      const tagged = (await screen.findByText("Tagged one")).closest("li")!;
+      expect(within(tagged).getByRole("list", { name: "Categories" }).textContent).toBe("financeinvoice");
+      expect(within(screen.getByText("Plain one").closest("li")!).queryByRole("list", { name: "Categories" })).toBeNull();
     });
   });
 
