@@ -17,6 +17,7 @@ export function MessageView({
   onForward,
   onDelete,
   onMove,
+  onDownload,
   onToggleRead,
   onEditDraft,
   accountDisabled,
@@ -35,6 +36,7 @@ export function MessageView({
   onForward: () => void;
   onDelete: () => void;
   onMove: (folder: string) => void;
+  onDownload: () => void;
   onToggleRead: () => void;
   onEditDraft: () => void;
   /** The message's account is disabled: read-only for good — every button that would change something is off. */
@@ -55,6 +57,7 @@ export function MessageView({
         onForward={onForward}
         onDelete={onDelete}
         onMove={onMove}
+        onDownload={onDownload}
         onToggleRead={onToggleRead}
         onEditDraft={onEditDraft}
         accountDisabled={accountDisabled}

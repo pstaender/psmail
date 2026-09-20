@@ -756,16 +756,18 @@ export function AppShell() {
    * read-only and disabled accounts too; the selection stays. A selection across accounts is one file per account.
    */
   async function bulkDownload() {
-    if (!token) return;
     const byAccount = new Map<string, number[]>();
     for (const item of selectionItems) byAccount.set(item.accountEmail, [...(byAccount.get(item.accountEmail) ?? []), item.id]);
-    for (const [accountEmail, ids] of byAccount) {
-      try {
-        const filename = await api.downloadMessages(token, accountEmail, ids);
-        toast.success(`Downloaded ${filename}`);
-      } catch (err) {
-        toast.error(errorMessage(err, "Couldn't download the message(s)"));
-      }
+    for (const [accountEmail, ids] of byAccount) await downloadMessages(accountEmail, ids);
+  }
+
+  /** One request, one file (the .eml itself for one message, a zip for several); says what was saved, or why not. */
+  async function downloadMessages(accountEmail: string, ids: number[]) {
+    if (!token) return;
+    try {
+      toast.success(`Downloaded ${await api.downloadMessages(token, accountEmail, ids)}`);
+    } catch (err) {
+      toast.error(errorMessage(err, "Couldn't download the message(s)"));
     }
   }
 
@@ -1068,6 +1070,7 @@ export function AppShell() {
               onForward={() => openCompose(forwardDraft(selectedEmail))}
               onDelete={requestDelete}
               onMove={handleMove}
+              onDownload={() => downloadMessages(selectedAccountEmail, [selectedEmail.id])}
               onToggleRead={toggleRead}
               onEditDraft={() => openCompose(editDraft(selectedEmail))}
               accountDisabled={isDisabledAccount(selectedAccountEmail)}

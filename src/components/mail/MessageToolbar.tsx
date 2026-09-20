@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FolderInput, Forward, Languages, Mail, PenSquare, Reply, ReplyAll, Sparkles, Trash2 } from "lucide-react";
+import { Download, FolderInput, Forward, Languages, Mail, PenSquare, Reply, ReplyAll, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
@@ -22,6 +22,7 @@ export function MessageToolbar({
   onForward,
   onDelete,
   onMove,
+  onDownload,
   onToggleRead,
   onEditDraft,
   accountDisabled,
@@ -37,6 +38,8 @@ export function MessageToolbar({
   onForward: () => void;
   onDelete: () => void;
   onMove: (folder: string) => void;
+  /** Saves the message as an .eml file. Only reads, so it stays available on a disabled account. */
+  onDownload: () => void;
   onToggleRead: () => void;
   onEditDraft: () => void;
   /** The account is disabled (frozen): everything that would change it — replying, forwarding, moving, deleting, marking, AI results — is off. Reading stays. */
@@ -97,6 +100,14 @@ export function MessageToolbar({
       <Button variant="ghost" size="sm" disabled={accountDisabled} title={frozen} onClick={onToggleRead}>
         <Mail className="size-4" /> Mark {email.isRead ? "unread" : "read"}
       </Button>
+
+      <Separator orientation="vertical" className="mx-1 h-5" />
+
+      <Button variant="ghost" size="sm" title="Download this message as an .eml file" onClick={onDownload}>
+        <Download className="size-4" /> Download
+      </Button>
+
+      <Separator orientation="vertical" className="mx-1 h-5" />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

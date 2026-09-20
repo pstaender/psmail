@@ -2502,6 +2502,52 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       });
     });
 
+    describe("download from the reading pane", () => {
+      const saved: string[] = [];
+      const realClick = HTMLAnchorElement.prototype.click;
+      beforeEach(() => {
+        saved.length = 0;
+        URL.createObjectURL = () => "blob:test";
+        URL.revokeObjectURL = () => {};
+        HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+          saved.push(this.download);
+        };
+      });
+      afterEach(() => {
+        HTMLAnchorElement.prototype.click = realClick;
+      });
+
+      async function openMessage(opts: Parameters<typeof installMockFetch>[0] = {}) {
+        installMockFetch(opts);
+        render(<App />);
+        await userEvent.click(await screen.findByText("default"));
+        await openAccountInbox();
+        await userEvent.click(await screen.findByText("Hello there"));
+        return await screen.findByRole("button", { name: /download/i });
+      }
+
+      test("the toolbar's Download sits in its own group, just before Move, and saves the message as .eml", async () => {
+        const download = await openMessage();
+        const toolbar = download.parentElement!;
+        const children = Array.from(toolbar.children);
+        const at = children.indexOf(download);
+        expect(children[at - 1]!.getAttribute("role")).toBe("none"); // separators before and after: a group of its own
+        expect(children[at + 1]!.getAttribute("role")).toBe("none");
+        expect(children[at + 2]!.textContent).toContain("Move");
+
+        await userEvent.click(download);
+        await waitFor(() => expect(saved).toEqual(["2024-05-01 Grüße.eml"]));
+        expect(messageDownloads).toEqual([{ account: "me@example.com", ids: [10] }]);
+      });
+
+      test("it only reads, so it stays available on a disabled account", async () => {
+        const download = await openMessage({ accountOverrides: { disabled: true } });
+        expect(download.hasAttribute("disabled")).toBe(false);
+        await userEvent.click(download);
+        await waitFor(() => expect(messageDownloads).toHaveLength(1));
+      });
+    });
+
     test("Cmd/Ctrl+A and Shift+arrows work in the combined list too", async () => {
       await openCombined();
       (document.body as HTMLElement).focus();
@@ -3631,6 +3677,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
           onForward={noop}
           onDelete={noop}
           onMove={noop}
+          onDownload={noop}
           onToggleRead={noop}
           onEditDraft={noop}
           accountDisabled={false}
