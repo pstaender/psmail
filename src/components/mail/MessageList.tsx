@@ -28,6 +28,7 @@ export function MessageList({
   onToggleFlag,
   onEditDraft,
   onOpen = () => {},
+  filtered = false,
 }: {
   emails: EmailRecord[];
   loading: boolean;
@@ -47,6 +48,8 @@ export function MessageList({
   onEditDraft: (email: EmailRecord) => void;
   /** Double-clicking any other message opens it for reading, which lets the app get the list out of the way. */
   onOpen?: (email: EmailRecord) => void;
+  /** A date filter is on: an empty list means nothing in that period, not an empty folder. */
+  filtered?: boolean;
 }) {
   const sentinelRef = useRef<HTMLLIElement>(null);
   const onLoadMoreRef = useRef(onLoadMore);
@@ -74,7 +77,7 @@ export function MessageList({
   }
 
   if (emails.length === 0) {
-    return <EmptyState title="No messages" description="This folder is empty." />;
+    return <EmptyState title="No messages" description={filtered ? "Nothing in the chosen dates." : "This folder is empty."} />;
   }
 
   return (

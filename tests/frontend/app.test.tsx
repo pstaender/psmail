@@ -155,6 +155,8 @@ let capturedCreateDraftBody: Record<string, unknown> | null = null;
 /** Bodies of POST .../folders (new folders), and how the mock server answers them. */
 /** POST .../emails/download requests (account + ids) of the mock server. */
 let messageDownloads: { account: string; ids: number[] }[] = [];
+/** Query strings of the GET requests for a folder's messages / the combined lists, in order. */
+let listRequests: { list: "folder" | "inbox" | "sent"; params: URLSearchParams }[] = [];
 let createFolderPosts: { name: string; parent?: string }[] = [];
 let createFolderError: string | null = null;
 // Same, for PATCH .../emails/13 (DRAFT_EMAIL) — asserts that editing an existing draft updates
@@ -246,6 +248,7 @@ function installMockFetch(
   capturedCreateDraftBody = null;
   createFolderPosts = [];
   messageDownloads = [];
+  listRequests = [];
   createFolderError = null;
   const createdFolders: Record<string, unknown>[] = [...(opts.extraFolders ?? [])];
   capturedUpdateDraftBody = null;
@@ -381,6 +384,9 @@ function installMockFetch(
       return jsonResponse({ count: opts.inboxUnread ?? 0 });
     }
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails") {
+      const listParams = new URL(url, "http://localhost").searchParams;
+      listRequests.push({ list: "folder", params: listParams });
+      if (listParams.has("after") || listParams.has("before")) return jsonResponse([]); // the mock has nothing in any date window
       if (opts.pagedEmailCount !== undefined) {
         const params = new URL(url, "http://localhost").searchParams;
         const limit = Number(params.get("limit") ?? 50);
@@ -453,6 +459,11 @@ function installMockFetch(
       capturedSettingsPatches.push(body);
       currentSettings = { ...currentSettings, ...body };
       return jsonResponse(currentSettings);
+    }
+    if (method === "GET" && (path === "/api/unified/inbox" || path === "/api/unified/sent")) {
+      const listParams = new URL(url, "http://localhost").searchParams;
+      listRequests.push({ list: path.endsWith("inbox") ? "inbox" : "sent", params: listParams });
+      if (listParams.has("after") || listParams.has("before")) return jsonResponse([]);
     }
     if (method === "GET" && path === "/api/unified/inbox") {
       if (opts.unifiedInboxRows) return jsonResponse(opts.unifiedInboxRows);
@@ -1027,6 +1038,118 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
     expect(screen.queryByText("New message")).toBeNull();
     expect(screen.queryByText("Edit draft", { selector: "[data-slot=dialog-title]" })).toBeNull();
+  });
+
+  describe("filtering the list by date", () => {
+    const localDay = (y: number, m: number, d: number) => new Date(y, m - 1, d);
+    const last = (list: "folder" | "inbox" | "sent") => listRequests.filter(r => r.list === list).at(-1)!.params;
+
+    async function openFolder() {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+      await screen.findByText("Hello there");
+    }
+    async function openDialog() {
+      await userEvent.click(screen.getByRole("button", { name: "More" }));
+      await userEvent.click(await screen.findByRole("menuitem", { name: /filter by date/i }));
+      return within((await screen.findByText("Filter by date", { selector: "[data-slot=dialog-title]" })).closest('[role="dialog"]') as HTMLElement);
+    }
+    const setDay = (dialog: ReturnType<typeof within>, label: string, value: string) => fireEvent.change(dialog.getByLabelText(label), { target: { value } });
+
+    test("a More button next to New opens the filter dialog; a specific day asks for that day (in the user's time zone) and shows a chip", async () => {
+      await openFolder();
+      expect(last("folder").has("after")).toBe(false); // no filter, no window
+      const dialog = await openDialog();
+
+      setDay(dialog, "Day", "2026-03-02");
+      await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
+
+      await waitFor(() => expect(last("folder").get("after")).toBe(localDay(2026, 3, 2).toISOString()));
+      expect(last("folder").get("before")).toBe(localDay(2026, 3, 3).toISOString()); // to the start of the next day
+      expect(await screen.findByText("Nothing in the chosen dates.")).toBeTruthy();
+      expect(screen.getByTitle("Change the date filter").textContent).toContain("2026");
+
+      await userEvent.click(screen.getByLabelText("Clear the date filter"));
+      await waitFor(() => expect(last("folder").has("after")).toBe(false));
+      expect(await screen.findByText("Hello there")).toBeTruthy();
+      expect(screen.queryByTitle("Change the date filter")).toBeNull();
+    });
+
+    test("a range includes both days; 'since' and 'before' set one side only", async () => {
+      await openFolder();
+
+      let dialog = await openDialog();
+      await userEvent.click(dialog.getByRole("radio", { name: "Date range" }));
+      setDay(dialog, "From", "2026-03-02");
+      setDay(dialog, "To", "2026-03-04");
+      await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
+      await waitFor(() => expect(last("folder").get("before")).toBe(localDay(2026, 3, 5).toISOString())); // the last day is part of it
+      expect(last("folder").get("after")).toBe(localDay(2026, 3, 2).toISOString());
+
+      dialog = await openDialog();
+      await userEvent.click(dialog.getByRole("radio", { name: "Since a date" }));
+      setDay(dialog, "Since", "2026-03-02");
+      await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
+      await waitFor(() => expect(last("folder").has("before")).toBe(false));
+      expect(last("folder").get("after")).toBe(localDay(2026, 3, 2).toISOString()); // that day is included
+
+      dialog = await openDialog();
+      await userEvent.click(dialog.getByRole("radio", { name: "Before a date" }));
+      setDay(dialog, "Before", "2026-03-02");
+      await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
+      await waitFor(() => expect(last("folder").has("after")).toBe(false));
+      expect(last("folder").get("before")).toBe(localDay(2026, 3, 2).toISOString()); // that day is not
+    });
+
+    test("a range that ends before it starts, or no date, can't be applied", async () => {
+      await openFolder();
+      const dialog = await openDialog();
+      await userEvent.click(dialog.getByRole("radio", { name: "Date range" }));
+      setDay(dialog, "From", "2026-03-05");
+      setDay(dialog, "To", "2026-03-02");
+      expect(dialog.getByText("The range ends before it starts.")).toBeTruthy();
+      expect(dialog.getByRole("button", { name: "Apply" }).hasAttribute("disabled")).toBe(true);
+
+      setDay(dialog, "To", "");
+      expect(dialog.getByText("Pick a date.")).toBeTruthy();
+    });
+
+    test("the dialog shows the filter in effect and can clear it", async () => {
+      await openFolder();
+      let dialog = await openDialog();
+      setDay(dialog, "Day", "2026-03-02");
+      await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
+      await screen.findByTitle("Change the date filter");
+
+      dialog = await openDialog();
+      expect((dialog.getByLabelText("Day") as HTMLInputElement).value).toBe("2026-03-02");
+      await userEvent.click(dialog.getByRole("button", { name: "Clear filter" }));
+      await waitFor(() => expect(screen.queryByTitle("Change the date filter")).toBeNull());
+    });
+
+    test("it works in the combined Inbox too, and each list starts without a filter", async () => {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await screen.findByText("Unified hello"); // the combined Inbox
+      const dialog = await openDialog();
+      setDay(dialog, "Day", "2026-03-02");
+      await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
+      await waitFor(() => expect(last("inbox").get("after")).toBe(localDay(2026, 3, 2).toISOString()));
+      await screen.findByTitle("Change the date filter");
+
+      await userEvent.click(screen.getByTitle("Sent of all accounts")); // another list: no filter
+      await screen.findByText("Unified outgoing");
+      expect(screen.queryByTitle("Change the date filter")).toBeNull();
+      expect(last("sent").has("after")).toBe(false);
+    });
+
+    test("there is no filter button while searching", async () => {
+      await openFolder();
+      await userEvent.type(screen.getByPlaceholderText(/search all mail/i), "second");
+      await waitFor(() => expect(screen.getByText(/Search: "second"/)).toBeTruthy());
+      expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+    });
   });
 
   test("double-clicking a message reads it with the list collapsed; the strip brings the list back", async () => {

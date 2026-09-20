@@ -18,6 +18,7 @@ import {
   type EmailRow,
 } from "../models/emails";
 import { json, noContent, parseIntParam, readJsonBody, requireAuth, requiredParam, withErrorHandling } from "../http";
+import { readDateBounds } from "../models/dateBounds";
 import { getEmailAttachmentsDir, sanitizeSegment } from "../config/paths";
 import { sendDraftEmail, type AttachmentWithData } from "../services/smtp";
 import { buildStoredEml, emlFileName, zipStream, type ZipEntry } from "../services/eml";
@@ -284,6 +285,7 @@ export function emailsRoutes(db: Database) {
 
         return json(
           listEmails(db, account.id, {
+            ...readDateBounds(url.searchParams),
             folder,
             limit: limit ? Number(limit) : undefined,
             offset: offset ? Number(offset) : undefined,

@@ -160,8 +160,10 @@ export const api = {
       body: { name, parent: parent ?? undefined },
     }),
 
-  listEmails: (token: string, accountEmail: string, folder: string, opts: { limit?: number; offset?: number } = {}) => {
+  listEmails: (token: string, accountEmail: string, folder: string, opts: { limit?: number; offset?: number; after?: string; before?: string } = {}) => {
     const params = new URLSearchParams({ folder });
+    if (opts.after) params.set("after", opts.after);
+    if (opts.before) params.set("before", opts.before);
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.offset) params.set("offset", String(opts.offset));
     return request<EmailRecord[]>("GET", `/api/accounts/${enc(accountEmail)}/emails?${params}`, { token });
@@ -291,8 +293,10 @@ export const api = {
   /** Unread messages across all accounts' Inboxes — the combined Inbox's badge. */
   unifiedInboxUnread: (token: string) => request<{ count: number }>("GET", "/api/unified/inbox/unread", { token }),
   /** Newest-first messages across all accounts' Inboxes (`inbox`) or Sent folders (`sent`). */
-  listUnified: (token: string, kind: UnifiedKind, opts: { limit?: number; offset?: number } = {}) => {
+  listUnified: (token: string, kind: UnifiedKind, opts: { limit?: number; offset?: number; after?: string; before?: string } = {}) => {
     const params = new URLSearchParams();
+    if (opts.after) params.set("after", opts.after);
+    if (opts.before) params.set("before", opts.before);
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.offset) params.set("offset", String(opts.offset));
     return request<SearchResult[]>("GET", `/api/unified/${kind}?${params}`, { token });

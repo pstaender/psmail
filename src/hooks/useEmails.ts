@@ -5,7 +5,7 @@ import { useAuth } from "../contexts/AuthContext";
 
 const PAGE_SIZE = 100;
 
-export function useEmails(accountEmail: string | null, folder: string | null) {
+export function useEmails(accountEmail: string | null, folder: string | null, bounds: { after?: string; before?: string } = {}) {
   const { token } = useAuth();
   const [emails, setEmails] = useState<EmailRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -14,7 +14,7 @@ export function useEmails(accountEmail: string | null, folder: string | null) {
   const [error, setError] = useState<string | null>(null);
 
   // Identifies the current account+folder; responses that arrive for an older one are dropped.
-  const viewKey = `${accountEmail}/${folder}`;
+  const viewKey = `${accountEmail}/${folder}/${bounds.after ?? ""}/${bounds.before ?? ""}`;
   const viewKeyRef = useRef(viewKey);
   viewKeyRef.current = viewKey;
   const loadedCountRef = useRef(0);
@@ -35,7 +35,7 @@ export function useEmails(accountEmail: string | null, folder: string | null) {
       setLoading(true);
       setError(null);
       try {
-        const page = await api.listEmails(token, accountEmail, folder, { limit });
+        const page = await api.listEmails(token, accountEmail, folder, { limit, ...bounds });
         if (viewKeyRef.current !== key) return;
         setEmails(page);
         setHasMore(page.length >= limit);
@@ -47,7 +47,7 @@ export function useEmails(accountEmail: string | null, folder: string | null) {
         if (viewKeyRef.current === key) setLoading(false);
       }
     },
-    [token, accountEmail, folder]
+    [token, accountEmail, folder, bounds.after, bounds.before]
   );
 
   const refresh = useCallback(() => load(true), [load]);
@@ -67,6 +67,7 @@ export function useEmails(accountEmail: string | null, folder: string | null) {
       const page = await api.listEmails(token, accountEmail, folder, {
         limit: PAGE_SIZE,
         offset: loadedCountRef.current,
+        ...bounds,
       });
       if (viewKeyRef.current !== key) return;
       // New mail arriving at the top shifts later pages down by one, so an item can show up twice.
@@ -83,7 +84,7 @@ export function useEmails(accountEmail: string | null, folder: string | null) {
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [token, accountEmail, folder, hasMore]);
+  }, [token, accountEmail, folder, hasMore, bounds.after, bounds.before]);
 
   const patchLocal = useCallback((id: number, patch: Partial<EmailRecord>) => {
     setEmails(prev => prev.map(e => (e.id === id ? { ...e, ...patch } : e)));

@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { recordContacts } from "./contacts";
 import { NotFoundError, type AttachmentRecord, type EmailAddress, type EmailRecord } from "../types";
+import { dateBoundsSql, type DateBounds } from "./dateBounds";
 
 type SqlBindings = (string | number | null)[];
 
@@ -207,7 +208,7 @@ function recordContactsFor(db: Database, accountId: number, email: EmailRecord, 
   recordContacts(db, accountId, own, email, outgoing);
 }
 
-export interface ListEmailsOptions {
+export interface ListEmailsOptions extends DateBounds {
   folder?: string;
   limit?: number;
   offset?: number;
@@ -244,17 +245,20 @@ export function listEmails(db: Database, accountId: number, options: ListEmailsO
   const limit = options.limit ?? 50;
   const offset = options.offset ?? 0;
 
+  // A date window is plain range conditions after the folder, so the (account, folder, date, id) index still serves the
+  // list in order: the rows come straight off a range of it, without reading the rest of the folder or sorting.
+  const window = dateBoundsSql(options);
   const rows = options.folder
     ? db
-        .query<EmailRow, [number, string, number, number]>(
-          `SELECT ${LIST_COLUMNS} FROM emails WHERE account_id = ? AND folder = ? ORDER BY date DESC, id DESC LIMIT ? OFFSET ?`
+        .query<EmailRow, (string | number)[]>(
+          `SELECT ${LIST_COLUMNS} FROM emails WHERE account_id = ? AND folder = ?${window.sql} ORDER BY date DESC, id DESC LIMIT ? OFFSET ?`
         )
-        .all(accountId, options.folder, limit, offset)
+        .all(accountId, options.folder, ...window.params, limit, offset)
     : db
-        .query<EmailRow, [number, number, number]>(
-          `SELECT ${LIST_COLUMNS} FROM emails WHERE account_id = ? ORDER BY date DESC, id DESC LIMIT ? OFFSET ?`
+        .query<EmailRow, (string | number)[]>(
+          `SELECT ${LIST_COLUMNS} FROM emails WHERE account_id = ?${window.sql} ORDER BY date DESC, id DESC LIMIT ? OFFSET ?`
         )
-        .all(accountId, limit, offset);
+        .all(accountId, ...window.params, limit, offset);
 
   return rows.map(row => toEmail(row));
 }

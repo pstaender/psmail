@@ -12,7 +12,7 @@ const PAGE_SIZE = 100;
  * Both come back as SearchResults and page in `PAGE_SIZE` chunks via `loadMore`. Empty queries with
  * no unified mailbox return nothing without hitting the API.
  */
-export function useSearchResults(query: string, unified: UnifiedKind | null = null) {
+export function useSearchResults(query: string, unified: UnifiedKind | null = null, bounds: { after?: string; before?: string } = {}) {
   const { token } = useAuth();
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -21,7 +21,9 @@ export function useSearchResults(query: string, unified: UnifiedKind | null = nu
   const [error, setError] = useState<string | null>(null);
 
   const trimmed = query.trim();
-  const sourceKey = trimmed ? `search:${trimmed}` : unified ? `unified:${unified}` : "";
+  // A date filter belongs to a mailbox list; a search has its own way to narrow things.
+  const window = trimmed ? {} : bounds;
+  const sourceKey = trimmed ? `search:${trimmed}` : unified ? `unified:${unified}:${window.after ?? ""}:${window.before ?? ""}` : "";
   const sourceKeyRef = useRef(sourceKey);
   sourceKeyRef.current = sourceKey;
   const loadedCountRef = useRef(0);
@@ -29,8 +31,8 @@ export function useSearchResults(query: string, unified: UnifiedKind | null = nu
 
   const fetchPage = useCallback(
     (limit: number, offset: number) =>
-      trimmed ? api.search(token!, trimmed, { limit, offset }) : api.listUnified(token!, unified!, { limit, offset }),
-    [token, trimmed, unified]
+      trimmed ? api.search(token!, trimmed, { limit, offset }) : api.listUnified(token!, unified!, { limit, offset, ...window }),
+    [token, trimmed, unified, window.after, window.before]
   );
 
   // `keepLoaded` re-fetches as many results as are already showing, so a refresh doesn't drop scrolled-in pages.

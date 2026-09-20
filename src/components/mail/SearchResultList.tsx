@@ -27,6 +27,7 @@ export function SearchResultList({
   selectedIds,
   onSelect,
   onOpen = () => {},
+  filtered = false,
 }: {
   results: SearchResult[];
   loading: boolean;
@@ -45,6 +46,8 @@ export function SearchResultList({
   onSelect: (result: SearchResult, event: React.MouseEvent) => void;
   /** Double-clicking a result opens it for reading, which lets the app get the list out of the way. */
   onOpen?: (result: SearchResult) => void;
+  /** A date filter is on: an empty list means nothing in that period. */
+  filtered?: boolean;
 }) {
   const sentinelRef = useRef<HTMLLIElement>(null);
   const onLoadMoreRef = useRef(onLoadMore);
@@ -71,7 +74,7 @@ export function SearchResultList({
   }
 
   if (results.length === 0) {
-    return <EmptyState title="No results" description="Try a different search term." />;
+    return <EmptyState title={filtered ? "No messages" : "No results"} description={filtered ? "Nothing in the chosen dates." : "Try a different search term."} />;
   }
 
   return (
