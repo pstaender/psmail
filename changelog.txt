@@ -7,6 +7,19 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Categories in the message lists (0a1ee67)
+------------------------------------------------------
+A message that has categories (the taxonomy labels a Categorize AI skill stores on it) now shows them in the lists: small
+chips under the subject, the first three and then "+N" (the tooltip lists all of them). Messages without categories look
+exactly as before.
+- Folder lists: the list query now includes taxonomy_list (the record already had taxonomyList; lists just didn't load it).
+- Search results and the combined Inbox/Sent: rows carry taxonomyList when the message has categories (absent otherwise,
+  so nothing else in the API changes), looked up for the page only, like the paperclip.
+- New CategoryChips component shared by both lists; the reading pane's Summary tab is unchanged.
+- Tests: the three lists' data (folder, combined, search; empty list and none), the chips (three + "+2", none) and
+  the combined list rendering them. Not looked at in a browser.
+
+
 2026-09-20 - Message toolbar is always visible again (fa08e37)
 -----------------------------------------------------------
 The reading pane's toolbar is a plain, always-visible row again (Reply, Forward, Translate, Mark read, Download, Move,
