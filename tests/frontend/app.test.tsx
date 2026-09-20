@@ -3046,8 +3046,36 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(screen.queryByLabelText("Dates and events")).toBeNull();
     });
 
+    test("it is collapsed to a line with the number found; a click opens it (and pins it) and another closes it", async () => {
+      render(<EventList events={[TEST_ICS_DEADLINE, TEST_ICS_CALL]} />);
+      const trigger = screen.getByRole("button", { name: /2 dates and events/ });
+      expect(trigger.getAttribute("aria-expanded")).toBe("false");
+      expect(screen.queryByText("Submit documents")).toBeNull();
+      expect(screen.queryByTitle("Download all as one .ics file")).toBeNull();
+
+      await userEvent.click(trigger);
+      expect(await screen.findByText("Submit documents")).toBeTruthy();
+      fireEvent.mouseLeave(screen.getByLabelText("Dates and events")); // pinned by the click: leaving doesn't close it
+      expect(screen.getByText("Submit documents")).toBeTruthy();
+
+      await userEvent.click(trigger); // the pointer is still over it, and it closes anyway
+      await waitFor(() => expect(screen.queryByText("Submit documents")).toBeNull());
+      expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    });
+
+    test("hovering opens it, and moving away closes it again", async () => {
+      render(<EventList events={[TEST_ICS_DEADLINE]} />);
+      const box = screen.getByLabelText("Dates and events");
+      expect(screen.getByRole("button", { name: /1 date or event/ })).toBeTruthy(); // singular
+      fireEvent.mouseEnter(box);
+      expect(await screen.findByText("Submit documents")).toBeTruthy();
+      fireEvent.mouseLeave(box);
+      await waitFor(() => expect(screen.queryByText("Submit documents")).toBeNull());
+    });
+
     test("each event is listed with its title, date and place, and downloads as its own .ics", async () => {
       render(<EventList events={[TEST_ICS_DEADLINE, TEST_ICS_CALL]} />);
+      await userEvent.click(screen.getByRole("button", { name: /dates and events/ }));
       const list = screen.getByLabelText("Dates and events");
       expect(within(list).getByText("Submit documents")).toBeTruthy();
       expect(within(list).getByText("Call with Alice, Bob")).toBeTruthy(); // the escaped comma reads normally
@@ -3062,6 +3090,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
     test("with several, one button downloads all of them in a single .ics", async () => {
       render(<EventList events={[TEST_ICS_DEADLINE, TEST_ICS_CALL]} />);
+      await userEvent.click(screen.getByRole("button", { name: /dates and events/ }));
       await userEvent.click(screen.getByTitle("Download all as one .ics file"));
       await waitFor(() => expect(saved).toHaveLength(1));
       const text = await saved[0]!.text;
@@ -3073,8 +3102,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(text.trimEnd().endsWith("END:VCALENDAR")).toBe(true);
     });
 
-    test("a single event has no 'All' button", () => {
+    test("a single event has no 'All' button", async () => {
       render(<EventList events={[TEST_ICS_DEADLINE]} />);
+      await userEvent.click(screen.getByRole("button", { name: /date or event/ }));
       expect(screen.queryByTitle("Download all as one .ics file")).toBeNull();
     });
 
@@ -3087,7 +3117,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
       await userEvent.click(await screen.findByRole("button", { name: "Summarize this message with AI" }));
       const list = await screen.findByLabelText("Dates and events");
-      expect(within(list).getByText("Submit documents")).toBeTruthy();
+      expect(within(list).queryByText("Submit documents")).toBeNull(); // collapsed: just the count
+      await userEvent.click(within(list).getByRole("button", { name: /2 dates and events/ }));
+      expect(await within(list).findByText("Submit documents")).toBeTruthy();
     });
   });
 

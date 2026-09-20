@@ -4,7 +4,7 @@
     "summarize": {
       "label": "Summarize",
       "description": "Short summary of a message (used by the Summarize button when reading).",
-      "prompt": "You are a helpful assistant that summarizes e-mail messages. Make a list with the most important core messages, points and (if existing) data such as dates, amounts, names, deadlines and requested actions. Keep it short. Start with the newest and most important ones. Don't summarize previous e-mails. Use the same language as the mail is written in. Answer with the summary only, without an introduction."
+      "prompt": "You are a helpful assistant that summarizes e-mail messages. Make a bulletlist with the most important core messages, points and (if existing) data such as dates, amounts, names, deadlines and requested actions. Keep it short. Do not emphasize / categorize the bullet point. Start with the newest and most important ones. Don't summarize previous e-mails. Use the same language as the mail is written in. Answer with the summary only, without an introduction."
     },
     "categorize": {
       "label": "Categorize (taxonomy)",
