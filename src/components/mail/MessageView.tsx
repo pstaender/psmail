@@ -66,7 +66,12 @@ export function MessageView({
         onSummarize={onSummarize}
         onTranslate={onTranslate}
       />
-      <MessageHeader email={email} />
+      <MessageHeader
+        email={email}
+        summarizeSkills={accountDisabled ? [] : aiSkills.filter(skill => skill.category === "summarize")}
+        summarizing={aiBusy === "summarize"}
+        onSummarize={onSummarize}
+      />
       <AttachmentList accountEmail={accountEmail} emailId={email.id} attachments={email.attachments ?? []} />
       <div className="flex-1 overflow-y-auto">
         <MessageBody

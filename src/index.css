@@ -48,6 +48,10 @@ img[alt="P.S.Mail logo"] {
           display: none;
         }
       }
+      *[aria-label="Categories"] {
+        display: none;
+      }
     }
+
   }
 }

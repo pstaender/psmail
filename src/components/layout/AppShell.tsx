@@ -138,6 +138,7 @@ export function AppShell() {
   // The AI buttons of the reading pane: summarize (+ categorize when that skill exists) and translate. The result is
   // stored on the message by the server; here it is just put into the open message.
   const [aiBusy, setAiBusy] = useState<"summarize" | "translate" | null>(null);
+  const [aiBusyEmailId, setAiBusyEmailId] = useState<number | null>(null); // which message the running AI call is for
   const openEmailId = useRef<number | null>(null);
   // Summarizing/translating again replaces a stored result (and costs another AI call), so it asks first.
   const [confirmAi, setConfirmAi] = useState<{ kind: "summarize" | "translate"; skillId: number } | null>(null);
@@ -151,6 +152,7 @@ export function AppShell() {
     if (!token || !selectedAccountEmail || !selectedEmail) return;
     const id = selectedEmail.id;
     setAiBusy(kind);
+    setAiBusyEmailId(id);
     try {
       const result =
         kind === "summarize"
@@ -935,7 +937,6 @@ export function AppShell() {
             title="Settings"
           >
             <Settings className="size-4" />
-            {username === "default" ? "Settings" : username}
           </Button>
           <Button variant="ghost" size="icon" onClick={logout} title="Sign out">
             <LogOut className="size-4" />
@@ -1075,7 +1076,7 @@ export function AppShell() {
               onEditDraft={() => openCompose(editDraft(selectedEmail))}
               accountDisabled={isDisabledAccount(selectedAccountEmail)}
               aiSkills={aiSkills}
-              aiBusy={aiBusy}
+              aiBusy={aiBusyEmailId === selectedEmail.id ? aiBusy : null}
               onSummarize={skillId => requestAi("summarize", skillId)}
               onTranslate={skillId => requestAi("translate", skillId)}
             />

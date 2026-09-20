@@ -216,6 +216,8 @@ function installMockFetch(
     liveFolders?: Record<string, unknown>[] | "fail";
     /** GET .../folders answers with the stored folders and this reason in x-folders-warning (the mail server can't be reached). */
     folderWarning?: string;
+    /** POST .../ai/summarize answers only after this many ms (to see the "generating" state). */
+    aiSummarizeDelayMs?: number;
     /** Folders next to the default ones (e.g. nested ones like Work/2024) in the account's folder list. */
     extraFolders?: Record<string, unknown>[];
     /** Categories the user has AI skills for (all on one provider); they show up in GET /api/ai/skills. */
@@ -426,6 +428,7 @@ function installMockFetch(
       }
       if (path === "/api/ai/run") return jsonResponse({ text: "Corrected text" });
       if (path.endsWith("/ai/summarize")) {
+        if (opts.aiSummarizeDelayMs) await new Promise(resolve => setTimeout(resolve, opts.aiSummarizeDelayMs));
         return jsonResponse({ email: { ...EMAIL, aiSummary: "- Alice says hello\n- No action needed", taxonomyList: ["greeting", "personal"] } });
       }
       if (path.endsWith("/ai/translate")) {
@@ -838,7 +841,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(screen.queryByText("default")).toBeNull();
   });
 
-  test("the header shows a non-default username", async () => {
+  test("the header's Settings button is an icon (with a Settings tooltip), also for a non-default username", async () => {
     installMockFetch({ extraUsers: [{ id: 2, username: "secure" }] });
     render(<App />);
 
@@ -847,7 +850,8 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
     await openAccountInbox();
 
-    expect(screen.getByText("secure")).toBeTruthy();
+    expect(screen.getByTitle("Settings")).toBeTruthy();
+    expect(screen.queryByText("secure")).toBeNull(); // the name isn't printed in the header any more
   });
 
   test("the Text/MD reading-pane tabs render via the non-editable RenderPureMarkdown component", async () => {
@@ -3005,6 +3009,46 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(aiRequests.some(([m, p]) => m === "POST" && p === "/api/accounts/me%40example.com/emails/10/ai/summarize")).toBe(true);
     });
 
+    describe("the sparkles icon next to the subject", () => {
+      const icon = () => screen.queryByRole("button", { name: "Summarize this message with AI" });
+      async function openHello(opts: Parameters<typeof installMockFetch>[0]) {
+        installMockFetch(opts);
+        await login();
+        await userEvent.click(await screen.findByText("Hello there"));
+        await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+      }
+
+      test("with a summarize skill and no summary yet it is offered; clicking says it is generating, and it is gone when the summary is there", async () => {
+        await openHello({ aiSkillCategories: ["summarize"], aiSummarizeDelayMs: 300 });
+        const button = await waitFor(() => icon()!);
+        expect(button.querySelector("svg.lucide-sparkles")).toBeTruthy();
+        expect(screen.queryByRole("status")).toBeNull();
+
+        await userEvent.click(button);
+        const status = await screen.findByRole("status");
+        expect(status.textContent).toContain("Generating the summary");
+        expect(status.textContent).toContain("may take a moment");
+
+        expect(await screen.findByText(/Alice says hello/)).toBeTruthy(); // done: the Summary tab opens itself
+        await waitFor(() => expect(icon()).toBeNull());
+        expect(screen.queryByRole("status")).toBeNull();
+        expect(screen.getByRole("button", { name: "Summarize again" })).toBeTruthy(); // running it again is possible, from the Summary tab
+      });
+
+      test("a message that already has a summary doesn't show it", () => {
+        const skill = { id: 1, name: "Summarize", category: "summarize" } as never;
+        const { rerender } = render(<MessageHeader email={{ ...EMAIL, aiSummary: null } as never} summarizeSkills={[skill]} />);
+        expect(icon()).toBeTruthy();
+        rerender(<MessageHeader email={{ ...EMAIL, aiSummary: "- already summarized" } as never} summarizeSkills={[skill]} />);
+        expect(icon()).toBeNull();
+      });
+
+      test("without a summarize skill (AI not set up, or only other skills) there is no icon", async () => {
+        await openHello({ aiSkillCategories: ["translate"] });
+        expect(icon()).toBeNull();
+      });
+    });
+
     test("summarizing happens in the Summary tab (the toolbar has no Summarize button) and the result stays there", async () => {
       installMockFetch({ aiSkillCategories: ["summarize"] });
       await login();
@@ -3670,10 +3714,10 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     const labelled = { ...EMAIL, taxonomyList: ["finance", "invoice", "tax", "2024", "paid"] };
     const listProps = { loading: false, hasMore: false, loadingMore: false, onLoadMore: () => {}, selectedId: null, selectedIds: new Set<number>(), folder: "INBOX", onSelect: () => {}, onToggleFlag: () => {}, onEditDraft: () => {} };
 
-    test("a message with categories shows the first three as chips, the rest as +N (all in the tooltip)", () => {
+    test("a message with categories shows the first four as chips, the rest as +N (all in the tooltip)", () => {
       render(<MessageList {...listProps} emails={[labelled as never]} />);
       const chips = screen.getByRole("list", { name: "Categories" });
-      expect(Array.from(chips.querySelectorAll("li")).map(li => li.textContent)).toEqual(["finance", "invoice", "tax", "+2"]);
+      expect(Array.from(chips.querySelectorAll("li")).map(li => li.textContent)).toEqual(["finance", "invoice", "tax", "2024", "+1"]);
       expect(chips.getAttribute("title")).toBe("finance, invoice, tax, 2024, paid");
     });
 

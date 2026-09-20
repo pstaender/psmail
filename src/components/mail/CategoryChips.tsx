@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 
 /** How many categories a list row shows before "+N" (the row's tooltip has them all). */
-const SHOWN = 3;
+const SHOWN = 4;
 
 /** A message's categories (the AI's taxonomy labels) as small chips, for the message lists. Nothing without any. */
 export function CategoryChips({ labels }: { labels?: string[] | null }) {
