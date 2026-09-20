@@ -532,7 +532,6 @@ function installMockFetch(
 describe("frontend smoke test (headless render, mocked backend)", () => {
   beforeEach(() => {
     localStorage.clear();
-    localStorage.setItem("psmail.messageActionsOpen", "true"); // the message actions start closed; most tests use them, so they start open
     window.history.replaceState(null, "", "/");
     installMockFetch();
   });
@@ -963,8 +962,11 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await waitFor(() => expect(screen.getAllByText("Unfinished draft").length).toBeGreaterThan(0));
 
     const editButton = await screen.findByRole("button", { name: /edit draft/i });
-    // It sits in the always-visible strip at the top, apart from the actions below it (which can be closed).
-    expect(screen.getByRole("button", { name: /delete/i }).parentElement!.contains(editButton)).toBe(false);
+    expect(editButton.className).toContain("ml-auto");
+
+    // Comes after Delete in the toolbar, consistent with "right-aligned, after Delete".
+    const deleteButton = screen.getByRole("button", { name: /delete/i });
+    expect(deleteButton.compareDocumentPosition(editButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     await userEvent.click(editButton);
     expect(await screen.findByText("Edit draft", { selector: "[data-slot=dialog-title]" })).toBeTruthy();
@@ -3663,16 +3665,15 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     });
   });
 
-  describe("message actions are tucked away", () => {
+  describe("message toolbar", () => {
     const noop = () => {};
-    const closed = () => localStorage.setItem("psmail.messageActionsOpen", "false");
     const folders = ["Archive", "Work/Invoices", "Work/Projects", "Private"].map(path => ({ path, name: path.split("/").pop()!, delimiter: "/", specialUse: null, flags: [], total: 0, unread: 0 }));
-    function renderToolbar(email: unknown = EMAIL, extra: { onMove?: (folder: string) => void; onReply?: () => void; accountDisabled?: boolean } = {}) {
+    function renderToolbar(email: unknown = EMAIL, extra: { onMove?: (folder: string) => void } = {}) {
       return render(
         <MessageToolbar
           email={email as never}
           folders={folders}
-          onReply={extra.onReply ?? noop}
+          onReply={noop}
           onReplyAll={noop}
           onForward={noop}
           onDelete={noop}
@@ -3680,45 +3681,18 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
           onDownload={noop}
           onToggleRead={noop}
           onEditDraft={noop}
-          accountDisabled={extra.accountDisabled ?? false}
+          accountDisabled={false}
         />
       );
     }
-    const reply = () => screen.queryByRole("button", { name: /^reply$/i });
 
-    test("only an arrow shows at first; it opens the actions below and closes them again", async () => {
-      closed();
+    test("all the actions are always visible: no hiding, no arrow", () => {
       renderToolbar();
-      const arrow = screen.getByRole("button", { name: "Message actions" });
-      expect(reply()).toBeNull();
-      expect(arrow.getAttribute("aria-expanded")).toBe("false");
-
-      await userEvent.click(arrow);
-      expect(reply()).toBeTruthy();
-      expect(arrow.getAttribute("aria-expanded")).toBe("true");
-
-      await userEvent.click(arrow);
-      expect(reply()).toBeNull();
-    });
-
-    test("it stays as it was left: the next message, and the next visit, start the way the user left it", async () => {
-      closed();
-      const { unmount } = renderToolbar();
-      await userEvent.click(screen.getByRole("button", { name: "Message actions" }));
-      expect(localStorage.getItem("psmail.messageActionsOpen")).toBe("true");
-      unmount();
-
-      renderToolbar({ ...EMAIL, id: 77 });
-      expect(reply()).toBeTruthy();
-    });
-
-    test("with the actions closed the keyboard reaches the arrow, and Enter opens them", async () => {
-      closed();
-      renderToolbar();
-      await userEvent.tab();
-      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Message actions" }));
-      await userEvent.keyboard("{Enter}");
-      expect(reply()).toBeTruthy();
+      for (const name of [/^reply$/i, /forward/i, /mark read|mark unread/i, /download/i, /delete/i]) {
+        expect(screen.getByRole("button", { name })).toBeTruthy();
+      }
+      expect(screen.getByRole("combobox", { name: /move/i })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Message actions" })).toBeNull();
     });
 
     test("Move is a combobox: typing narrows the folders, Enter moves, and it lists no folder that doesn't match", async () => {
@@ -3736,23 +3710,6 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await userEvent.click(screen.getByRole("combobox", { name: /move/i }));
       await userEvent.type(await screen.findByPlaceholderText("Find a folder…"), "zzz");
       expect(await screen.findByText("No folder found.")).toBeTruthy();
-    });
-
-    test("opening the Move list doesn't close the actions", async () => {
-      renderToolbar();
-      await userEvent.click(screen.getByRole("combobox", { name: /move/i }));
-      await screen.findByRole("option", { name: "Archive" });
-      expect(reply()).toBeTruthy();
-      await userEvent.keyboard("{Escape}");
-      await waitFor(() => expect(screen.queryByRole("option", { name: "Archive" })).toBeNull());
-      expect(reply()).toBeTruthy();
-    });
-
-    test("a draft keeps its Edit draft button in view even with the actions closed, since editing is what a draft is for", () => {
-      closed();
-      renderToolbar({ ...EMAIL, isDraft: true });
-      expect(screen.getByRole("button", { name: /edit draft/i })).toBeTruthy();
-      expect(reply()).toBeNull();
     });
   });
 

@@ -1,13 +1,11 @@
 import { useEffect, useState } from "react";
-import { ChevronRight, Download, FolderInput, Forward, Languages, Mail, PenSquare, Reply, ReplyAll, Trash2 } from "lucide-react";
+import { Download, FolderInput, Forward, Languages, Mail, PenSquare, Reply, ReplyAll, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { EmailRecord } from "../../server/types";
 import type { FolderInfo } from "@/lib/api";
 import type { AiSkillRecord } from "../../server/models/ai";
-import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import { AiSkillButton } from "./AiSkillButton";
 import { FolderCombobox } from "./FolderCombobox";
 
@@ -60,30 +58,8 @@ export function MessageToolbar({
   const [replyAllShown, setReplyAllShown] = useState(false);
   useEffect(() => setReplyAllShown(false), [email.id]);
 
-  // The actions stay out of the way so the mail is what you look at: a slim strip with just an arrow, which opens
-  // the toolbar below it (and closes it again). It starts closed, and stays as the user left it — between messages
-  // and between visits.
-  const [open, setOpen] = useLocalStorageState("psmail.messageActionsOpen", false);
-
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="border-b">
-      <div className="flex h-8 items-center justify-between px-2">
-        <CollapsibleTrigger asChild>
-          <Button variant="ghost" size="icon" className="size-7 text-muted-foreground" title="Message actions" aria-label="Message actions">
-            <ChevronRight className={cn("size-4 transition-transform", open && "rotate-90")} />
-          </Button>
-        </CollapsibleTrigger>
-
-        {/* Editing is what a draft is for, so this one stays in view. */}
-        {email.isDraft && (
-          <Button variant="ghost" size="sm" disabled={accountDisabled} title={frozen} onClick={onEditDraft}>
-            <PenSquare className="size-4" /> Edit draft
-          </Button>
-        )}
-      </div>
-
-      <CollapsibleContent>
-        <div className="flex flex-wrap items-center gap-1 px-3 pb-1.5">
+    <div className="flex items-center gap-1 border-b px-3 py-1.5">
       <Button
         variant="ghost"
         size="sm"
@@ -146,8 +122,12 @@ export function MessageToolbar({
       <Button variant="ghost" size="sm" disabled={accountDisabled} title={frozen} onClick={onDelete}>
         <Trash2 className="size-4" /> Delete
       </Button>
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+
+      {email.isDraft && (
+        <Button variant="ghost" size="sm" className="ml-auto" disabled={accountDisabled} title={frozen} onClick={onEditDraft}>
+          <PenSquare className="size-4" /> Edit draft
+        </Button>
+      )}
+    </div>
   );
 }
