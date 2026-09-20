@@ -7,6 +7,21 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Folder tree: subfolders start collapsed (f53ecb0)
+--------------------------------------------------------------
+Nested folders (Work/2024 inside Work) now sit inside their parent in the sidebar. A folder that has subfolders starts
+collapsed and shows an arrow; the arrow opens and closes it, and clicking the folder itself selects it and opens it.
+- Each level opens on its own (opening Work doesn't open Work/2024).
+- A collapsed folder shows the unread count of everything inside it, so mail in a hidden subfolder isn't lost from
+  view; once opened, the subfolder carries its own count.
+- The selected folder is never hidden: a link to Work/2024, or a folder you just created inside Work, opens its parents.
+- Nesting follows the folder paths and the folders the list really has: a folder whose parent isn't listed (say
+  Archive/2024 without an Archive) simply stays at the top level. Folders without subfolders get an empty spacer where
+  the arrow would be, so the names line up.
+- Tests: collapsed at the start, arrow/click opening, per-level, unread of hidden folders, selected folder revealed,
+  new folder revealed. Not tried in a browser against your accounts.
+
+
 2026-09-20 - New folders, created on the IMAP server (6d306dd)
 --------------------------------------------------------------
 An account's menu (the three dots) has "New folder...": a name and, optionally, a folder to put it in ("Inside", default
