@@ -32,6 +32,7 @@ const EMPTY: CreateAccountInput = {
   smtpPassword: "",
   readOnly: false,
   skipSoftDelete: false,
+  excludeFromAutoSync: false,
 };
 
 export function AddAccountDialog({ onCreated }: { onCreated: () => void }) {
@@ -211,6 +212,22 @@ export function AddAccountDialog({ onCreated }: { onCreated: () => void }) {
                 Trash and always expunge immediately.
               </p>
             </div>
+
+          <div className="flex items-start gap-2 rounded-md border p-3">
+            <Switch
+              id="acc-exclude-from-auto-sync"
+              className="mt-0.5"
+              checked={form.excludeFromAutoSync}
+              onCheckedChange={v => set("excludeFromAutoSync", v)}
+            />
+            <div className="space-y-0.5">
+              <Label htmlFor="acc-exclude-from-auto-sync">Exclude from automatic sync</Label>
+              <p className="text-xs text-muted-foreground">
+                Leaves this account out of the syncs that cover all accounts (the sync interval, the combined Inbox's
+                refresh button) — for servers like Gmail that throttle IMAP. Its own "Sync now" still works.
+              </p>
+            </div>
+          </div>
           </div>
 
           <DialogFooter>

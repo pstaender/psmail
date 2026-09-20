@@ -20,6 +20,7 @@ interface AccountRow {
   read_only: number;
   disabled: number;
   skip_soft_delete: number;
+  exclude_from_auto_sync: number;
   /** NULL = never checked; 0/1 = the server's UIDPLUS support as of the last check (see checkImapCapabilities in services/imap.ts). */
   imap_uidplus: number | null;
   sender_name: string | null;
@@ -57,6 +58,8 @@ export interface CreateAccountInput {
    * refreshed via checkImapCapabilities) needed for that move to be done safely.
    */
   skipSoftDelete?: boolean;
+  /** Keeps the account out of the global syncs (interval sync, "sync all Inboxes") — for servers like Gmail that throttle IMAP. */
+  excludeFromAutoSync?: boolean;
   /** Used as the From display name on outgoing mail sent from this account, instead of the bare address. */
   senderName?: string;
   /** Markdown, appended to the body of new/reply/forward compositions from this account (not edits of an existing draft). */
@@ -85,6 +88,7 @@ function toAccount(row: AccountRow): Account {
     readOnly: !!row.read_only,
     disabled: !!row.disabled,
     skipSoftDelete: !!row.skip_soft_delete,
+    excludeFromAutoSync: !!row.exclude_from_auto_sync,
     supportsUidPlus: row.imap_uidplus === null ? null : !!row.imap_uidplus,
     senderName: row.sender_name,
     signature: row.signature,
@@ -100,15 +104,15 @@ export function createAccount(db: Database, userId: number, input: CreateAccount
       AccountRow,
       [
         number, string, string | null, string, number, number, string, string, string, number, number, string, string,
-        number, number, string | null, string | null,
+        number, number, number, string | null, string | null,
       ]
     >(
       `INSERT INTO accounts (
         user_id, email, display_name,
         imap_host, imap_port, imap_secure, imap_username, imap_password_encrypted,
         smtp_host, smtp_port, smtp_secure, smtp_username, smtp_password_encrypted, read_only, skip_soft_delete,
-        sender_name, signature, position
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        exclude_from_auto_sync, sender_name, signature, position
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
         (SELECT COALESCE(MAX(position), 0) + 1 FROM accounts WHERE user_id = ?1))
       RETURNING *`
     )
@@ -128,6 +132,7 @@ export function createAccount(db: Database, userId: number, input: CreateAccount
       encryptSecret(input.smtpPassword, encryptionKey),
       input.readOnly ? 1 : 0,
       input.skipSoftDelete ? 1 : 0,
+      input.excludeFromAutoSync ? 1 : 0,
       input.senderName ?? null,
       input.signature ?? null
     );
@@ -187,6 +192,7 @@ export function updateAccount(db: Database, id: number, input: UpdateAccountInpu
     read_only: input.readOnly !== undefined ? (input.readOnly ? 1 : 0) : existing.read_only,
     disabled: input.disabled !== undefined ? (input.disabled ? 1 : 0) : existing.disabled,
     skip_soft_delete: input.skipSoftDelete !== undefined ? (input.skipSoftDelete ? 1 : 0) : existing.skip_soft_delete,
+    exclude_from_auto_sync: input.excludeFromAutoSync !== undefined ? (input.excludeFromAutoSync ? 1 : 0) : existing.exclude_from_auto_sync,
     // A cached "does this server support UIDPLUS" answer is only valid for the server it was
     // checked against — if the connection details changed, forget it until checkImapCapabilities
     // (services/imap.ts) re-checks the (possibly different) server on the next opportunity.
@@ -200,14 +206,14 @@ export function updateAccount(db: Database, id: number, input: UpdateAccountInpu
       AccountRow,
       [
         string, string | null, string, number, number, string, string, string, number, number, string, string, number,
-        number, number, number | null, string | null, string | null, number,
+        number, number, number, number | null, string | null, string | null, number,
       ]
     >(
       `UPDATE accounts SET
         email = ?, display_name = ?,
         imap_host = ?, imap_port = ?, imap_secure = ?, imap_username = ?, imap_password_encrypted = ?,
         smtp_host = ?, smtp_port = ?, smtp_secure = ?, smtp_username = ?, smtp_password_encrypted = ?, read_only = ?,
-        disabled = ?, skip_soft_delete = ?, imap_uidplus = ?, sender_name = ?, signature = ?,
+        disabled = ?, skip_soft_delete = ?, exclude_from_auto_sync = ?, imap_uidplus = ?, sender_name = ?, signature = ?,
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       WHERE id = ?
       RETURNING *`
@@ -228,6 +234,7 @@ export function updateAccount(db: Database, id: number, input: UpdateAccountInpu
       merged.read_only,
       merged.disabled,
       merged.skip_soft_delete,
+      merged.exclude_from_auto_sync,
       merged.imap_uidplus,
       merged.sender_name,
       merged.signature,

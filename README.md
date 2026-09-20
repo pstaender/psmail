@@ -111,6 +111,8 @@ Accounts also have a `readOnly` flag (editable via "Account settings" in the sid
 
 A `skipSoftDelete` flag (same place, or `skipSoftDelete: true/false`) opts an account out of the default soft-delete-to-Trash behavior, always expunging permanently instead — see "Delete" above. A `supportsUidPlus` field (`true`/`false`/`null` for "never checked") reports the account's cached UIDPLUS capability, refreshed via "Check server capabilities" or `POST .../imap-capabilities`; it's automatically invalidated (reset to `null`) whenever the account's IMAP host/port/TLS/username/password changes, since a cached answer only applies to the server it was checked against.
 
+An `excludeFromAutoSync` flag (stored as `accounts.exclude_from_auto_sync`; Account settings → Misc → *Exclude from automatic sync*, or `excludeFromAutoSync: true/false` in the account create/update body) keeps an account out of the syncs that cover all accounts: the sync interval (Settings → Inboxes) and the combined Inbox's refresh button. It exists for servers that throttle or block IMAP access when there are too many requests — Gmail, for one ("Account exceeded command or bandwidth limits"). The account's own "Sync now" (and `psmail sync <account>`) still works, and nothing else about it changes.
+
 `senderName` and `signature` (editable via "Account settings" → "Signature", or the same-named fields in the account create/update body) control the From display name and an optional markdown signature appended to new/reply/forward compositions — see "Compose" above. Both default to `null`/unset.
 
 ## Search syntax

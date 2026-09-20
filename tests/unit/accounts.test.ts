@@ -161,6 +161,27 @@ describe("accounts model", () => {
     });
   });
 
+  describe("excludeFromAutoSync flag", () => {
+    test("is off by default, stored when given at creation, and toggles via updateAccount without touching the rest", async () => {
+      const db = createTestDb();
+      const user = await createUser(db, "alice", "pw");
+      const key = deriveEncryptionKey("pw", generateSalt());
+
+      const plain = createAccount(db, user.id, sampleAccountInput, key);
+      expect(plain.excludeFromAutoSync).toBe(false);
+
+      const account = createAccount(db, user.id, { ...sampleAccountInput, email: "gmail@example.com", excludeFromAutoSync: true }, key);
+      expect(account.excludeFromAutoSync).toBe(true);
+
+      const changed = updateAccount(db, account.id, { displayName: "G" }, key);
+      expect(changed.excludeFromAutoSync).toBe(true); // an update that doesn't mention it keeps it
+      expect(changed.skipSoftDelete).toBe(false);
+
+      expect(updateAccount(db, account.id, { excludeFromAutoSync: false }, key).excludeFromAutoSync).toBe(false);
+      expect(updateAccount(db, account.id, { excludeFromAutoSync: true }, key).excludeFromAutoSync).toBe(true);
+    });
+  });
+
   describe("UIDPLUS capability caching", () => {
     test("supportsUidPlus is null (never checked) for a freshly created account", async () => {
       const db = createTestDb();

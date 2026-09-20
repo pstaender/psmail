@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS accounts (
   -- A disabled account is never synced or written to: it is read-only and its stored mail is frozen (see assertAccountEnabled).
   disabled INTEGER NOT NULL DEFAULT 0,
   skip_soft_delete INTEGER NOT NULL DEFAULT 0,
+  -- Left out of the global syncs (the interval sync and "sync all Inboxes"); its own Sync button still works. For servers that throttle IMAP, like Gmail.
+  exclude_from_auto_sync INTEGER NOT NULL DEFAULT 0,
   imap_uidplus INTEGER,
   sender_name TEXT,
   signature TEXT,

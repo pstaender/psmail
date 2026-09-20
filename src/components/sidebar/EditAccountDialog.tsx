@@ -27,6 +27,7 @@ interface EditForm {
   readOnly: boolean;
   disabled: boolean;
   skipSoftDelete: boolean;
+  excludeFromAutoSync: boolean;
   senderName: string;
   signature: string;
   position: number;
@@ -47,6 +48,7 @@ const EMPTY: EditForm = {
   readOnly: false,
   disabled: false,
   skipSoftDelete: false,
+  excludeFromAutoSync: false,
   senderName: "",
   signature: "",
   position: 1,
@@ -68,6 +70,7 @@ function formFromAccount(account: Account): EditForm {
     readOnly: account.readOnly,
     disabled: account.disabled,
     skipSoftDelete: account.skipSoftDelete,
+    excludeFromAutoSync: account.excludeFromAutoSync,
     senderName: account.senderName ?? "",
     signature: account.signature ?? "",
     position: account.position,
@@ -162,6 +165,7 @@ export function EditAccountDialog({
         readOnly: form.readOnly,
         disabled: form.disabled,
         skipSoftDelete: form.skipSoftDelete,
+        excludeFromAutoSync: form.excludeFromAutoSync,
         senderName: form.senderName,
         signature: form.signature,
       };
@@ -430,6 +434,23 @@ export function EditAccountDialog({
                   1 is the top of the sidebar's account list (below the combined Inbox and Sent); the other accounts move
                   to make room. There {accountCount === 1 ? "is 1 account" : `are ${accountCount} accounts`}; a larger number puts this one last.
                 </p>
+              </div>
+
+              <div className="flex items-start gap-2 rounded-md border p-3">
+                <Switch
+                  id="edit-exclude-from-auto-sync"
+                  className="mt-0.5"
+                  checked={form.excludeFromAutoSync}
+                  onCheckedChange={v => set("excludeFromAutoSync", v)}
+                />
+                <div className="flex-1 space-y-1">
+                  <Label htmlFor="edit-exclude-from-auto-sync">Exclude from automatic sync</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Leaves this account out of the syncs that cover all accounts — the sync interval and the combined
+                    Inbox's refresh button. Some servers (Gmail, for one) throttle or block IMAP access when there are
+                    too many requests. The account's own "Sync now" still works.
+                  </p>
+                </div>
               </div>
             </TabsContent>
           </Tabs>

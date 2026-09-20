@@ -23,6 +23,8 @@ export interface Account {
   /** Disabled accounts aren't synced or written to; they stay readable (and always count as read-only). */
   disabled: boolean;
   skipSoftDelete: boolean;
+  /** Left out of the global syncs (the interval sync and "sync all Inboxes"); syncing the account itself still works. */
+  excludeFromAutoSync: boolean;
   /** Whether the IMAP server supports UIDPLUS, as of the last check — null if never checked. Soft-delete (move to Trash) is only offered when this is true. */
   supportsUidPlus: boolean | null;
   /** From display name used on outgoing mail sent from this account, instead of the bare address. */

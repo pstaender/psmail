@@ -36,6 +36,7 @@ const ACCOUNT: Account = {
   readOnly: false,
   disabled: false,
   skipSoftDelete: false,
+  excludeFromAutoSync: false,
   supportsUidPlus: null,
   senderName: null,
   signature: null,
@@ -1362,6 +1363,23 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await waitFor(() => expect(screen.getByTitle("Read-only")).toBeTruthy());
   });
 
+  test("Account settings → Misc has 'Exclude from automatic sync', and saving sends it", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+    await userEvent.click(screen.getByTitle("More actions"));
+    await userEvent.click(screen.getByText("Account settings"));
+    await screen.findByText("Account settings", { selector: "[data-slot=dialog-title]" });
+
+    await userEvent.click(screen.getByRole("tab", { name: "Misc" }));
+    const toggle = screen.getByLabelText("Exclude from automatic sync");
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    await userEvent.click(toggle);
+    await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => expect(capturedAccountPatch).toMatchObject({ excludeFromAutoSync: true }));
+  });
+
   test("account settings are organized into Server/Safety/Signature tabs", async () => {
     render(<App />);
 
@@ -1785,6 +1803,31 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       render(<App />); // still signed in from above
       await openAccountInbox();
       expect(minuteTimers).toHaveLength(1); // still just the first render's
+    } finally {
+      globalThis.setInterval = realSetInterval;
+    }
+  });
+
+  test("an account excluded from automatic sync is skipped by the interval sync", async () => {
+    const realSetInterval = globalThis.setInterval;
+    const minuteTimers: (() => void)[] = [];
+    globalThis.setInterval = ((fn: () => void, ms?: number, ...rest: unknown[]) => {
+      if (ms !== undefined && ms >= 60_000) {
+        minuteTimers.push(fn);
+        return 0 as unknown as ReturnType<typeof setInterval>;
+      }
+      return realSetInterval(fn, ms, ...rest);
+    }) as typeof setInterval;
+
+    try {
+      installMockFetch({ settings: { syncIntervalMinutes: 3 }, extraAccounts: [{ email: "gmail@example.com", excludeFromAutoSync: true }] });
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await waitFor(() => expect(minuteTimers).toHaveLength(1));
+
+      await act(async () => minuteTimers[0]!());
+      await waitFor(() => expect(downloadAccounts).toEqual(["me@example.com"]));
+      expect(downloadAccounts).not.toContain("gmail@example.com");
     } finally {
       globalThis.setInterval = realSetInterval;
     }
@@ -3340,6 +3383,16 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await userEvent.click(sync);
       await waitFor(() => expect(downloadAccounts).toEqual(["me@example.com"]));
       expect(screen.getByText("Unified outgoing")).toBeTruthy(); // still the Sent list
+    });
+
+    test("accounts excluded from automatic sync are left out", async () => {
+      installMockFetch({ extraAccounts: [{ email: "gmail@example.com", excludeFromAutoSync: true }] });
+      await login();
+
+      await userEvent.click(screen.getByTitle("Sync the Inboxes of all accounts"));
+      await waitFor(() => expect(downloadAccounts).toEqual(["me@example.com"]));
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(downloadAccounts).toEqual(["me@example.com"]);
     });
 
     test("disabled accounts are left out", async () => {

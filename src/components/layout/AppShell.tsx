@@ -325,7 +325,7 @@ export function AppShell() {
   useEffect(() => {
     if (!syncIntervalMinutes) return;
     const timer = setInterval(() => {
-      for (const account of accountsRef.current) if (!account.disabled) startSync(account.email, { folder: "INBOX", silent: true });
+      for (const account of accountsRef.current) if (!account.disabled && !account.excludeFromAutoSync) startSync(account.email, { folder: "INBOX", silent: true });
     }, syncIntervalMinutes * 60_000);
     return () => clearInterval(timer);
   }, [syncIntervalMinutes, startSync]);
@@ -333,7 +333,7 @@ export function AppShell() {
   // The combined Inbox's refresh button: sync the Inbox of every account at once (disabled accounts can't be synced; an
   // account that is already syncing is left alone by startSync). Only the Inboxes — "Sync now" on an account does all its folders.
   function syncAllInboxes() {
-    for (const account of accounts) if (!account.disabled) startSync(account.email, { folder: "INBOX" });
+    for (const account of accounts) if (!account.disabled && !account.excludeFromAutoSync) startSync(account.email, { folder: "INBOX" });
   }
 
   async function saveSettings(patch: SettingsPatch) {
