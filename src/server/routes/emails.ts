@@ -20,9 +20,12 @@ import {
 import { json, noContent, parseIntParam, readJsonBody, requireAuth, requiredParam, withErrorHandling } from "../http";
 import { getEmailAttachmentsDir, sanitizeSegment } from "../config/paths";
 import { sendDraftEmail, type AttachmentWithData } from "../services/smtp";
+import { buildStoredEml, emlFileName, zipStream, type ZipEntry } from "../services/eml";
 import {
   appendMessage,
+  createImapClient,
   deleteMessage,
+  fetchMessageSource,
   listFolders,
   moveMessage,
   setMessageFlags,
@@ -31,7 +34,7 @@ import {
 } from "../services/imap";
 import { resolveSpecialFolder } from "../../lib/folders";
 import { getUserRowById } from "../models/users";
-import { ApiError, NotFoundError, type EmailRecord } from "../types";
+import { ApiError, NotFoundError, type AttachmentRecord, type EmailRecord } from "../types";
 import { getOwnedAccountByEmailParam } from "./accounts";
 
 const TRASH_FOLDER = "Trash";
@@ -168,6 +171,55 @@ function requireIds(body: Partial<BulkRequestBody>): number[] {
   return body.ids;
 }
 
+const MAX_DOWNLOAD_MESSAGES = 5000;
+
+/**
+ * The .eml of each message, one at a time (so a zip never holds more than one in memory). The original source is read
+ * from the IMAP server over one shared connection — opened only when a message has a UID, the account is enabled, and
+ * closed when the download ends or is abandoned. A message the server can't give (a draft, a sent message that was
+ * never copied there, an unreachable server, a disabled account) is built from what is stored instead.
+ */
+async function* emlEntries(db: Database, account: AccountRow, encryptionKey: Buffer, rows: EmailRow[]): AsyncGenerator<ZipEntry, void, undefined> {
+  const names = new Set<string>();
+  let client: ImapFlow | null = null;
+  let serverUsable = !account.disabled;
+
+  try {
+    for (const row of rows) {
+      let data: Buffer | null = null;
+
+      if (serverUsable && row.uid !== null) {
+        try {
+          if (!client) {
+            const { imapPassword } = decryptAccountCredentials(account, encryptionKey);
+            const connecting = createImapClient(imapCredentialsFor(account, imapPassword));
+            await connecting.connect();
+            client = connecting;
+          }
+          data = await fetchMessageSource(client, row.folder, row.uid);
+        } catch (error) {
+          console.error(`[eml] ${account.email}: couldn't read message ${row.id} from the server, using the stored copy:`, error);
+          if (!client || !client.usable) serverUsable = false; // the connection is gone: don't try again for every message
+        }
+      }
+
+      const email = getEmail(db, row.id);
+      if (!data) {
+        const attachments: { record: AttachmentRecord; content: Buffer }[] = [];
+        for (const record of email.attachments ?? []) {
+          const file = Bun.file(getAttachmentRow(db, record.id).file_path);
+          if (await file.exists()) attachments.push({ record, content: Buffer.from(await file.arrayBuffer()) });
+        }
+        data = await buildStoredEml(email, attachments);
+      }
+
+      yield { name: emlFileName(email, names), data, date: email.date ? new Date(email.date) : new Date() };
+    }
+  } finally {
+    if (client) await (client as ImapFlow).logout().catch(() => (client as ImapFlow).close());
+  }
+}
+
 /**
  * Runs `fn` once per id, sharing a single IMAP connection across the whole batch when any of
  * them will actually push to the server — bulk actions used to open one connection per
@@ -246,6 +298,28 @@ export function emailsRoutes(db: Database) {
         const body = await readJsonBody<EmailInput>(req);
         const email = createEmail(db, account.id, { ...body, folder: body.folder ?? "Drafts", isDraft: true });
         return json(email, { status: 201 });
+      }),
+    },
+    // Download messages as .eml: one message as the file itself, several as a zip of .eml files, streamed.
+    "/api/accounts/:email/emails/download": {
+      POST: withErrorHandling(async req => {
+        const { session, encryptionKey } = requireAuth(req, db);
+        const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        const ids = requireIds(await readJsonBody<Partial<BulkRequestBody>>(req));
+        if (ids.length > MAX_DOWNLOAD_MESSAGES) throw new ApiError(400, `At most ${MAX_DOWNLOAD_MESSAGES} messages can be downloaded at once.`);
+        const rows = [...new Set(ids)].map(id => getOwnedEmail(db, id, account.id)); // all of them are checked before anything is sent
+
+        const entries = emlEntries(db, account, encryptionKey, rows);
+        if (rows.length === 1) {
+          const entry = (await entries.next()).value as ZipEntry;
+          await entries.return(undefined);
+          return new Response(entry.data as Uint8Array<ArrayBuffer>, {
+            headers: { "Content-Type": "message/rfc822", "Content-Disposition": contentDisposition(entry.name), "Cache-Control": "no-store" },
+          });
+        }
+        return new Response(zipStream(entries), {
+          headers: { "Content-Type": "application/zip", "Content-Disposition": contentDisposition(`${account.email} messages.zip`), "Cache-Control": "no-store" },
+        });
       }),
     },
     "/api/accounts/:email/emails/bulk": {

@@ -63,6 +63,29 @@ export interface BulkResult {
   softDeleted?: boolean;
 }
 
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+/** The file name a Content-Disposition header proposes (the UTF-8 `filename*` form wins over the ASCII fallback). */
+export function filenameFromDisposition(header: string | null): string | null {
+  if (!header) return null;
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(header)?.[1];
+  if (utf8) {
+    try {
+      return decodeURIComponent(utf8);
+    } catch {
+      // fall through to the plain form
+    }
+  }
+  return /filename="([^"]*)"/i.exec(header)?.[1] ?? null;
+}
+
 function enc(value: string): string {
   return encodeURIComponent(value);
 }
@@ -197,13 +220,26 @@ export const api = {
       headers: { authorization: `Bearer ${token}` },
     });
     if (!res.ok) throw new ApiError(res.status, "Failed to download attachment");
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    saveBlob(await res.blob(), filename);
+  },
+
+  /**
+   * Saves the messages as .eml files: one message as the file itself, several as one zip (the server streams it, so
+   * a big selection doesn't pile up there). Returns the name of the saved file.
+   */
+  async downloadMessages(token: string, accountEmail: string, ids: number[]): Promise<string> {
+    const res = await fetch(`/api/accounts/${enc(accountEmail)}/emails/download`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: res.statusText }));
+      throw new ApiError(res.status, data.error ?? res.statusText);
+    }
+    const filename = filenameFromDisposition(res.headers.get("content-disposition")) ?? (ids.length === 1 ? "message.eml" : "messages.zip");
+    saveBlob(await res.blob(), filename);
+    return filename;
   },
 
   listDownloadJobs: (token: string, accountEmail: string) =>

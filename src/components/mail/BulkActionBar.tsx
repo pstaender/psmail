@@ -1,4 +1,4 @@
-import { FolderInput, Mail, MailOpen, Trash2, X } from "lucide-react";
+import { Download, FolderInput, Mail, MailOpen, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import type { FolderInfo } from "@/lib/api";
@@ -16,6 +16,7 @@ export function BulkActionBar({
   onMarkRead,
   onMarkUnread,
   onMove,
+  onDownload,
   onDelete,
   onClear,
 }: {
@@ -26,6 +27,8 @@ export function BulkActionBar({
   onMarkRead: () => void;
   onMarkUnread: () => void;
   onMove: (folder: string) => void;
+  /** Saves the selection as .eml files: the file itself for one message, a zip for several. */
+  onDownload: () => void;
   onDelete: () => void;
   onClear: () => void;
 }) {
@@ -62,6 +65,10 @@ export function BulkActionBar({
           </DropdownMenuContent>
         </DropdownMenu>
         )}
+
+        <Button variant="ghost" size="sm" onClick={onDownload} title={count === 1 ? "Download as .eml" : "Download as a zip of .eml files"}>
+          <Download className="size-4" />
+        </Button>
 
         <Button variant="ghost" size="sm" onClick={onDelete} title="Delete">
           <Trash2 className="size-4" />

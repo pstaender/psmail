@@ -289,6 +289,13 @@ export async function moveMessage(client: ImapFlow, folder: string, uid: number,
   return { newUid: newUid !== undefined ? Number(newUid) : null };
 }
 
+/** The message's original RFC 822 source, read without changing anything (the folder is opened read-only); null when the server doesn't have it. */
+export async function fetchMessageSource(client: ImapFlow, folder: string, uid: number): Promise<Buffer | null> {
+  await client.mailboxOpen(folder, { readOnly: true });
+  const message = await client.fetchOne(String(uid), { source: true }, { uid: true });
+  return message && message.source ? message.source : null;
+}
+
 /** Whether the connected server advertises the UIDPLUS extension (RFC 4315). */
 export function hasUidPlusCapability(client: ImapFlow): boolean {
   return client.capabilities.has("UIDPLUS");

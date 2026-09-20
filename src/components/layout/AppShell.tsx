@@ -751,6 +751,24 @@ export function AppShell() {
     return succeeded;
   }
 
+  /**
+   * Saves the selected messages as .eml (one message) or a zip of .eml files (several). Reading only, so it works for
+   * read-only and disabled accounts too; the selection stays. A selection across accounts is one file per account.
+   */
+  async function bulkDownload() {
+    if (!token) return;
+    const byAccount = new Map<string, number[]>();
+    for (const item of selectionItems) byAccount.set(item.accountEmail, [...(byAccount.get(item.accountEmail) ?? []), item.id]);
+    for (const [accountEmail, ids] of byAccount) {
+      try {
+        const filename = await api.downloadMessages(token, accountEmail, ids);
+        toast.success(`Downloaded ${filename}`);
+      } catch (err) {
+        toast.error(errorMessage(err, "Couldn't download the message(s)"));
+      }
+    }
+  }
+
   /** Applies count changes to the sidebar's folder badges (only the selected account's are known here) and re-reads the combined Inbox's badge. */
   function applyCountChanges(changes: { item: SelectionItem; folder: string; total?: number; unread?: number }[]) {
     const perFolder = new Map<string, { total: number; unread: number }>();
@@ -978,6 +996,7 @@ export function AppShell() {
               onMarkRead={() => bulkMarkRead(true)}
               onMarkUnread={() => bulkMarkRead(false)}
               onMove={bulkMove}
+              onDownload={bulkDownload}
               onDelete={requestDelete}
               onClear={() => setSelectedIds(new Set())}
             />

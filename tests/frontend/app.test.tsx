@@ -147,6 +147,8 @@ const originalFetch = global.fetch;
 // call (mirrors currentAccount's per-test freshness, just below).
 let capturedCreateDraftBody: Record<string, unknown> | null = null;
 /** Bodies of POST .../folders (new folders), and how the mock server answers them. */
+/** POST .../emails/download requests (account + ids) of the mock server. */
+let messageDownloads: { account: string; ids: number[] }[] = [];
 let createFolderPosts: { name: string; parent?: string }[] = [];
 let createFolderError: string | null = null;
 // Same, for PATCH .../emails/13 (DRAFT_EMAIL) — asserts that editing an existing draft updates
@@ -235,6 +237,7 @@ function installMockFetch(
   let currentAccount = { ...ACCOUNT, ...opts.accountOverrides };
   capturedCreateDraftBody = null;
   createFolderPosts = [];
+  messageDownloads = [];
   createFolderError = null;
   const createdFolders: Record<string, unknown>[] = [...(opts.extraFolders ?? [])];
   capturedUpdateDraftBody = null;
@@ -314,6 +317,14 @@ function installMockFetch(
     if (method === "POST" && path === "/api/accounts/me%40example.com/imap-capabilities") {
       currentAccount = { ...currentAccount, supportsUidPlus: opts.uidPlusSupported ?? true };
       return jsonResponse(currentAccount);
+    }
+    const downloadMessages = /^\/api\/accounts\/([^/]+)\/emails\/download$/.exec(path);
+    if (method === "POST" && downloadMessages) {
+      const { ids } = JSON.parse(init!.body as string) as { ids: number[] };
+      messageDownloads.push({ account: decodeURIComponent(downloadMessages[1]!), ids });
+      return ids.length === 1
+        ? new Response("From: a\r\n\r\nhi", { headers: { "content-type": "message/rfc822", "content-disposition": "attachment; filename=\"2024-05-01 Gr__e.eml\"; filename*=UTF-8''2024-05-01%20Gr%C3%BC%C3%9Fe.eml" } })
+        : new Response("zip", { headers: { "content-type": "application/zip", "content-disposition": "attachment; filename=\"me@example.com messages.zip\"" } });
     }
     if (method === "POST" && path === "/api/accounts/me%40example.com/folders") {
       const body = JSON.parse(init!.body as string) as { name: string; parent?: string };
@@ -2405,6 +2416,47 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
       await userEvent.click(screen.getByText("Mine one")); // a plain click reads it and drops the selection
       await waitFor(() => expect(screen.queryByText(/\d+ selected/)).toBeNull());
+    });
+
+    describe("download", () => {
+      const saved: string[] = [];
+      const realClick = HTMLAnchorElement.prototype.click;
+      beforeEach(() => {
+        saved.length = 0;
+        URL.createObjectURL = () => "blob:test";
+        URL.revokeObjectURL = () => {};
+        HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+          saved.push(this.download);
+        };
+      });
+      afterEach(() => {
+        HTMLAnchorElement.prototype.click = realClick;
+      });
+
+      test("one message is saved as its .eml, under the name the server gives (non-ASCII intact)", async () => {
+        await openCombined();
+        fireEvent.click(screen.getByText("Mine one"), { ctrlKey: true });
+        await userEvent.click(await screen.findByTitle("Download as .eml"));
+
+        await waitFor(() => expect(saved).toEqual(["2024-05-01 Grüße.eml"]));
+        expect(messageDownloads).toEqual([{ account: "me@example.com", ids: [10] }]);
+        expect((await screen.findAllByText("Downloaded 2024-05-01 Grüße.eml")).length).toBeGreaterThan(0);
+        expect(screen.getByText("1 selected")).toBeTruthy(); // the selection stays
+      });
+
+      test("several messages are one zip, and a selection across accounts is one request (and file) per account", async () => {
+        await openCombined();
+        fireEvent.click(screen.getByText("Mine one"), { ctrlKey: true });
+        fireEvent.click(screen.getByText("Mine two"), { ctrlKey: true });
+        await userEvent.click(await screen.findByTitle("Download as a zip of .eml files"));
+        await waitFor(() => expect(messageDownloads).toEqual([{ account: "me@example.com", ids: [10, 11] }]));
+        await waitFor(() => expect(saved).toEqual(["me@example.com messages.zip"]));
+
+        messageDownloads.length = 0;
+        fireEvent.click(screen.getByText("Theirs three"), { ctrlKey: true });
+        await userEvent.click(screen.getByTitle("Download as a zip of .eml files"));
+        await waitFor(() => expect(messageDownloads).toEqual([{ account: "me@example.com", ids: [10, 11] }, { account: "you@example.com", ids: [12] }]));
+      });
     });
 
     test("Cmd/Ctrl+A and Shift+arrows work in the combined list too", async () => {
