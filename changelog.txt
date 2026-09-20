@@ -7,6 +7,33 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - AI skill "Find dates and events": .ics files for the user (8afccb1)
+---------------------------------------------------------------------------------
+New AI skill category "events" (Settings > AI > Skills > "Find dates and events"). When a message is summarized and such a skill
+exists, the same run also searches the message for appointments, meetings, deadlines and other dates - like categorizing -
+and what it finds is offered below the attachments, each as a calendar file (.ics) to download.
+- The AI is asked for a plain JSON list (title, start, end, location, description); the server writes the iCalendar text.
+  Models write JSON far more reliably than ICS, and this way every file is valid: CRLF lines folded at 75 octets (never inside a
+  UTF-8 character), escaped text, all-day dates as VALUE=DATE with the exclusive end day, times floating (the same wall-clock
+  time in any calendar) unless the mail names a zone - then written in UTC - and a stable UID per event, so importing the
+  same event twice doesn't duplicate it. An end before the start, an invalid date or an entry without a title is dropped
+  (the event stays without the end); duplicates are merged; at most 20 per message. The message's date is sent along, so
+  "next Friday" can be resolved. Suggested prompt in skillDefaults.json.
+- Storage: new column emails.calendar_events (migrated) - a JSON array with ONE COMPLETE VCALENDAR PER EVENT, rather than one
+  text with a separator: no separator to get wrong, and each event is a valid .ics on its own. NULL = never searched, []
+  = searched, nothing found. EmailRecord.calendarEvents (list rows don't load it).
+- A failing events step doesn't lose the summary, the categories or earlier events: the answer carries eventsError, shown as a toast.
+- UI: an "Dates and events" strip under the attachments (nothing without events): title, date, place; a click downloads
+  that event ("<title>.ics"); with several an "All (N)" button downloads one .ics with all of them. It stays for read-only
+  and disabled accounts too (it's only reading what is stored).
+- The compose endpoint (/api/ai/run) doesn't take the category. The confirmation for summarizing again now says it replaces
+  the categories, dates and events as well.
+- Not built: a way to run the search on its own (it runs with Summarize, as asked); adding to a calendar directly (files only).
+- Tests: the parser, the ICS writer (dates, zones, escaping, folding, UIDs), the summarize flow with the skill (order of
+  calls, stored events, empty list, failing step), the file reader/merger and the strip with its downloads. The files are
+  checked structurally, not imported into a real calendar app - worth trying one with your calendar.
+
+
 2026-09-20 - Lists show their hyphens (AI summaries and Text/MD tabs) (3270cbc)
 --------------------------------------------------------------------------------
 Why the hyphens of an AI summary were missing: the summary is markdown ("- item" lines) and is rendered as HTML lists, but
