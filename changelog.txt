@@ -7,6 +7,29 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Download messages as .eml / zip (debe37b)
+------------------------------------------------------
+The bulk action bar (shown when messages are checked) has a Download button: one selected message is saved as its .eml
+file, several as one zip of .eml files. It works in folder lists, the combined lists and search results; a selection
+across accounts gives one file per account. It only reads, so read-only and disabled accounts can be downloaded from.
+- POST /api/accounts/:email/emails/download { ids }. The zip is streamed: each message is fetched, compressed and
+  written before the next is touched, so the server's memory doesn't grow with the selection (a hand-written zip
+  writer, deflate or stored per entry, checked with a real "unzip -t"). Up to 5000 messages; beyond the limits of a
+  plain zip (65535 entries, 4 GB) the stream errors rather than deliver a corrupt file. The browser still collects
+  the response into a file before saving it (a fetch with the Authorization header can't stream to disk).
+- The .eml is the ORIGINAL message: read from the IMAP server (one shared connection, folder opened read-only).
+  What the server can't give - a draft, a sent message never copied to the server, a disabled account, an unreachable
+  server - is rebuilt from the stored copy (headers, text, HTML, attachments) and carries an X-PSMail-Reconstructed
+  header, because the server's Received chain and exact MIME structure aren't stored. So a download never fails just
+  because the server is down.
+- File names: "YYYY-MM-DD Subject.eml", made safe for file systems, numbered when they clash; the client uses the
+  server's UTF-8 name (Grüße survives).
+- Tests: the zip writer read back by an independent reader (names, contents, checksums, stored vs deflate, empty, early
+  cancel, a failing source), file naming, the rebuilt message parsed back, the route (one, several, duplicates, fallback
+  with an unreachable server, disabled account, bad ids, other users) and the buttons. Not tried against a real IMAP
+  server (the original-source path), nor a large selection in a browser.
+
+
 2026-09-20 - Folder tree: subfolders start collapsed (f53ecb0)
 --------------------------------------------------------------
 Nested folders (Work/2024 inside Work) now sit inside their parent in the sidebar. A folder that has subfolders starts
