@@ -7,6 +7,15 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Message toolbar is always visible again (fa08e37)
+-----------------------------------------------------------
+The reading pane's toolbar is a plain, always-visible row again (Reply, Forward, Translate, Mark read, Download, Move,
+Delete; Edit draft at the right end for a draft) - the hide/reveal behaviour (hover fade, then Collapsible with an arrow)
+didn't look or feel right, so it is gone, along with the remembered open/closed choice. What stays from that work: the
+Download button in its own group, Move as a searchable combobox, and the header changes (no "Message-ID" label, the
+details arrow as a Collapsible). Tests for the hiding were replaced by two for the plain toolbar.
+
+
 2026-09-20 - Message header and toolbar as Collapsibles (5fa4618)
 -------------------------------------------------------------
 - Message header: the "Message-ID" label is gone (it sounded too technical); the id itself is still shown, in the extra
