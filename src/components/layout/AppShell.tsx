@@ -84,7 +84,11 @@ export function AppShell() {
   // Deep link: the URL the app was opened on decides where it starts (see lib/routes.ts).
   const [initialRoute] = useState(() => parsePath(window.location.pathname));
   const [selectedAccountEmail, setSelectedAccountEmail] = useState<string | null>(initialRoute.accountEmail);
-  const selectedAccount = accounts.find(a => a.email === selectedAccountEmail) ?? null;
+  // Where the message that is open lives, when that isn't the list being browsed: a message opened from a search or a
+  // combined list belongs to its own account and folder, but opening it must not move the list, the filter or the sidebar.
+  const [openedIn, setOpenedIn] = useState<{ accountEmail: string; folder: string | null } | null>(null);
+  const messageAccountEmail = openedIn?.accountEmail ?? selectedAccountEmail;
+  const selectedAccount = accounts.find(a => a.email === messageAccountEmail) ?? null;
   // A disabled account is frozen (the server refuses every change): the UI doesn't even try.
   const isDisabledAccount = (email: string | null) => !!accounts.find(a => a.email === email)?.disabled;
   function refuseIfDisabled(email: string | null): boolean {
@@ -93,6 +97,7 @@ export function AppShell() {
     return true;
   }
   const [selectedFolder, setSelectedFolder] = useState<string | null>(initialRoute.folder);
+  const messageFolder = openedIn ? openedIn.folder : selectedFolder;
   const [selectedEmailId, setSelectedEmailId] = useState<number | null>(initialRoute.emailId);
   // Checked via Cmd/Ctrl+click, for bulk actions — independent of selectedEmailId (the reading pane).
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -152,16 +157,16 @@ export function AppShell() {
     else runAi(kind, skillId);
   }
   async function runAi(kind: "summarize" | "translate", skillId: number) {
-    if (refuseIfDisabled(selectedAccountEmail)) return;
-    if (!token || !selectedAccountEmail || !selectedEmail) return;
+    if (refuseIfDisabled(messageAccountEmail)) return;
+    if (!token || !messageAccountEmail || !selectedEmail) return;
     const id = selectedEmail.id;
     setAiBusy(kind);
     setAiBusyEmailId(id);
     try {
       const result =
         kind === "summarize"
-          ? await api.aiSummarize(token, selectedAccountEmail, id, skillId)
-          : await api.aiTranslate(token, selectedAccountEmail, id, undefined, skillId);
+          ? await api.aiSummarize(token, messageAccountEmail, id, skillId)
+          : await api.aiTranslate(token, messageAccountEmail, id, undefined, skillId);
       if (openEmailId.current === id) setSelectedEmailDetail(result.email);
       if ("taxonomyError" in result && result.taxonomyError) toast.error(`Categorizing failed: ${result.taxonomyError}`);
       if ("eventsError" in result && result.eventsError) toast.error(`Looking for dates and events failed: ${result.eventsError}`);
@@ -213,7 +218,10 @@ export function AppShell() {
   // moment, so it isn't remembered: a new page load shows the list.
   const [listCollapsed, setListCollapsed] = useState(false);
   useEffect(() => {
-    if (selectedEmailId === null) setListCollapsed(false); // nothing to read (deleted, moved, folder changed): the list is what is needed
+    if (selectedEmailId === null) {
+      setListCollapsed(false); // nothing to read (deleted, moved, folder changed): the list is what is needed
+      setOpenedIn(null);
+    }
   }, [selectedEmailId]);
   useEffect(() => setListCollapsed(false), [searchQuery]);
   const { width: sidebarWidth, startResize: startSidebarResize } = useResizableWidth("psmail.sidebarWidth", 240, 160, 480);
@@ -229,7 +237,7 @@ export function AppShell() {
   // normalizes the URL the app was opened on, and Back/Forward apply the URL they land on to the state again.
   const urlSynced = useRef(false);
   useEffect(() => {
-    const desired = buildPath({ unified: unifiedView, accountEmail: selectedAccountEmail, folder: selectedFolder, emailId: selectedEmailId });
+    const desired = buildPath({ unified: unifiedView, accountEmail: messageAccountEmail, folder: messageFolder, emailId: selectedEmailId });
     const openInFolder = selectedEmailId !== null || unifiedView === null;
     const path = openInFolder ? desired : buildPath({ unified: unifiedView, accountEmail: null, folder: null, emailId: null });
     if (path !== window.location.pathname) {
@@ -237,11 +245,12 @@ export function AppShell() {
       else window.history.replaceState(null, "", path);
     }
     urlSynced.current = true;
-  }, [unifiedView, selectedAccountEmail, selectedFolder, selectedEmailId]);
+  }, [unifiedView, messageAccountEmail, messageFolder, selectedEmailId]);
 
   useEffect(() => {
     const onPopState = () => {
       const route = parsePath(window.location.pathname);
+      setOpenedIn(null);
       setUnifiedView(route.unified);
       if (route.accountEmail) {
         setSelectedAccountEmail(route.accountEmail);
@@ -281,7 +290,7 @@ export function AppShell() {
     dateBounds
   );
   const { folders, loading: foldersLoading, error: foldersError, warning: foldersWarning, refresh: refreshFolders, patchCounts: patchRawFolderCounts } =
-    useFolders(selectedAccountEmail);
+    useFolders(messageAccountEmail);
 
   // Unread messages across every account's Inbox, for the combined Inbox's badge. Loaded from the
   // server (which knows all accounts, not just the selected one) and then nudged optimistically
@@ -371,7 +380,7 @@ export function AppShell() {
       refreshUnifiedInboxUnread();
     }
   }
-  const { email: selectedEmail, setEmail: setSelectedEmailDetail } = useEmailDetail(selectedAccountEmail, selectedEmailId);
+  const { email: selectedEmail, setEmail: setSelectedEmailDetail } = useEmailDetail(messageAccountEmail, selectedEmailId);
   openEmailId.current = selectedEmail?.id ?? null;
 
   // Mark-as-read on open, like every other mail client. Patches both the folder-scoped list
@@ -380,8 +389,8 @@ export function AppShell() {
   // failed IMAP push — flipping the message back to unread right after the user just opened
   // and read it would be a confusing flicker. It does still surface the failure via toast.
   useEffect(() => {
-    if (selectedEmail && !selectedEmail.isRead && selectedAccountEmail && token && !isDisabledAccount(selectedAccountEmail)) {
-      api.updateEmail(token, selectedAccountEmail, selectedEmail.id, { isRead: true }).catch(err => {
+    if (selectedEmail && !selectedEmail.isRead && messageAccountEmail && token && !isDisabledAccount(messageAccountEmail)) {
+      api.updateEmail(token, messageAccountEmail, selectedEmail.id, { isRead: true }).catch(err => {
         toast.error(errorMessage(err, "Failed to sync read status to the mail server"));
       });
       patchLocal(selectedEmail.id, { isRead: true });
@@ -512,6 +521,7 @@ export function AppShell() {
   }, [cursorId, selectedEmailId]);
 
   function selectUnified(kind: UnifiedKind) {
+    setOpenedIn(null);
     setUnifiedView(kind);
     setCursorId(null);
     setSearchQuery("");
@@ -521,6 +531,7 @@ export function AppShell() {
   }
 
   function selectFolder(accountEmail: string, folder: string) {
+    setOpenedIn(null);
     setUnifiedView(null);
     setCursorId(null);
     setSelectedAccountEmail(accountEmail);
@@ -573,6 +584,7 @@ export function AppShell() {
   function selectEmail(email: EmailRecord, event: React.MouseEvent) {
     if (handleSelectionClick(emails.map(e => e.id), email.id, event)) return;
 
+    setOpenedIn(null); // it is in the list being browsed
     setSelectedIds(new Set());
     setSelectedEmailId(email.id);
     setSelectionAnchorId(email.id);
@@ -583,8 +595,7 @@ export function AppShell() {
   // selected in the sidebar; opening one switches the reading pane to that context
   // without clearing the search itself, so the result list stays browsable.
   function selectSearchResult(result: SearchResult) {
-    setSelectedAccountEmail(result.accountEmail);
-    setSelectedFolder(result.folder);
+    setOpenedIn({ accountEmail: result.accountEmail, folder: result.folder });
     setSelectedEmailId(result.id);
     setSelectedIds(new Set());
     setSelectionAnchorId(null);
@@ -607,12 +618,12 @@ export function AppShell() {
   // couldn't when they only touched the local database. The optimistic local update is rolled
   // back on failure so the UI doesn't drift from what the server actually has.
   async function toggleFlag(email: EmailRecord) {
-    if (refuseIfDisabled(selectedAccountEmail)) return;
-    if (!token || !selectedAccountEmail) return;
+    if (refuseIfDisabled(messageAccountEmail)) return;
+    if (!token || !messageAccountEmail) return;
     const isFlagged = !email.isFlagged;
     patchLocal(email.id, { isFlagged });
     try {
-      await api.updateEmail(token, selectedAccountEmail, email.id, { isFlagged });
+      await api.updateEmail(token, messageAccountEmail, email.id, { isFlagged });
     } catch (err) {
       patchLocal(email.id, { isFlagged: email.isFlagged });
       toast.error(errorMessage(err, "Failed to update flag"));
@@ -641,8 +652,8 @@ export function AppShell() {
   }
 
   async function toggleRead() {
-    if (refuseIfDisabled(selectedAccountEmail)) return;
-    if (!token || !selectedAccountEmail || !selectedEmail) return;
+    if (refuseIfDisabled(messageAccountEmail)) return;
+    if (!token || !messageAccountEmail || !selectedEmail) return;
     const previousIsRead = selectedEmail.isRead;
     const isRead = !previousIsRead;
     patchLocal(selectedEmail.id, { isRead });
@@ -650,7 +661,7 @@ export function AppShell() {
     patchFolderCounts(selectedEmail.folder, { unread: isRead ? -1 : 1 });
     setSelectedEmailDetail({ ...selectedEmail, isRead });
     try {
-      await api.updateEmail(token, selectedAccountEmail, selectedEmail.id, { isRead });
+      await api.updateEmail(token, messageAccountEmail, selectedEmail.id, { isRead });
     } catch (err) {
       patchLocal(selectedEmail.id, { isRead: previousIsRead });
       patchSearchResult(selectedEmail.id, { isRead: previousIsRead });
@@ -661,11 +672,11 @@ export function AppShell() {
   }
 
   async function handleDelete() {
-    if (refuseIfDisabled(selectedAccountEmail)) return;
-    if (!token || !selectedAccountEmail || !selectedEmail) return;
+    if (refuseIfDisabled(messageAccountEmail)) return;
+    if (!token || !messageAccountEmail || !selectedEmail) return;
     let result: { softDeleted: boolean };
     try {
-      result = await api.deleteEmail(token, selectedAccountEmail, selectedEmail.id);
+      result = await api.deleteEmail(token, messageAccountEmail, selectedEmail.id);
     } catch (err) {
       toast.error(errorMessage(err, "Failed to delete message"));
       return;
@@ -684,10 +695,10 @@ export function AppShell() {
   }
 
   async function handleMove(folder: string) {
-    if (refuseIfDisabled(selectedAccountEmail)) return;
-    if (!token || !selectedAccountEmail || !selectedEmail) return;
+    if (refuseIfDisabled(messageAccountEmail)) return;
+    if (!token || !messageAccountEmail || !selectedEmail) return;
     try {
-      await api.moveEmail(token, selectedAccountEmail, selectedEmail.id, folder);
+      await api.moveEmail(token, messageAccountEmail, selectedEmail.id, folder);
     } catch (err) {
       toast.error(errorMessage(err, "Failed to move message"));
       return;
@@ -724,8 +735,8 @@ export function AppShell() {
     ? selectionItems[0]!.accountEmail
     : null;
   useEffect(() => {
-    if (showingResults && selectionAccount && selectionAccount !== selectedAccountEmail) setSelectedAccountEmail(selectionAccount);
-  }, [showingResults, selectionAccount, selectedAccountEmail]);
+    if (showingResults && selectionAccount && selectionAccount !== messageAccountEmail) setOpenedIn({ accountEmail: selectionAccount, folder: null });
+  }, [showingResults, selectionAccount, messageAccountEmail]);
 
   // A different result list (new search, another combined mailbox) starts with a clean selection.
   useEffect(() => {
@@ -800,7 +811,7 @@ export function AppShell() {
   function applyCountChanges(changes: { item: SelectionItem; folder: string; total?: number; unread?: number }[]) {
     const perFolder = new Map<string, { total: number; unread: number }>();
     for (const change of changes) {
-      if (change.item.accountEmail !== selectedAccountEmail) continue;
+      if (change.item.accountEmail !== messageAccountEmail) continue;
       const entry = perFolder.get(change.folder) ?? { total: 0, unread: 0 };
       entry.total += change.total ?? 0;
       entry.unread += change.unread ?? 0;
@@ -875,7 +886,7 @@ export function AppShell() {
           accounts.find(a => a.email === item.accountEmail) ?? null,
           item,
           // Only the selected account's live folder list is at hand for resolving the Trash path.
-          item.accountEmail === selectedAccountEmail ? folders : []
+          item.accountEmail === messageAccountEmail ? folders : []
         )
       );
       if (soft) bulkDelete();
@@ -883,7 +894,7 @@ export function AppShell() {
       return;
     }
     if (selectedEmail) {
-      if (refuseIfDisabled(selectedAccountEmail)) return;
+      if (refuseIfDisabled(messageAccountEmail)) return;
       if (willSoftDelete(selectedAccount, selectedEmail, folders)) handleDelete();
       else setConfirmDelete({ mode: "single", count: 1 });
     }
@@ -899,7 +910,7 @@ export function AppShell() {
   // New/reply/forward get the account's signature appended; continuing an existing draft
   // (editDraft sets `id`) doesn't — its body is already the draft's own finalized content.
   function openCompose(initial: ComposeDraft | null) {
-    if (refuseIfDisabled(selectedAccountEmail)) return;
+    if (refuseIfDisabled(messageAccountEmail)) return;
     setComposeInitial(initial?.id === undefined ? withSignature(initial, selectedAccount?.signature ?? null) : initial);
     setComposeOpen(true);
   }
@@ -907,7 +918,8 @@ export function AppShell() {
   async function confirmDeleteAccount() {
     if (!token || !pendingDeleteAccount) return;
     await api.deleteAccount(token, pendingDeleteAccount);
-    if (selectedAccountEmail === pendingDeleteAccount) {
+    if (selectedAccountEmail === pendingDeleteAccount || messageAccountEmail === pendingDeleteAccount) {
+      setOpenedIn(null);
       setSelectedAccountEmail(null);
       setSelectedFolder(null);
       setSelectedEmailId(null);
@@ -1028,7 +1040,7 @@ export function AppShell() {
                 syncingAccounts={Object.values(syncJobs).filter(job => job.status === "pending" || job.status === "running").length}
                 onCollapse={() => setSidebarCollapsed(true)}
                 sharedFolders={{
-                  accountEmail: selectedAccountEmail,
+                  accountEmail: messageAccountEmail,
                   folders,
                   loading: foldersLoading,
                   error: foldersError,
@@ -1052,7 +1064,7 @@ export function AppShell() {
           {selectionItems.length > 0 ? (
             <BulkActionBar
               count={selectionItems.length}
-              canMove={selectionAccount !== null && selectionAccount === selectedAccountEmail}
+              canMove={selectionAccount !== null && selectionAccount === messageAccountEmail}
               folders={folders.filter(f => !selectionItems.every(item => item.folder === f.path))}
               onMarkRead={() => bulkMarkRead(true)}
               onMarkUnread={() => bulkMarkRead(false)}
@@ -1086,8 +1098,8 @@ export function AppShell() {
                 </DropdownMenu>
                 <Button
                   size="sm"
-                  disabled={!selectedAccountEmail || isDisabledAccount(selectedAccountEmail)}
-                  title={isDisabledAccount(selectedAccountEmail) ? "This account is disabled" : undefined}
+                  disabled={!messageAccountEmail || isDisabledAccount(messageAccountEmail)}
+                  title={isDisabledAccount(messageAccountEmail) ? "This account is disabled" : undefined}
                   onClick={() => openCompose(null)}
                 >
                   <PenSquare className="size-4" /> New
@@ -1122,7 +1134,7 @@ export function AppShell() {
                 onOpen={() => setListCollapsed(true)}
                 filtered={dateFilter !== null}
               />
-            ) : selectedAccountEmail && selectedFolder ? (
+            ) : messageAccountEmail && selectedFolder ? (
               <MessageList
                 emails={emails}
                 loading={emailsLoading}
@@ -1149,22 +1161,22 @@ export function AppShell() {
         {!listCollapsed && <ResizeHandle onPointerDown={startMessageListResize} />}
 
         <div className="min-w-0 flex-1">
-          {selectedEmail && selectedAccountEmail ? (
+          {selectedEmail && messageAccountEmail ? (
             <MessageView
-              accountEmail={selectedAccountEmail}
+              accountEmail={messageAccountEmail}
               email={selectedEmail}
               folders={folders}
               preferredView={preferredBodyView}
               onViewChange={pickBodyView}
               onReply={() => openCompose(replyDraft(selectedEmail))}
-              onReplyAll={() => openCompose(replyAllDraft(selectedEmail, selectedAccountEmail))}
+              onReplyAll={() => openCompose(replyAllDraft(selectedEmail, messageAccountEmail))}
               onForward={() => openCompose(forwardDraft(selectedEmail))}
               onDelete={requestDelete}
               onMove={handleMove}
-              onDownload={() => downloadMessages(selectedAccountEmail, [selectedEmail.id])}
+              onDownload={() => downloadMessages(messageAccountEmail, [selectedEmail.id])}
               onToggleRead={toggleRead}
               onEditDraft={() => openCompose(editDraft(selectedEmail))}
-              accountDisabled={isDisabledAccount(selectedAccountEmail)}
+              accountDisabled={isDisabledAccount(messageAccountEmail)}
               aiSkills={aiSkills}
               aiBusy={aiBusyEmailId === selectedEmail.id ? aiBusy : null}
               onSummarize={skillId => requestAi("summarize", skillId)}
@@ -1178,9 +1190,9 @@ export function AppShell() {
 
       <DateFilterDialog open={dateFilterOpen} onOpenChange={setDateFilterOpen} value={dateFilter} onApply={setDateFilter} />
 
-      {selectedAccountEmail && (
+      {messageAccountEmail && (
         <ComposeDialog
-          accountEmail={selectedAccountEmail}
+          accountEmail={messageAccountEmail}
           senderName={selectedAccount?.senderName ?? null}
           folders={folders}
           open={composeOpen}

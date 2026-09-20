@@ -545,7 +545,7 @@ function installMockFetch(
           ...(inBody ? { matchedInBody: true } : {}),
           id: SECOND_EMAIL.id,
           accountEmail: ACCOUNT.email,
-          folder: SECOND_EMAIL.folder,
+          folder: searchParams.get("q") === "in-archive" ? "Archive" : SECOND_EMAIL.folder, // "in-archive" finds a hit outside the folder being browsed
           uid: SECOND_EMAIL.uid,
           isRead: SECOND_EMAIL.isRead,
           isFlagged: SECOND_EMAIL.isFlagged,
@@ -1144,6 +1144,41 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await screen.findByText("Unified outgoing");
       expect(screen.queryByTitle("Change the date filter")).toBeNull();
       expect(last("sent").has("after")).toBe(false);
+    });
+
+    test("opening a search result from another folder leaves the browsed folder, the filter and the sidebar alone", async () => {
+      await openFolder();
+      const dialog = await openDialog();
+      setDay(dialog, "Day", "2026-03-02");
+      await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
+      await screen.findByTitle("Change the date filter");
+      await userEvent.type(screen.getByPlaceholderText(/search all mail/i), "in-archive");
+      const hit = await screen.findByText("Second message");
+      const folderRequests = listRequests.filter(r => r.list === "folder").length;
+      const inboxRow = () => screen.getAllByText("Inbox")[1]!.closest("button")!;
+      expect(inboxRow().className).toContain("bg-accent"); // the browsed folder is highlighted
+
+      await userEvent.click(hit);
+      await waitFor(() => expect(screen.getAllByText("Second message").length).toBeGreaterThan(1)); // the message opens
+
+      expect(screen.getByTitle("Change the date filter")).toBeTruthy(); // the filter is still there…
+      expect(inboxRow().className).toContain("bg-accent"); // …the sidebar still shows the folder being browsed…
+      expect(listRequests.filter(r => r.list === "folder")).toHaveLength(folderRequests); // …and that list wasn't re-read for another folder
+      expect(window.location.pathname).toBe("/a/me@example.com/Archive/11"); // the address is the message's own place
+
+      await userEvent.clear(screen.getByPlaceholderText(/search all mail/i)); // back to the list that was browsed, still filtered
+      await waitFor(() => expect(last("folder").get("after")).toBe(localDay(2026, 3, 2).toISOString()));
+      expect(screen.getByTitle("Change the date filter")).toBeTruthy();
+    });
+
+    test("picking a folder in the sidebar afterwards makes that the scope again (and a new list starts unfiltered)", async () => {
+      await openFolder();
+      await userEvent.type(screen.getByPlaceholderText(/search all mail/i), "in-archive");
+      await userEvent.click(await screen.findByText("Second message"));
+      await waitFor(() => expect(window.location.pathname).toBe("/a/me@example.com/Archive/11"));
+
+      await userEvent.click(screen.getAllByText("Inbox")[1]!);
+      await waitFor(() => expect(window.location.pathname).toBe("/a/me@example.com/inbox/"));
     });
 
     test("More sits to the left of New", async () => {
