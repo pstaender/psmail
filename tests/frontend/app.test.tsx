@@ -2601,7 +2601,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await waitFor(() => expect(screen.getByText("2 selected")).toBeTruthy());
 
       await userEvent.click(await screen.findByTitle("Move"));
-      await userEvent.click(await screen.findByRole("menuitem", { name: "Entwürfe" })); // the account's folders, minus INBOX where they all are
+      await userEvent.click(await screen.findByRole("option", { name: "Entwürfe" })); // the account's folders, minus INBOX where they all are
 
       await waitFor(() => expect(bulkRequests).toEqual([{ account: "me@example.com", method: "PATCH", move: "Entwürfe", body: expect.objectContaining({ ids: [10, 11] }) }]));
       await waitFor(() => expect(screen.queryByText("Mine one")).toBeNull());
@@ -3278,9 +3278,10 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await userEvent.click(await screen.findByText("Hello there")); // an unread message
       await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
 
-      for (const name of [/^reply$/i, /^forward$/i, /mark read/i, /^delete$/i, /^move$/i]) {
+      for (const name of [/^reply$/i, /^forward$/i, /mark read/i, /^delete$/i]) {
         expect(screen.getByRole("button", { name }).hasAttribute("disabled")).toBe(true);
       }
+      expect(screen.getByRole("combobox", { name: /move/i }).hasAttribute("disabled")).toBe(true);
       expect(screen.getByRole("button", { name: /^new$/i }).hasAttribute("disabled")).toBe(true);
       await new Promise(resolve => setTimeout(resolve, 50));
       expect(emailPatches).toEqual([]); // no "mark as read" request
@@ -3720,11 +3721,55 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(shown()).toBe(false); // the choice is made; the mail is what's left
     });
 
+    test("opening the Move menu keeps the toolbar up, even though the pointer and focus are then in the menu", async () => {
+      const folders = [{ path: "Archive", name: "Archive", delimiter: "/", specialUse: null, flags: [], total: 0, unread: 0 }];
+      render(
+        <MessageToolbar email={EMAIL as never} folders={folders} onReply={noop} onReplyAll={noop} onForward={noop} onDelete={noop} onMove={noop} onDownload={noop} onToggleRead={noop} onEditDraft={noop} accountDisabled={false} />
+      );
+      const strip = screen.getByTitle("Message actions").parentElement!;
+      const actions = screen.getByRole("button", { name: /^reply$/i }).parentElement!;
+      const shown = () => actions.className.includes("opacity-100");
+
+      fireEvent.mouseEnter(strip);
+      await userEvent.click(screen.getByRole("combobox", { name: /move/i }));
+      await screen.findByRole("option", { name: "Archive" });
+
+      fireEvent.mouseLeave(strip); // the pointer went over the menu, which is outside the strip
+      fireEvent.blur(screen.getByRole("combobox", { name: /move/i }));
+      expect(shown()).toBe(true);
+
+      await userEvent.keyboard("{Escape}"); // closing the list stops holding the toolbar open
+      await waitFor(() => expect(screen.queryByRole("option", { name: "Archive" })).toBeNull());
+      fireEvent.blur(screen.getByRole("combobox", { name: /move/i })); // focus went back to the Move button; a keyboard user tabs away
+      expect(shown()).toBe(false);
+    });
+
+    test("Move is a combobox: typing narrows the folders, Enter moves, and it lists no folder that doesn't match", async () => {
+      const folders = ["Archive", "Work/Invoices", "Work/Projects", "Private"].map(path => ({ path, name: path.split("/").pop()!, delimiter: "/", specialUse: null, flags: [], total: 0, unread: 0 }));
+      const moved: string[] = [];
+      render(
+        <MessageToolbar email={EMAIL as never} folders={folders} onReply={noop} onReplyAll={noop} onForward={noop} onDelete={noop} onMove={f => moved.push(f)} onDownload={noop} onToggleRead={noop} onEditDraft={noop} accountDisabled={false} />
+      );
+      await userEvent.click(screen.getByRole("combobox", { name: /move/i }));
+      expect((await screen.findAllByRole("option")).map(o => o.textContent)).toEqual(["Archive", "Work/Invoices", "Work/Projects", "Private"]);
+
+      await userEvent.type(screen.getByPlaceholderText("Find a folder…"), "proj");
+      await waitFor(() => expect(screen.getAllByRole("option").map(o => o.textContent)).toEqual(["Work/Projects"]));
+      await userEvent.keyboard("{Enter}");
+      expect(moved).toEqual(["Work/Projects"]);
+      await waitFor(() => expect(screen.queryByPlaceholderText("Find a folder…")).toBeNull()); // closed after choosing
+
+      await userEvent.click(screen.getByRole("combobox", { name: /move/i }));
+      await userEvent.type(await screen.findByPlaceholderText("Find a folder…"), "zzz");
+      expect(await screen.findByText("No folder found.")).toBeTruthy();
+    });
+
     test("the actions stay in the page (faded, not removed), so keyboard users and screen readers can reach them", () => {
       renderToolbar();
-      for (const name of [/^reply$/i, /forward/i, /mark read|mark unread/i, /download/i, /move/i, /delete/i]) {
+      for (const name of [/^reply$/i, /forward/i, /mark read|mark unread/i, /download/i, /delete/i]) {
         expect(screen.getByRole("button", { name })).toBeTruthy();
       }
+      expect(screen.getByRole("combobox", { name: /move/i })).toBeTruthy();
     });
 
     test("a draft keeps its Edit draft button in view, since editing is what a draft is for", () => {

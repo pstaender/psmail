@@ -1,6 +1,6 @@
 import { Download, FolderInput, Mail, MailOpen, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { FolderCombobox } from "./FolderCombobox";
 import type { FolderInfo } from "@/lib/api";
 
 /**
@@ -50,20 +50,9 @@ export function BulkActionBar({
         </Button>
 
         {canMove && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" title="Move">
-              <FolderInput className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {folders.map(f => (
-              <DropdownMenuItem key={f.path} onClick={() => onMove(f.path)}>
-                {f.name}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <FolderCombobox folders={folders} onPick={onMove} title="Move" align="end">
+          <FolderInput className="size-4" />
+        </FolderCombobox>
         )}
 
         <Button variant="ghost" size="sm" onClick={onDownload} title={count === 1 ? "Download as .eml" : "Download as a zip of .eml files"}>

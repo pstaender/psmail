@@ -48,7 +48,7 @@ export function MessageView({
   onTranslate?: (skillId: number) => void;
 }) {
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="relative flex h-full flex-col overflow-hidden">
       <MessageToolbar
         email={email}
         folders={folders}

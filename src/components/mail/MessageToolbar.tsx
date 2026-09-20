@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { Download, FolderInput, Forward, Languages, Mail, MoreHorizontal, PenSquare, Reply, ReplyAll, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { EmailRecord } from "../../server/types";
 import type { FolderInfo } from "@/lib/api";
 import type { AiSkillRecord } from "../../server/models/ai";
 import { AiSkillButton } from "./AiSkillButton";
+import { FolderCombobox } from "./FolderCombobox";
 
 /** Keyboard focus (Tab) reveals the toolbar; a mouse click that leaves a button focused doesn't keep it open. */
 function focusedByKeyboard(element: HTMLElement): boolean {
@@ -74,12 +74,18 @@ export function MessageToolbar({
   const [hovering, setHovering] = useState(false);
   const [focusWithin, setFocusWithin] = useState(false);
   const [pinned, setPinned] = useState(false);
-  useEffect(() => setPinned(false), [email.id]);
-  const open = hovering || focusWithin || pinned;
+  // An open menu (Move, the AI skills) holds the toolbar open: while it is up the pointer is over the menu, not the
+  // strip, and focus is in the menu, so neither would.
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => {
+    setPinned(false);
+    setMenuOpen(false);
+  }, [email.id]);
+  const open = hovering || focusWithin || pinned || menuOpen;
 
   return (
     <div
-      className="relative z-10 h-9 border-b"
+      className="absolute inset-x-0 top-0 z-10 h-9"
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
       onFocus={event => setFocusWithin(focusedByKeyboard(event.target as HTMLElement))}
@@ -91,18 +97,18 @@ export function MessageToolbar({
       <Button
         variant="ghost"
         size="icon"
-        className={cn("absolute left-2 top-1 size-7 text-muted-foreground", open && "opacity-0")}
+        className={cn("absolute left-2 text-muted-foreground", open && "opacity-0")}
         title="Message actions"
         aria-label="Message actions"
         aria-expanded={open}
         onClick={() => setPinned(value => !value)}
       >
-        <MoreHorizontal className="size-4" />
+        {/*<MoreHorizontal className="size-4" />*/}
       </Button>
 
       <div
         className={cn(
-          "absolute inset-x-0 top-0 flex items-center gap-1 border-b bg-background px-3 py-1.5 shadow-sm transition-opacity duration-100",
+          "absolute inset-x-0 top-0 flex items-center gap-1 bg-background px-3 py-1.5 transition-opacity duration-100",
           open ? "opacity-100" : "pointer-events-none opacity-0"
         )}
         onClick={() => setPinned(false)}
@@ -139,6 +145,7 @@ export function MessageToolbar({
             label="Translate"
             title={frozen ?? "Translate this message with AI"}
             onRun={onTranslate}
+            onMenuOpenChange={setMenuOpen}
           />
         </>
       )}
@@ -157,22 +164,15 @@ export function MessageToolbar({
 
       <Separator orientation="vertical" className="mx-1 h-5" />
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm" disabled={accountDisabled} title={frozen}>
-            <FolderInput className="size-4" /> Move
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          {folders
-            .filter(f => f.path !== email.folder)
-            .map(f => (
-              <DropdownMenuItem key={f.path} onClick={() => onMove(f.path)}>
-                {f.name}
-              </DropdownMenuItem>
-            ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <FolderCombobox
+        folders={folders.filter(f => f.path !== email.folder)}
+        onPick={onMove}
+        onOpenChange={setMenuOpen}
+        disabled={accountDisabled}
+        title={frozen}
+      >
+        <FolderInput className="size-4" /> Move
+      </FolderCombobox>
 
       <Button variant="ghost" size="sm" disabled={accountDisabled} title={frozen} onClick={onDelete}>
         <Trash2 className="size-4" /> Delete
