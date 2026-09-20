@@ -7,6 +7,24 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Opening a result no longer changes the list's scope (86c415a)
+--------------------------------------------------------------------------
+Clicking a message in a search result (or in the combined Inbox/Sent) used to make that message's account and folder THE selected ones:
+the sidebar jumped to that folder, the folder list underneath was re-read for it, and the date filter - which belongs to the list it
+was set on - was reset because the folder had changed. Now the app tells apart
+- the scope being browsed (selectedAccount/selectedFolder: the sidebar highlight, the folder list, the date filter), and
+- where the open message lives (openedIn: its account and folder),
+and opening a result only sets the latter. So the filter, the search and the browsed folder stay as they were, and closing the search returns
+to the same (still filtered) list. Everything about the open message - reading, flag/read/move/delete, the Move list, Reply and the
+compose account, AI - uses the message's own account, as before. Picking a folder or a mailbox in the sidebar, a plain click in the folder
+list, Back/Forward, or nothing being open any more, ends the difference.
+- The address bar was the part that changed too: it shows the message's own place (/a/<account>/<its folder>/<id>), so it can be reopened, while
+  the list you were browsing is not part of the URL (as before, the search and filter never were).
+- Also: selecting rows across accounts in a result list no longer moves the sidebar to that account (it only sets the account Move uses).
+- Test: a filtered folder + a search whose hit lives in another folder: after opening it the chip, the sidebar highlight and the folder
+  list are unchanged, the URL is the message's; it fails on the old code. Not looked at in a browser.
+
+
 2026-09-20 - Search options: Full text search (1949523)
 --------------------------------------------------------
 While the search box is in use (focused, or its menu open) a "..." button appears beside the close (x) button. It opens a menu with a
