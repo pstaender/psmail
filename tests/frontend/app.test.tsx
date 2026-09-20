@@ -962,9 +962,9 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await waitFor(() => expect(screen.getAllByText("Unfinished draft").length).toBeGreaterThan(0));
 
     const editButton = await screen.findByRole("button", { name: /edit draft/i });
-    expect(editButton.className).toContain("ml-auto");
+    expect(editButton.className).toContain("right-3"); // pinned to the right edge, above the faded actions
 
-    // Comes after Delete in the toolbar, consistent with "right-aligned, after Delete".
+    // Comes after Delete in the toolbar.
     const deleteButton = screen.getByRole("button", { name: /delete/i });
     expect(deleteButton.compareDocumentPosition(editButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
@@ -3662,6 +3662,76 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
       expect((await screen.findAllByText(/Passkey unlock was removed from this device/)).length).toBeGreaterThan(0);
       expect(localStorage.getItem(vaultKey)).toBeNull();
+    });
+  });
+
+  describe("message actions are tucked away", () => {
+    const noop = () => {};
+    function renderToolbar(email: unknown = EMAIL, onReply: () => void = noop) {
+      render(
+        <MessageToolbar
+          email={email as never}
+          folders={[]}
+          onReply={onReply}
+          onReplyAll={noop}
+          onForward={noop}
+          onDelete={noop}
+          onMove={noop}
+          onDownload={noop}
+          onToggleRead={noop}
+          onEditDraft={noop}
+          accountDisabled={false}
+        />
+      );
+      const strip = screen.getByTitle("Message actions").parentElement!;
+      const actions = screen.getByRole("button", { name: /^reply$/i }).parentElement!;
+      const shown = () => actions.className.includes("opacity-100") && !actions.className.includes("pointer-events-none");
+      return { strip, actions, shown };
+    }
+
+    test("only a small icon shows until the pointer is on the strip; then the actions appear, and go again", () => {
+      const { strip, shown } = renderToolbar();
+      expect(shown()).toBe(false);
+
+      fireEvent.mouseEnter(strip);
+      expect(shown()).toBe(true);
+      fireEvent.mouseLeave(strip);
+      expect(shown()).toBe(false);
+    });
+
+    test("clicking the icon keeps them open (touch screens have no hover) until clicked again, Esc, or an action", () => {
+      const replies: string[] = [];
+      const { shown } = renderToolbar(EMAIL, () => replies.push("reply"));
+      const icon = screen.getByTitle("Message actions");
+
+      fireEvent.click(icon);
+      expect(shown()).toBe(true);
+      expect(icon.getAttribute("aria-expanded")).toBe("true");
+      fireEvent.click(icon);
+      expect(shown()).toBe(false);
+
+      fireEvent.click(icon);
+      fireEvent.keyDown(icon, { key: "Escape" });
+      expect(shown()).toBe(false);
+
+      fireEvent.click(icon);
+      fireEvent.click(screen.getByRole("button", { name: /^reply$/i }));
+      expect(replies).toEqual(["reply"]);
+      expect(shown()).toBe(false); // the choice is made; the mail is what's left
+    });
+
+    test("the actions stay in the page (faded, not removed), so keyboard users and screen readers can reach them", () => {
+      renderToolbar();
+      for (const name of [/^reply$/i, /forward/i, /mark read|mark unread/i, /download/i, /move/i, /delete/i]) {
+        expect(screen.getByRole("button", { name })).toBeTruthy();
+      }
+    });
+
+    test("a draft keeps its Edit draft button in view, since editing is what a draft is for", () => {
+      const { actions, shown } = renderToolbar({ ...EMAIL, isDraft: true });
+      const edit = screen.getByRole("button", { name: /edit draft/i });
+      expect(shown()).toBe(false);
+      expect(actions.contains(edit)).toBe(false); // not part of the faded group
     });
   });
 

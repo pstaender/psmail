@@ -1,12 +1,22 @@
 import { useEffect, useState } from "react";
-import { Download, FolderInput, Forward, Languages, Mail, PenSquare, Reply, ReplyAll, Sparkles, Trash2 } from "lucide-react";
+import { Download, FolderInput, Forward, Languages, Mail, MoreHorizontal, PenSquare, Reply, ReplyAll, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 import type { EmailRecord } from "../../server/types";
 import type { FolderInfo } from "@/lib/api";
 import type { AiSkillRecord } from "../../server/models/ai";
 import { AiSkillButton } from "./AiSkillButton";
+
+/** Keyboard focus (Tab) reveals the toolbar; a mouse click that leaves a button focused doesn't keep it open. */
+function focusedByKeyboard(element: HTMLElement): boolean {
+  try {
+    return element.matches(":focus-visible");
+  } catch {
+    return true; // no :focus-visible support: err on the side of showing the actions
+  }
+}
 
 /**
  * The delete confirmation (skipped entirely when the message would only be soft-deleted, i.e.
@@ -57,8 +67,46 @@ export function MessageToolbar({
   const [replyAllShown, setReplyAllShown] = useState(false);
   useEffect(() => setReplyAllShown(false), [email.id]);
 
+  // The actions stay out of the way so the mail is what you look at: only a small "more" icon shows, and the
+  // toolbar appears over the top of the message while the pointer is on that strip, keyboard focus is in it, or the
+  // icon was clicked (which is how touch screens, without hover, get to it). It is never unmounted — only faded —
+  // so open menus and Tab navigation keep working.
+  const [hovering, setHovering] = useState(false);
+  const [focusWithin, setFocusWithin] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  useEffect(() => setPinned(false), [email.id]);
+  const open = hovering || focusWithin || pinned;
+
   return (
-    <div className="flex items-center gap-1 border-b px-3 py-1.5">
+    <div
+      className="relative z-10 h-9 border-b"
+      onMouseEnter={() => setHovering(true)}
+      onMouseLeave={() => setHovering(false)}
+      onFocus={event => setFocusWithin(focusedByKeyboard(event.target as HTMLElement))}
+      onBlur={event => setFocusWithin(event.currentTarget.contains(event.relatedTarget as Node | null))}
+      onKeyDown={event => {
+        if (event.key === "Escape") setPinned(false);
+      }}
+    >
+      <Button
+        variant="ghost"
+        size="icon"
+        className={cn("absolute left-2 top-1 size-7 text-muted-foreground", open && "opacity-0")}
+        title="Message actions"
+        aria-label="Message actions"
+        aria-expanded={open}
+        onClick={() => setPinned(value => !value)}
+      >
+        <MoreHorizontal className="size-4" />
+      </Button>
+
+      <div
+        className={cn(
+          "absolute inset-x-0 top-0 flex items-center gap-1 border-b bg-background px-3 py-1.5 shadow-sm transition-opacity duration-100",
+          open ? "opacity-100" : "pointer-events-none opacity-0"
+        )}
+        onClick={() => setPinned(false)}
+      >
       <Button
         variant="ghost"
         size="sm"
@@ -129,9 +177,10 @@ export function MessageToolbar({
       <Button variant="ghost" size="sm" disabled={accountDisabled} title={frozen} onClick={onDelete}>
         <Trash2 className="size-4" /> Delete
       </Button>
+      </div>
 
       {email.isDraft && (
-        <Button variant="ghost" size="sm" className="ml-auto" disabled={accountDisabled} title={frozen} onClick={onEditDraft}>
+        <Button variant="ghost" size="sm" className="absolute right-3 top-0.5 z-20" disabled={accountDisabled} title={frozen} onClick={onEditDraft}>
           <PenSquare className="size-4" /> Edit draft
         </Button>
       )}
