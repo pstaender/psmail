@@ -3097,7 +3097,8 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       const tab = await screen.findByRole("tab", { name: "Summary" });
       expect(tab.querySelector("svg.lucide-sparkles")).toBeTruthy();
 
-      await userEvent.click(await screen.findByRole("button", { name: "Summarize this message with AI" }));
+      await userEvent.click(await screen.findByRole("tab", { name: "Summary" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Summarize with AI" }));
       await screen.findByText(/Alice says hello/);
       expect(screen.getByRole("tab", { name: "Summary" }).querySelector("svg")).toBeNull();
     });
@@ -3109,7 +3110,8 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
       expect(screen.queryByRole("button", { name: /found/i })).toBeNull();
 
-      await userEvent.click(await screen.findByRole("button", { name: "Summarize this message with AI" }));
+      await userEvent.click(await screen.findByRole("tab", { name: "Summary" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Summarize with AI" }));
       const found = await screen.findByRole("button", { name: /found 2 dates/i });
       const categories = screen.getByLabelText("Categories");
       const again = screen.getByRole("button", { name: "Summarize again" });
@@ -3118,45 +3120,36 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     });
   });
 
-  describe("the sparkles icon next to the subject", () => {
-      const icon = () => screen.queryByRole("button", { name: "Summarize this message with AI" });
-      async function openHello(opts: Parameters<typeof installMockFetch>[0]) {
-        installMockFetch(opts);
-        await login();
-        await userEvent.click(await screen.findByText("Hello there"));
-        await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
-      }
+  describe("the reading pane header while a summary is generated", () => {
+    async function openHello(opts: Parameters<typeof installMockFetch>[0]) {
+      installMockFetch(opts);
+      await login();
+      await userEvent.click(await screen.findByText("Hello there"));
+      await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+    }
 
-      test("with a summarize skill and no summary yet it is offered; clicking says it is generating, and it is gone when the summary is there", async () => {
-        await openHello({ aiSkillCategories: ["summarize"], aiSummarizeDelayMs: 300 });
-        const button = await waitFor(() => icon()!);
-        expect(button.querySelector("svg.lucide-sparkles")).toBeTruthy();
-        expect(screen.queryByRole("status")).toBeNull();
+    test("the header has no Summarize button; starting one from the Summary tab shows that it is generating, until it is there", async () => {
+      await openHello({ aiSkillCategories: ["summarize"], aiSummarizeDelayMs: 300 });
+      expect(screen.queryByRole("button", { name: /summarize this message/i })).toBeNull();
+      expect(screen.queryByRole("status")).toBeNull();
 
-        await userEvent.click(button);
-        const status = await screen.findByRole("status");
-        expect(status.textContent).toContain("Generating the summary");
-        expect(status.textContent).toContain("may take a moment");
+      await userEvent.click(await screen.findByRole("tab", { name: "Summary" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Summarize with AI" }));
+      const status = await screen.findByRole("status");
+      expect(status.textContent).toContain("Generating the summary");
+      expect(status.textContent).toContain("may take a moment");
 
-        expect(await screen.findByText(/Alice says hello/)).toBeTruthy(); // done: the Summary tab opens itself
-        await waitFor(() => expect(icon()).toBeNull());
-        expect(screen.queryByRole("status")).toBeNull();
-        expect(screen.getByRole("button", { name: "Summarize again" })).toBeTruthy(); // running it again is possible, from the Summary tab
-      });
-
-      test("a message that already has a summary doesn't show it", () => {
-        const skill = { id: 1, name: "Summarize", category: "summarize" } as never;
-        const { rerender } = render(<MessageHeader email={{ ...EMAIL, aiSummary: null } as never} summarizeSkills={[skill]} />);
-        expect(icon()).toBeTruthy();
-        rerender(<MessageHeader email={{ ...EMAIL, aiSummary: "- already summarized" } as never} summarizeSkills={[skill]} />);
-        expect(icon()).toBeNull();
-      });
-
-      test("without a summarize skill (AI not set up, or only other skills) there is no icon", async () => {
-        await openHello({ aiSkillCategories: ["translate"] });
-        expect(icon()).toBeNull();
-      });
+      expect(await screen.findByText(/Alice says hello/)).toBeTruthy();
+      await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
     });
+
+    test("the status belongs to the message it was started for", () => {
+      const { rerender } = render(<MessageHeader email={{ ...EMAIL, aiSummary: null } as never} summarizing />);
+      expect(screen.getByRole("status")).toBeTruthy();
+      rerender(<MessageHeader email={{ ...EMAIL, aiSummary: "- done" } as never} summarizing />);
+      expect(screen.queryByRole("status")).toBeNull();
+    });
+  });
 
     test("summarizing happens in the Summary tab (the toolbar has no Summarize button) and the result stays there", async () => {
       installMockFetch({ aiSkillCategories: ["summarize"] });

@@ -5,8 +5,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { cn } from "@/lib/utils";
 import { formatFullDate } from "@/lib/time";
 import type { EmailAddress, EmailRecord } from "../../server/types";
-import type { AiSkillRecord } from "../../server/models/ai";
-import { AiSkillButton } from "./AiSkillButton";
 
 function formatAddress(addr: EmailAddress): string {
   return addr.name ? `${addr.name} <${addr.address}>` : addr.address;
@@ -29,18 +27,7 @@ function AddressLine({ label, addresses, full }: { label: string; addresses: Ema
   );
 }
 
-export function MessageHeader({
-  email,
-  summarizeSkills = [],
-  summarizing = false,
-  onSummarize = () => {},
-}: {
-  email: EmailRecord;
-  /** The user's Summarize skills — with one (and no summary yet) a sparkles icon next to the subject offers to summarize. */
-  summarizeSkills?: AiSkillRecord[];
-  summarizing?: boolean;
-  onSummarize?: (skillId: number) => void;
-}) {
+export function MessageHeader({ email, summarizing = false }: { email: EmailRecord; /** A summary is being generated for this message (started from the Summary tab). */ summarizing?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   // "Expand all details": Cc/Bcc (and To) unclamped, plus the message id, which is hidden otherwise.
   const [allDetails, setAllDetails] = useState(false);
@@ -51,21 +38,7 @@ export function MessageHeader({
     <div className="space-y-3 border-b p-4">
       <div className="flex items-start justify-between gap-4">
         <h2 className="text-lg font-semibold leading-tight">{email.subject || "(no subject)"}</h2>
-        <div className="flex shrink-0 items-center gap-1">
-          {/* No summary yet and the feature is there: an icon offers it; once there is one (or none can be made) it is gone. */}
-          {!email.aiSummary && (summarizeSkills.length > 0 || summarizing) && (
-            <AiSkillButton
-              skills={summarizeSkills}
-              busy={summarizing}
-              iconOnly
-              icon={<Sparkles className="size-4" />}
-              label="Summarize this message with AI"
-              title="Summarize this message with AI"
-              onRun={onSummarize}
-            />
-          )}
-          {email.isFlagged && <Star aria-label="Starred" className="mt-1 size-4 shrink-0 fill-yellow-400 text-yellow-500" />}
-        </div>
+        {email.isFlagged && <Star aria-label="Starred" className="mt-1 size-4 shrink-0 fill-yellow-400 text-yellow-500" />}
       </div>
 
       {summarizing && !email.aiSummary && (

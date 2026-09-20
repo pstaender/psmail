@@ -16,7 +16,6 @@ export function AiSkillButton({
   title,
   variant = "ghost",
   disabled = false,
-  iconOnly = false,
   onRun,
 }: {
   skills?: AiSkillRecord[];
@@ -26,24 +25,14 @@ export function AiSkillButton({
   title?: string;
   variant?: "ghost" | "outline";
   disabled?: boolean;
-  /** Just the icon (label and title stay as the accessible name and tooltip). */
-  iconOnly?: boolean;
   onRun: (skillId: number) => void;
 }) {
   if (skills.length === 0) return null;
 
   const button = (
-    <Button
-      variant={variant}
-      size={iconOnly ? "icon" : "sm"}
-      className={iconOnly ? "size-7" : undefined}
-      disabled={busy || disabled}
-      title={title}
-      aria-label={iconOnly ? label : undefined}
-      onClick={skills.length === 1 ? () => onRun(skills[0]!.id) : undefined}
-    >
-      {busy ? <Loader2 className="size-4 animate-spin" /> : icon} {iconOnly ? null : label}
-      {skills.length > 1 && !iconOnly && <ChevronDown className="size-3" />}
+    <Button variant={variant} size="sm" disabled={busy || disabled} title={title} onClick={skills.length === 1 ? () => onRun(skills[0]!.id) : undefined}>
+      {busy ? <Loader2 className="size-4 animate-spin" /> : icon} {label}
+      {skills.length > 1 && <ChevronDown className="size-3" />}
     </Button>
   );
   if (skills.length === 1) return button;
