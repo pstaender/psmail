@@ -7,6 +7,26 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - New folders, created on the IMAP server (6d306dd)
+--------------------------------------------------------------
+An account's menu (the three dots) has "New folder...": a name and, optionally, a folder to put it in ("Inside", default
+top level). The folder is created on the mail server itself and subscribed to, so every other mail client sees it too;
+the sidebar then shows it (subfolders are indented by depth).
+- POST /api/accounts/:email/folders { name, parent? } -> 201 { path, folders }. The server's list afterwards is stored
+  (the folder cache) and returned with the counts. The path is parent + the server's delimiter + name.
+- Names are checked before anything is sent: 1-100 characters, no delimiter, "*", "%" or control characters, not "."
+  or ".."; an existing folder (any case) is 409, an unknown parent 404. Servers that keep everything under "INBOX."
+  (Dovecot's namespace prefix) get "top-level" folders there too, as they refuse names outside it.
+- Read-only accounts and disabled accounts can't create folders (409, and the menu entry isn't shown): it would be a
+  change on the server, which read-only exists to prevent, and a folder that only exists locally would be a lie.
+  A server that refuses or can't be reached is a 502 with its reason, shown in the dialog.
+- Tests: the path/validation rules and the IMAP calls with a fake client (create, subscribe, refusal, no subscriptions),
+  the route's refusals, and the dialog (top level, nested, server refusal, disabled button, hidden for read-only/
+  disabled accounts).
+- Not tried against a real server: the Greenmail integration test has no case for it yet, and I haven't created a
+  folder on your accounts.
+
+
 2026-09-20 - Deep links: URL paths for folders and messages (a90e73b)
 ------------------------------------------------------------------
 The address bar now follows the view, on plain URL paths (no hash router), so reload, bookmarks, shared links and
