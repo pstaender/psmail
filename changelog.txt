@@ -7,6 +7,22 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Move as a searchable combobox; toolbar stays up while a menu is open (9996f17)
+------------------------------------------------------------------------------------------
+- Move (in the reading pane's toolbar and in the bulk action bar) is now a shadcn combobox - a button that opens a
+  searchable list (Popover + Command, i.e. the cmdk package, added with the ui/popover.tsx and ui/command.tsx components
+  and the shared FolderCombobox). Type part of a folder's name or path to narrow it, arrow keys/Enter or a click move the
+  message(s), Esc closes; "No folder found." when nothing matches. The list shows the folder paths (Work/Invoices), not
+  just the last part, and the current folder isn't offered.
+- The hidden action toolbar no longer disappears when Move is clicked: while a menu is open the pointer and focus are in
+  the menu (outside the strip), which used to close the toolbar and take the menu with it. An open Move list or AI skill
+  menu (a new onMenuOpenChange on AiSkillButton) now holds it open, and it lets go once the menu is closed.
+- The strip's positioning is done with classes (absolute inset-x-0 top-0 z-10 h-9) instead of an inline style, and the
+  reading pane's root is "relative" so that it is positioned against the pane.
+- Tests: typing narrows and Enter moves, no match, the toolbar held open by the list, the bulk Move, the disabled state
+  (Move is a combobox now, not a plain button). Not looked at in a browser.
+
+
 2026-09-20 - Reading pane: actions hidden until wanted (f68e24b)
 -------------------------------------------------------------
 The open message's action buttons (Reply, Forward, Translate, Mark read, Download, Move, Delete) no longer sit there all
