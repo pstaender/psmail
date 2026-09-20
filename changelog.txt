@@ -7,6 +7,20 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Accounts: exclude_from_auto_sync (fa9758d)
+-------------------------------------------------------
+New account option to keep an account out of the syncs that cover all accounts, because servers like Gmail throttle or
+block IMAP access when there are too many requests. Stored as accounts.exclude_from_auto_sync (a migration adds the
+column, default off); in the API it is excludeFromAutoSync, like the other flags (readOnly, skipSoftDelete).
+- What it skips: the interval sync (Settings > Inboxes) and the combined Inbox's refresh button ("sync the Inboxes of
+  all accounts"). Those are the global syncs; nothing else syncs automatically. Disabled accounts were already skipped.
+- What it doesn't touch: the account's own "Sync now" button and "psmail sync <account>" still work, and reading,
+  writing and everything else about the account is unchanged.
+- Where to set it: Account settings > Misc > "Exclude from automatic sync", and in the Add account dialog.
+- Tests: the flag in the model (default, creation, update leaves it alone), the interval tick and the all-Inboxes button
+  skipping the account, and the settings dialog sending it. Not tried against a real Gmail account.
+
+
 2026-09-20 - Download messages as .eml / zip (debe37b)
 ------------------------------------------------------
 The bulk action bar (shown when messages are checked) has a Download button: one selected message is saved as its .eml
