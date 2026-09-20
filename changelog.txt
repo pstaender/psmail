@@ -7,6 +7,14 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Header: the Summarize sparkles button is removed (bea60c7)
+-------------------------------------------------------------------------
+The sparkles icon button next to the subject in the message header is gone. Summarizing is done from the Summary tab (its
+"Summarize with AI" / "Summarize again" button), as before that icon existed. The "Generating the summary... this may take a
+moment." status stays in the header while a summary started from the Summary tab is being made. AiSkillButton lost its
+iconOnly option (only the icon needed it). Tests adjusted.
+
+
 2026-09-20 - "Found n dates" button in the Summary tab; Summary tab icon only until there is a summary (d10751f)
 --------------------------------------------------------------------------------------------------------------
 - The found dates and events are no longer a strip under the attachments: they are a button with the calendar icon,
