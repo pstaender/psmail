@@ -7,6 +7,18 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Dates and events: collapsed by default (1605e24)
+--------------------------------------------------------------
+The "Dates and events" strip under the attachments is now a collapsed line saying how many were found ("2 dates and
+events" / "1 date or event", with the titles as its tooltip). A shadcn Collapsible: the pointer over it opens the list and
+moving away closes it; a click keeps it open (pinned) until it is clicked again - which is also how touch screens, with no
+hover, get to it. A click on it while the pointer is still there closes it and it stays closed until the pointer has left.
+The "All (N)" button moved into the opened list.
+- Tests: the count line, click pins and un-pins, hover in/out, singular, and the existing download tests open it first.
+  Not looked at in a browser (hover-opening moves the content below it down, as the toolbar experiments showed it may
+  feel wrong - say if you'd rather have click only).
+
+
 2026-09-20 - AI skill "Find dates and events": .ics files for the user (8afccb1)
 ---------------------------------------------------------------------------------
 New AI skill category "events" (Settings > AI > Skills > "Find dates and events"). When a message is summarized and such a skill
