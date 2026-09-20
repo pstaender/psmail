@@ -7,6 +7,24 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Message header and toolbar as Collapsibles (5fa4618)
+-------------------------------------------------------------
+- Message header: the "Message-ID" label is gone (it sounded too technical); the id itself is still shown, in the extra
+  details. "Expand all details" / "Collapse details" is now a shadcn Collapsible whose trigger is only an arrow (it keeps
+  the words as its tooltip and accessible name); the "to ..." line that opens the details box is a Collapsible too.
+- Message toolbar: instead of fading in on hover it is a Collapsible. A slim strip at the top shows just an arrow that
+  opens the toolbar below it and closes it again. No hover logic any more, so nothing to trip over when a menu opens
+  (the Move list no longer needs any special care), and the buttons aren't in the page while it's closed.
+  The choice is remembered (localStorage psmail.messageActionsOpen; closed by default), so it stays as the user left it
+  between messages and visits - a change from "closed again for every message". A draft still keeps Edit draft in the strip.
+  Opening the toolbar moves the message down (it's in the flow now, not an overlay).
+- Removed the pieces the hover version needed: the onMenuOpenChange prop of AiSkillButton and FolderCombobox, the
+  absolute positioning, and "relative" on the reading pane.
+- Tests: the toolbar tests were rewritten for the arrow (closed by default, opens/closes, remembered, keyboard, Move list,
+  draft); the other tests start with the toolbar open, since most of them use its buttons. Header tests updated.
+  Not looked at in a browser.
+
+
 2026-09-20 - Move as a searchable combobox; toolbar stays up while a menu is open (9996f17)
 ------------------------------------------------------------------------------------------
 - Move (in the reading pane's toolbar and in the bulk action bar) is now a shadcn combobox - a button that opens a
