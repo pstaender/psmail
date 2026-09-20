@@ -5,6 +5,7 @@ import {
   ChevronRight,
   File,
   Folder,
+  FolderPlus,
   Inbox,
   Loader2,
   Lock,
@@ -23,6 +24,8 @@ import { cn } from "@/lib/utils";
 import { useFolders } from "@/hooks/useFolders";
 import type { Account, DownloadJob } from "../../server/types";
 import type { FolderInfo } from "@/lib/api";
+import { NewFolderDialog } from "./NewFolderDialog";
+import { toast } from "sonner";
 
 function folderIcon(folder: FolderInfo) {
   switch (folder.specialUse) {
@@ -84,6 +87,7 @@ export function AccountRow({
   // instead of fetching an independent copy that would only ever catch up on a full refresh.
   const own = useFolders(usingShared ? null : expanded ? account.email : null);
   const { folders, loading, error, warning, refresh } = usingShared ? sharedFolders : own;
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
   const job = syncJob;
   const isRunning = job?.status === "pending" || job?.status === "running";
   const syncLabel = job
@@ -153,12 +157,33 @@ export function AccountRow({
             <DropdownMenuItem variant="destructive" onClick={() => onDeleteAccount(account.email)}>
               <Trash2 className="size-3.5" /> Remove account
             </DropdownMenuItem>
+            {!account.disabled && !account.readOnly && (
+              <DropdownMenuItem
+                onClick={() => {
+                  setExpanded(true); // the folder list has to be loaded to offer the parents
+                  setNewFolderOpen(true);
+                }}
+              >
+                <FolderPlus className="size-3.5" /> New folder…
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onClick={() => onEditAccount(account.email)}>
               <Settings className="size-3.5" /> Account settings
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <NewFolderDialog
+        accountEmail={account.email}
+        folders={folders}
+        open={newFolderOpen}
+        onOpenChange={setNewFolderOpen}
+        onCreated={(_, path) => {
+          refresh(); // the server has remembered the new list; reload it (and the counts) the usual way
+          toast.success(`Folder "${path}" was created.`);
+        }}
+      />
 
       <CollapsibleContent className="pl-4">
         {/* Only the first load blanks the tree; a refresh (e.g. after a sync) keeps the folders on screen. */}
@@ -177,6 +202,7 @@ export function AccountRow({
         {folders.map(folder => {
             const Icon = folderIcon(folder);
             const isSelected = selected?.accountEmail === account.email && selected.folder === folder.path;
+            const depth = folder.delimiter ? folder.path.split(folder.delimiter).length - 1 : 0;
             return (
               <button
                 key={folder.path}
@@ -185,6 +211,7 @@ export function AccountRow({
                   "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm truncate hover:bg-accent",
                   isSelected && "bg-accent font-medium"
                 )}
+                style={depth > 0 ? { paddingLeft: `${0.5 + depth * 0.75}rem` } : undefined}
               >
                 <Icon className="size-3.5 shrink-0 text-muted-foreground" />
                 <span className="flex-1 truncate">{folder.name.toLowerCase() === 'inbox' ? 'Inbox' : folder.name}</span>

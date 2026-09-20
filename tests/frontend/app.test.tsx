@@ -146,6 +146,9 @@ const originalFetch = global.fetch;
 // need to inspect what folder a saved draft was actually sent under — reset per installMockFetch
 // call (mirrors currentAccount's per-test freshness, just below).
 let capturedCreateDraftBody: Record<string, unknown> | null = null;
+/** Bodies of POST .../folders (new folders), and how the mock server answers them. */
+let createFolderPosts: { name: string; parent?: string }[] = [];
+let createFolderError: string | null = null;
 // Same, for PATCH .../emails/13 (DRAFT_EMAIL) — asserts that editing an existing draft updates
 // it in place instead of creating a new one.
 let capturedUpdateDraftBody: Record<string, unknown> | null = null;
@@ -229,6 +232,9 @@ function installMockFetch(
   // test can't leak into another, and so GET /api/accounts reflects a prior PATCH within a test.
   let currentAccount = { ...ACCOUNT, ...opts.accountOverrides };
   capturedCreateDraftBody = null;
+  createFolderPosts = [];
+  createFolderError = null;
+  const createdFolders: Record<string, unknown>[] = [];
   capturedUpdateDraftBody = null;
   pagedRequests.length = 0;
   capturedSettingsPatches.length = 0;
@@ -307,6 +313,14 @@ function installMockFetch(
       currentAccount = { ...currentAccount, supportsUidPlus: opts.uidPlusSupported ?? true };
       return jsonResponse(currentAccount);
     }
+    if (method === "POST" && path === "/api/accounts/me%40example.com/folders") {
+      const body = JSON.parse(init!.body as string) as { name: string; parent?: string };
+      createFolderPosts.push(body);
+      if (createFolderError) return jsonResponse({ error: createFolderError }, 409);
+      const folderPath = body.parent ? `${body.parent}/${body.name}` : body.name;
+      createdFolders.push({ path: folderPath, name: body.name, delimiter: "/", specialUse: null, flags: [], total: 0, unread: 0 });
+      return jsonResponse({ path: folderPath, folders: [...FOLDERS, ...createdFolders] }, 201);
+    }
     if (method === "GET" && path === "/api/accounts/me%40example.com/folders" && url.includes("live=1")) {
       liveFolderRequests += 1;
       if (opts.liveFolders === "fail") return jsonResponse({ error: "Couldn't read the folders of me@example.com from imap.example.com: slow" }, 502);
@@ -314,12 +328,12 @@ function installMockFetch(
         await new Promise(resolve => setTimeout(resolve, 150)); // IMAP takes its time
         return jsonResponse(opts.liveFolders);
       }
-      return warned(jsonResponse(FOLDERS));
+      return warned(jsonResponse([...FOLDERS, ...createdFolders]));
     }
     if (method === "GET" && path === "/api/accounts/me%40example.com/folders") {
       folderRequests += 1;
       if (folderDelayMs > 0) await new Promise(resolve => setTimeout(resolve, folderDelayMs));
-      return warned(jsonResponse(FOLDERS));
+      return warned(jsonResponse([...FOLDERS, ...createdFolders]));
     }
     const downloadPost = /^\/api\/accounts\/([^/]+)\/downloads$/.exec(path);
     if (method === "POST" && downloadPost) {
@@ -511,6 +525,71 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
   afterEach(() => {
     cleanup();
     global.fetch = originalFetch;
+  });
+
+  describe("creating folders", () => {
+    async function openNewFolderDialog() {
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+      await userEvent.click(screen.getByTitle("More actions"));
+      await userEvent.click(await screen.findByText("New folder…"));
+      return within((await screen.findByText("New folder", { selector: "[data-slot=dialog-title]" })).closest('[role="dialog"]') as HTMLElement);
+    }
+
+    test("the account menu creates a folder on the server, and it shows up in the tree", async () => {
+      render(<App />);
+      const dialog = await openNewFolderDialog();
+      await userEvent.type(dialog.getByLabelText("Name"), "Receipts");
+      await userEvent.click(dialog.getByRole("button", { name: "Create folder" }));
+
+      expect(await screen.findByText("Receipts")).toBeTruthy();
+      expect(createFolderPosts).toEqual([{ name: "Receipts" }]);
+      expect((await screen.findAllByText(/Folder "Receipts" was created/)).length).toBeGreaterThan(0);
+      expect(screen.queryByText("New folder", { selector: "[data-slot=dialog-title]" })).toBeNull();
+    });
+
+    test("a folder can be created inside another one", async () => {
+      render(<App />);
+      const dialog = await openNewFolderDialog();
+      await userEvent.type(dialog.getByLabelText("Name"), "2024");
+      await userEvent.selectOptions(dialog.getByLabelText("Inside"), "Entwürfe");
+      await userEvent.click(dialog.getByRole("button", { name: "Create folder" }));
+
+      await waitFor(() => expect(createFolderPosts).toEqual([{ name: "2024", parent: "Entwürfe" }]));
+      expect(await screen.findByText("2024")).toBeTruthy();
+    });
+
+    test("the server's refusal is shown in the dialog, which stays open", async () => {
+      createFolderError = 'A folder "Receipts" already exists.';
+      render(<App />);
+      const dialog = await openNewFolderDialog();
+      await userEvent.type(dialog.getByLabelText("Name"), "Receipts");
+      await userEvent.click(dialog.getByRole("button", { name: "Create folder" }));
+
+      expect(await screen.findByText(/already exists/)).toBeTruthy();
+      expect(screen.getByText("New folder", { selector: "[data-slot=dialog-title]" })).toBeTruthy();
+    });
+
+    test("nothing to create without a name", async () => {
+      render(<App />);
+      const dialog = await openNewFolderDialog();
+      expect(dialog.getByRole("button", { name: "Create folder" }).hasAttribute("disabled")).toBe(true);
+    });
+  });
+
+  describe("creating folders: accounts that can't", () => {
+    test.each([
+      ["read-only", { readOnly: true }],
+      ["disabled", { disabled: true }],
+    ])("a %s account has no New folder action", async (_label, accountOverrides) => {
+      installMockFetch({ accountOverrides });
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await waitFor(() => expect(screen.getAllByText("me@example.com").length).toBeGreaterThan(0), { timeout: 3000 });
+      await userEvent.click(screen.getByTitle("More actions"));
+      await screen.findByText("Account settings");
+      expect(screen.queryByText("New folder…")).toBeNull();
+    });
   });
 
   describe("deep links (URL paths)", () => {

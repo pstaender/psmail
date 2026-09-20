@@ -109,6 +109,57 @@ export async function listFolders(client: ImapFlow): Promise<ImapFolder[]> {
   );
 }
 
+/** What a folder name may not contain: the IMAP wildcards, control characters — and the hierarchy delimiter (checked separately). */
+const FORBIDDEN_IN_FOLDER_NAME = /[\u0000-\u001f\u007f*%]/;
+
+/** Thrown for a folder name/parent that can't be created; carries the reason for the user and whether it already exists. */
+export class FolderNameError extends Error {
+  constructor(message: string, readonly kind: "invalid" | "exists" | "missing-parent") {
+    super(message);
+  }
+}
+
+/**
+ * Where a new folder goes: `parent` + delimiter + name, or at the top level. Servers that keep everything under
+ * the Inbox namespace (Dovecot with `INBOX.` as prefix) refuse top-level names, so when every other folder is
+ * `INBOX<delimiter>…` a "top-level" folder is created there too.
+ */
+export function newFolderPath(existing: ImapFolder[], name: string, parent: string | null): string {
+  const delimiter = existing.find(f => f.path === parent)?.delimiter ?? existing.find(f => f.delimiter)?.delimiter ?? "/";
+  const trimmed = name.trim();
+  if (!trimmed) throw new FolderNameError("A folder needs a name.", "invalid");
+  if (trimmed.length > 100) throw new FolderNameError("The folder name is too long (100 characters at most).", "invalid");
+  if (trimmed === "." || trimmed === ".." || FORBIDDEN_IN_FOLDER_NAME.test(trimmed) || trimmed.includes(delimiter)) {
+    throw new FolderNameError(`A folder name can't contain "${delimiter}", "*", "%" or control characters.`, "invalid");
+  }
+
+  let prefix = "";
+  if (parent) {
+    if (!existing.some(f => f.path === parent)) throw new FolderNameError(`The folder "${parent}" doesn't exist.`, "missing-parent");
+    prefix = parent + delimiter;
+  } else {
+    const others = existing.filter(f => f.specialUse !== "\\Inbox" && f.path.toUpperCase() !== "INBOX");
+    if (others.length > 0 && others.every(f => f.path.toUpperCase().startsWith(`INBOX${delimiter}`))) prefix = `INBOX${delimiter}`;
+  }
+
+  const path = prefix + trimmed;
+  if (existing.some(f => f.path.toLowerCase() === path.toLowerCase())) {
+    throw new FolderNameError(`A folder "${path}" already exists.`, "exists");
+  }
+  return path;
+}
+
+/**
+ * Creates a folder on the server (and subscribes to it, so other clients show it too). Returns the new path and the
+ * server's folder list afterwards.
+ */
+export async function createFolder(client: ImapFlow, name: string, parent: string | null): Promise<{ path: string; folders: ImapFolder[] }> {
+  const path = newFolderPath(await listFolders(client), name, parent);
+  await client.mailboxCreate(path);
+  await client.mailboxSubscribe(path).catch(() => {}); // not every server has subscriptions; the folder exists either way
+  return { path, folders: await listFolders(client) };
+}
+
 /**
  * Servers that don't flag their Inbox/Sent folders (no \Inbox / \Sent special-use) usually still name them that way:
  * when no folder carries the flag, a folder called "inbox" / "sent" (any case) is taken for it. A real flag always wins.

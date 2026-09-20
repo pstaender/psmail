@@ -1,9 +1,9 @@
 import type { Database } from "bun:sqlite";
-import { decryptAccountCredentials, getFoldersCache, learnSpecialFolders, setFoldersCache, type AccountRow } from "../models/accounts";
+import { assertAccountEnabled, decryptAccountCredentials, getFoldersCache, learnSpecialFolders, setFoldersCache, type AccountRow } from "../models/accounts";
 import { getFolderCounts, type FolderCount } from "../models/emails";
 import { json, requireAuth, withErrorHandling } from "../http";
-import { applySpecialUseFallback, describeImapError, inboxFirst, listFolders, withImapClient, type ImapFolder } from "../services/imap";
-import { ApiError } from "../types";
+import { applySpecialUseFallback, createFolder, describeImapError, FolderNameError, inboxFirst, listFolders, withImapClient, type ImapFolder } from "../services/imap";
+import { ApiError, ConflictError } from "../types";
 import { getOwnedAccountByEmailParam } from "./accounts";
 
 export interface FolderWithCounts extends ImapFolder {
@@ -106,6 +106,34 @@ function listLive(db: Database, account: AccountRow, encryptionKey: Buffer): Pro
 export function foldersRoutes(db: Database) {
   return {
     "/api/accounts/:email/folders": {
+      // Creates a folder on the IMAP server: { name, parent? } (parent is the path of an existing folder to nest it in).
+      POST: withErrorHandling(async req => {
+        const { session, encryptionKey } = requireAuth(req, db);
+        const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        assertAccountEnabled(account);
+        if (account.read_only) throw new ConflictError(`Account "${account.email}" is read-only, so no folder can be created on its server.`);
+
+        const body = (await req.json().catch(() => null)) as { name?: unknown; parent?: unknown } | null;
+        if (!body || typeof body.name !== "string") throw new ApiError(400, "Missing folder name");
+        const parent = typeof body.parent === "string" && body.parent !== "" ? body.parent : null;
+
+        const { imapPassword } = decryptAccountCredentials(account, encryptionKey);
+        let result;
+        try {
+          result = await withImapClient(
+            { host: account.imap_host, port: account.imap_port, secure: !!account.imap_secure, username: account.imap_username, password: imapPassword },
+            client => createFolder(client, body.name as string, parent)
+          );
+        } catch (error) {
+          if (error instanceof FolderNameError) throw error.kind === "exists" ? new ConflictError(error.message) : new ApiError(error.kind === "missing-parent" ? 404 : 400, error.message);
+          throw new ApiError(502, `Couldn't create the folder on ${account.imap_host}: ${describeImapError(error)}`);
+        }
+
+        learnSpecialFolders(db, account.id, result.folders);
+        setFoldersCache(db, account.id, result.folders);
+        return json({ path: result.path, folders: mergeFolderCounts(result.folders, getFolderCounts(db, account.id)) }, { status: 201 });
+      }),
+
       GET: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
         const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);

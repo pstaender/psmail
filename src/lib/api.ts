@@ -129,6 +129,13 @@ export const api = {
       },
     }),
 
+  /** Creates a folder on the account's IMAP server (nested in `parent`, or at the top level) and returns the new folder list. */
+  createFolder: (token: string, accountEmail: string, name: string, parent?: string | null) =>
+    request<{ path: string; folders: FolderInfo[] }>("POST", `/api/accounts/${enc(accountEmail)}/folders`, {
+      token,
+      body: { name, parent: parent ?? undefined },
+    }),
+
   listEmails: (token: string, accountEmail: string, folder: string, opts: { limit?: number; offset?: number } = {}) => {
     const params = new URLSearchParams({ folder });
     if (opts.limit) params.set("limit", String(opts.limit));

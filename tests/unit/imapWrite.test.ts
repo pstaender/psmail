@@ -2,10 +2,13 @@ import { describe, expect, test } from "bun:test";
 import type { ImapFlow } from "imapflow";
 import {
   appendMessage,
+  createFolder,
   deleteMessage,
   fetchRemoteFlags,
   hasUidPlusCapability,
+  FolderNameError,
   moveMessage,
+  newFolderPath,
   runWithTeardown,
   setMessageFlags,
 } from "../../src/server/services/imap";
@@ -446,5 +449,62 @@ describe("describeImapError", () => {
 
     expect(describeImapError(Object.assign(new Error("Command failed"), { responseText: "NO nope" }))).toBe('Command failed (response="NO nope")');
     expect(describeImapError("plain")).toBe("plain");
+  });
+});
+
+describe("creating folders", () => {
+  const folder = (path: string, specialUse: string | null = null, delimiter = "/") => ({ path, name: path.split(delimiter).pop()!, delimiter, specialUse, flags: [] as string[] });
+  const existing = [folder("INBOX", "\\Inbox"), folder("Sent", "\\Sent"), folder("Work")];
+
+  test("a top-level folder is just its name; a nested one is parent + delimiter + name", () => {
+    expect(newFolderPath(existing, "Receipts", null)).toBe("Receipts");
+    expect(newFolderPath(existing, "  Receipts  ", null)).toBe("Receipts");
+    expect(newFolderPath(existing, "2024", "Work")).toBe("Work/2024");
+    expect(newFolderPath([folder("INBOX", "\\Inbox", "."), folder("Work", null, ".")], "2024", "Work")).toBe("Work.2024");
+  });
+
+  test("servers that keep everything under INBOX. get top-level folders there too", () => {
+    const namespaced = [folder("INBOX", "\\Inbox", "."), folder("INBOX.Sent", "\\Sent", "."), folder("INBOX.Work", null, ".")];
+    expect(newFolderPath(namespaced, "Receipts", null)).toBe("INBOX.Receipts");
+  });
+
+  test("bad names are refused before anything is sent", () => {
+    for (const name of ["", "   ", "a/b", "a*", "a%", "..", "tab\tname", "x".repeat(101)]) {
+      expect(() => newFolderPath(existing, name, null)).toThrow(FolderNameError);
+    }
+  });
+
+  test("an existing folder (any case) and a missing parent are refused, with a reason that says which", () => {
+    expect(() => newFolderPath(existing, "work", null)).toThrow(expect.objectContaining({ kind: "exists" }));
+    expect(() => newFolderPath(existing, "x", "Nope")).toThrow(expect.objectContaining({ kind: "missing-parent" }));
+  });
+
+  test("createFolder creates and subscribes, and returns the server's list afterwards", async () => {
+    const calls: string[] = [];
+    let listed = existing;
+    const client = {
+      list: async () => listed,
+      mailboxCreate: async (p: string) => {
+        calls.push(`create ${p}`);
+        listed = [...existing, folder(p)];
+      },
+      mailboxSubscribe: async (p: string) => {
+        calls.push(`subscribe ${p}`);
+      },
+    } as unknown as ImapFlow;
+
+    const result = await createFolder(client, "2024", "Work");
+    expect(calls).toEqual(["create Work/2024", "subscribe Work/2024"]);
+    expect(result.path).toBe("Work/2024");
+    expect(result.folders.map(f => f.path)).toContain("Work/2024");
+  });
+
+  test("a server without subscriptions still counts as created, and a refusal by the server is passed on", async () => {
+    const base = { list: async () => existing };
+    const created = await createFolder({ ...base, mailboxCreate: async () => {}, mailboxSubscribe: async () => Promise.reject(new Error("no")) } as unknown as ImapFlow, "A", null);
+    expect(created.path).toBe("A");
+
+    const refusing = { ...base, mailboxCreate: async () => Promise.reject(new Error("NO [NOPERM]")) } as unknown as ImapFlow;
+    await expect(createFolder(refusing, "B", null)).rejects.toThrow("NOPERM");
   });
 });
