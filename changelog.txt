@@ -7,6 +7,20 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Date filter: More left of New, and combined with search (1b2485f)
+--------------------------------------------------------------------------------
+- The "More" button now sits to the LEFT of "New".
+- A date filter and a search work together: with a rule set (say "before 20 Sep 2011") what you type is searched as before -
+  subject/sender, from:, favs, and the text fallback - but only over the messages in those dates. Typing a search no longer hides
+  the button or the chip; changing or clearing the filter re-runs the search; clearing the search returns to the filtered list.
+- Server: GET /api/search takes after / before like the message lists (same validation: 400 for a non-date or an empty window).
+  The window is part of the first query (range conditions on emails.date, so fewer rows are read and matched) and of the
+  text fallback's query.
+- Tests: search in a window over HTTP and in the model (incl. from: and the text fallback), and the UI (More before New, the
+  search request carrying q and the window, re-running on change/clear, the filter surviving a closed search).
+  Not looked at in a browser.
+
+
 2026-09-20 - Date filter for the message lists (36e4d88)
 ---------------------------------------------------------
 Next to "New" in the list header there is a "More" (three dots) button with "Filter by date...". Its dialog offers
