@@ -27,6 +27,7 @@ export function MessageList({
   onSelect,
   onToggleFlag,
   onEditDraft,
+  onOpen = () => {},
 }: {
   emails: EmailRecord[];
   loading: boolean;
@@ -44,6 +45,8 @@ export function MessageList({
   onToggleFlag: (email: EmailRecord) => void;
   /** Double-clicking a draft opens it for editing directly, instead of just reading it. */
   onEditDraft: (email: EmailRecord) => void;
+  /** Double-clicking any other message opens it for reading, which lets the app get the list out of the way. */
+  onOpen?: (email: EmailRecord) => void;
 }) {
   const sentinelRef = useRef<HTMLLIElement>(null);
   const onLoadMoreRef = useRef(onLoadMore);
@@ -81,7 +84,10 @@ export function MessageList({
           <li key={email.id} data-row-id={email.id}>
             <button
               onClick={e => onSelect(email, e)}
-              onDoubleClick={() => email.isDraft && onEditDraft(email)}
+              onDoubleClick={e => {
+                if (email.isDraft) onEditDraft(email);
+                else if (!e.shiftKey && !e.metaKey && !e.ctrlKey) onOpen(email);
+              }}
               className={cn(
                 "group flex w-full flex-col gap-0.5 px-3 py-2.5 text-left hover:bg-accent/60 transition-colors",
                 selectedId === email.id && "bg-accent",

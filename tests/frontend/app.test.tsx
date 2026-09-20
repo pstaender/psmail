@@ -1029,6 +1029,60 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(screen.queryByText("Edit draft", { selector: "[data-slot=dialog-title]" })).toBeNull();
   });
 
+  test("double-clicking a message reads it with the list collapsed; the strip brings the list back", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+
+    await userEvent.dblClick(await screen.findByText("Hello there"));
+    await screen.findByTitle("Show the message list");
+    expect(screen.queryByText("Second message")).toBeNull(); // the list is gone…
+    await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(0)); // …the message stays open
+    expect(screen.getByRole("button", { name: /^reply$/i })).toBeTruthy();
+
+    await userEvent.click(screen.getByTitle("Show the message list"));
+    expect(await screen.findByText("Second message")).toBeTruthy();
+    expect(screen.queryByTitle("Show the message list")).toBeNull();
+  });
+
+  test("a draft still opens for editing on double-click, and the list stays", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+
+    await userEvent.dblClick(await screen.findByText("Unfinished draft"));
+    await screen.findByText("Edit draft", { selector: "[data-slot=dialog-title]" });
+    expect(screen.queryByTitle("Show the message list")).toBeNull();
+  });
+
+  test("the collapsed list comes back when there is nothing to read, or a folder or search is chosen", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+
+    await userEvent.dblClick(await screen.findByText("Hello there"));
+    await screen.findByTitle("Show the message list");
+    await userEvent.click(screen.getAllByText("Inbox")[1]!); // picking a folder in the sidebar
+    expect(await screen.findByText("Second message")).toBeTruthy();
+    expect(screen.queryByTitle("Show the message list")).toBeNull();
+
+    await userEvent.dblClick(screen.getByText("Hello there"));
+    await screen.findByTitle("Show the message list");
+    await userEvent.type(screen.getByPlaceholderText(/search all mail/i), "second"); // a search shows its results list
+    await waitFor(() => expect(screen.queryByTitle("Show the message list")).toBeNull());
+  });
+
+  test("double-clicking a search result collapses the list too", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+    await userEvent.type(screen.getByPlaceholderText(/search all mail/i), "second");
+    await waitFor(() => expect(screen.getByText(/Search: "second"/)).toBeTruthy());
+
+    await userEvent.dblClick(await screen.findByText("Second message"));
+    await screen.findByTitle("Show the message list");
+  });
+
   test("remembers the last body view across messages, downgrading HTML to Safe HTML", async () => {
     render(<App />);
 

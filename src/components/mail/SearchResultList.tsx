@@ -26,6 +26,7 @@ export function SearchResultList({
   selectedId,
   selectedIds,
   onSelect,
+  onOpen = () => {},
 }: {
   results: SearchResult[];
   loading: boolean;
@@ -42,6 +43,8 @@ export function SearchResultList({
   selectedIds: Set<number>;
   /** `event` carries the click's modifier keys, so the caller can tell a plain click from a selection click. */
   onSelect: (result: SearchResult, event: React.MouseEvent) => void;
+  /** Double-clicking a result opens it for reading, which lets the app get the list out of the way. */
+  onOpen?: (result: SearchResult) => void;
 }) {
   const sentinelRef = useRef<HTMLLIElement>(null);
   const onLoadMoreRef = useRef(onLoadMore);
@@ -78,6 +81,9 @@ export function SearchResultList({
           <li key={`${result.accountEmail}:${result.id}`} data-row-id={result.id}>
             <button
               onClick={e => onSelect(result, e)}
+              onDoubleClick={e => {
+                if (!e.shiftKey && !e.metaKey && !e.ctrlKey) onOpen(result);
+              }}
               className={cn(
                 "group flex w-full flex-col gap-0.5 px-3 py-2.5 text-left hover:bg-accent/60 transition-colors",
                 selectedId === result.id && "bg-accent",

@@ -195,6 +195,13 @@ export function AppShell() {
   const showingResults = isSearching || unifiedView !== null;
 
   const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorageState("psmail.sidebarCollapsed", false);
+  // Double-clicking a message in a list reads it with the list out of the way (a thin strip brings it back). Only for the
+  // moment, so it isn't remembered: a new page load shows the list.
+  const [listCollapsed, setListCollapsed] = useState(false);
+  useEffect(() => {
+    if (selectedEmailId === null) setListCollapsed(false); // nothing to read (deleted, moved, folder changed): the list is what is needed
+  }, [selectedEmailId]);
+  useEffect(() => setListCollapsed(false), [searchQuery]);
   const { width: sidebarWidth, startResize: startSidebarResize } = useResizableWidth("psmail.sidebarWidth", 240, 160, 480);
   const { width: messageListWidth, startResize: startMessageListResize } = useResizableWidth(
     "psmail.messageListWidth",
@@ -991,6 +998,13 @@ export function AppShell() {
           </>
         )}
 
+        {listCollapsed ? (
+          <div className="flex w-9 shrink-0 flex-col items-center border-r bg-muted/20 pt-3">
+            <Button variant="ghost" size="icon" className="size-7" onClick={() => setListCollapsed(false)} title="Show the message list">
+              <PanelLeftOpen className="size-4" />
+            </Button>
+          </div>
+        ) : (
         <div style={{ width: messageListWidth }} className="flex shrink-0 flex-col border-r">
           {selectionItems.length > 0 ? (
             <BulkActionBar
@@ -1036,6 +1050,7 @@ export function AppShell() {
                 selectedId={selectedEmailId}
                 selectedIds={selectedIds}
                 onSelect={selectResult}
+                onOpen={() => setListCollapsed(true)}
               />
             ) : selectedAccountEmail && selectedFolder ? (
               <MessageList
@@ -1050,6 +1065,7 @@ export function AppShell() {
                 onSelect={selectEmail}
                 onToggleFlag={toggleFlag}
                 onEditDraft={email => openCompose(editDraft(email))}
+                onOpen={() => setListCollapsed(true)}
               />
             ) : (
               <EmptyState title="No account selected" description="Add or select an account to see messages." />
@@ -1057,7 +1073,9 @@ export function AppShell() {
           </div>
         </div>
 
-        <ResizeHandle onPointerDown={startMessageListResize} />
+        )}
+
+        {!listCollapsed && <ResizeHandle onPointerDown={startMessageListResize} />}
 
         <div className="min-w-0 flex-1">
           {selectedEmail && selectedAccountEmail ? (
