@@ -1,22 +1,15 @@
 import { useEffect, useState } from "react";
-import { Download, FolderInput, Forward, Languages, Mail, MoreHorizontal, PenSquare, Reply, ReplyAll, Sparkles, Trash2 } from "lucide-react";
+import { ChevronRight, Download, FolderInput, Forward, Languages, Mail, PenSquare, Reply, ReplyAll, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { EmailRecord } from "../../server/types";
 import type { FolderInfo } from "@/lib/api";
 import type { AiSkillRecord } from "../../server/models/ai";
+import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import { AiSkillButton } from "./AiSkillButton";
 import { FolderCombobox } from "./FolderCombobox";
-
-/** Keyboard focus (Tab) reveals the toolbar; a mouse click that leaves a button focused doesn't keep it open. */
-function focusedByKeyboard(element: HTMLElement): boolean {
-  try {
-    return element.matches(":focus-visible");
-  } catch {
-    return true; // no :focus-visible support: err on the side of showing the actions
-  }
-}
 
 /**
  * The delete confirmation (skipped entirely when the message would only be soft-deleted, i.e.
@@ -67,52 +60,30 @@ export function MessageToolbar({
   const [replyAllShown, setReplyAllShown] = useState(false);
   useEffect(() => setReplyAllShown(false), [email.id]);
 
-  // The actions stay out of the way so the mail is what you look at: only a small "more" icon shows, and the
-  // toolbar appears over the top of the message while the pointer is on that strip, keyboard focus is in it, or the
-  // icon was clicked (which is how touch screens, without hover, get to it). It is never unmounted — only faded —
-  // so open menus and Tab navigation keep working.
-  const [hovering, setHovering] = useState(false);
-  const [focusWithin, setFocusWithin] = useState(false);
-  const [pinned, setPinned] = useState(false);
-  // An open menu (Move, the AI skills) holds the toolbar open: while it is up the pointer is over the menu, not the
-  // strip, and focus is in the menu, so neither would.
-  const [menuOpen, setMenuOpen] = useState(false);
-  useEffect(() => {
-    setPinned(false);
-    setMenuOpen(false);
-  }, [email.id]);
-  const open = hovering || focusWithin || pinned || menuOpen;
+  // The actions stay out of the way so the mail is what you look at: a slim strip with just an arrow, which opens
+  // the toolbar below it (and closes it again). It starts closed, and stays as the user left it — between messages
+  // and between visits.
+  const [open, setOpen] = useLocalStorageState("psmail.messageActionsOpen", false);
 
   return (
-    <div
-      className="absolute inset-x-0 top-0 z-10 h-9"
-      onMouseEnter={() => setHovering(true)}
-      onMouseLeave={() => setHovering(false)}
-      onFocus={event => setFocusWithin(focusedByKeyboard(event.target as HTMLElement))}
-      onBlur={event => setFocusWithin(event.currentTarget.contains(event.relatedTarget as Node | null))}
-      onKeyDown={event => {
-        if (event.key === "Escape") setPinned(false);
-      }}
-    >
-      <Button
-        variant="ghost"
-        size="icon"
-        className={cn("absolute left-2 text-muted-foreground", open && "opacity-0")}
-        title="Message actions"
-        aria-label="Message actions"
-        aria-expanded={open}
-        onClick={() => setPinned(value => !value)}
-      >
-        {/*<MoreHorizontal className="size-4" />*/}
-      </Button>
+    <Collapsible open={open} onOpenChange={setOpen} className="border-b">
+      <div className="flex h-8 items-center justify-between px-2">
+        <CollapsibleTrigger asChild>
+          <Button variant="ghost" size="icon" className="size-7 text-muted-foreground" title="Message actions" aria-label="Message actions">
+            <ChevronRight className={cn("size-4 transition-transform", open && "rotate-90")} />
+          </Button>
+        </CollapsibleTrigger>
 
-      <div
-        className={cn(
-          "absolute inset-x-0 top-0 flex items-center gap-1 bg-background px-3 py-1.5 transition-opacity duration-100",
-          open ? "opacity-100" : "pointer-events-none opacity-0"
+        {/* Editing is what a draft is for, so this one stays in view. */}
+        {email.isDraft && (
+          <Button variant="ghost" size="sm" disabled={accountDisabled} title={frozen} onClick={onEditDraft}>
+            <PenSquare className="size-4" /> Edit draft
+          </Button>
         )}
-        onClick={() => setPinned(false)}
-      >
+      </div>
+
+      <CollapsibleContent>
+        <div className="flex flex-wrap items-center gap-1 px-3 pb-1.5">
       <Button
         variant="ghost"
         size="sm"
@@ -145,7 +116,6 @@ export function MessageToolbar({
             label="Translate"
             title={frozen ?? "Translate this message with AI"}
             onRun={onTranslate}
-            onMenuOpenChange={setMenuOpen}
           />
         </>
       )}
@@ -167,7 +137,6 @@ export function MessageToolbar({
       <FolderCombobox
         folders={folders.filter(f => f.path !== email.folder)}
         onPick={onMove}
-        onOpenChange={setMenuOpen}
         disabled={accountDisabled}
         title={frozen}
       >
@@ -177,13 +146,8 @@ export function MessageToolbar({
       <Button variant="ghost" size="sm" disabled={accountDisabled} title={frozen} onClick={onDelete}>
         <Trash2 className="size-4" /> Delete
       </Button>
-      </div>
-
-      {email.isDraft && (
-        <Button variant="ghost" size="sm" className="absolute right-3 top-0.5 z-20" disabled={accountDisabled} title={frozen} onClick={onEditDraft}>
-          <PenSquare className="size-4" /> Edit draft
-        </Button>
-      )}
-    </div>
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

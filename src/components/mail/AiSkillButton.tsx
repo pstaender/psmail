@@ -17,7 +17,6 @@ export function AiSkillButton({
   variant = "ghost",
   disabled = false,
   onRun,
-  onMenuOpenChange,
 }: {
   skills?: AiSkillRecord[];
   busy: boolean;
@@ -27,8 +26,6 @@ export function AiSkillButton({
   variant?: "ghost" | "outline";
   disabled?: boolean;
   onRun: (skillId: number) => void;
-  /** Told when the skill menu (shown when there are several skills) opens or closes. */
-  onMenuOpenChange?: (open: boolean) => void;
 }) {
   if (skills.length === 0) return null;
 
@@ -41,7 +38,7 @@ export function AiSkillButton({
   if (skills.length === 1) return button;
 
   return (
-    <DropdownMenu onOpenChange={onMenuOpenChange}>
+    <DropdownMenu>
       <DropdownMenuTrigger asChild>{button}</DropdownMenuTrigger>
       <DropdownMenuContent align="start">
         {skills.map(skill => (

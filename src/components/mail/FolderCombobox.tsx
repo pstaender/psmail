@@ -11,7 +11,6 @@ import type { FolderInfo } from "@/lib/api";
 export function FolderCombobox({
   folders,
   onPick,
-  onOpenChange,
   children,
   disabled = false,
   title,
@@ -19,8 +18,6 @@ export function FolderCombobox({
 }: {
   folders: FolderInfo[];
   onPick: (folder: string) => void;
-  /** Told when the list opens or closes (the reading-pane toolbar stays up while it is open). */
-  onOpenChange?: (open: boolean) => void;
   /** The button's content. */
   children: React.ReactNode;
   disabled?: boolean;
@@ -28,10 +25,7 @@ export function FolderCombobox({
   align?: "start" | "center" | "end";
 }) {
   const [open, setOpen] = useState(false);
-  const change = (value: boolean) => {
-    setOpen(value);
-    onOpenChange?.(value);
-  };
+  const change = setOpen;
 
   return (
     <Popover open={open} onOpenChange={change}>
