@@ -7,6 +7,27 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Deep links: URL paths for folders and messages (a90e73b)
+------------------------------------------------------------------
+The address bar now follows the view, on plain URL paths (no hash router), so reload, bookmarks, shared links and
+Back/Forward work.
+- /a/<account email>/<folder>/ is a folder (/a/me@example.com/inbox/), /a/<account email>/<folder>/<message id> a
+  message in it, / the combined Inbox, /u/sent the combined Sent. "a" is short for accounts. The Inbox is written
+  "inbox"; the @ stays readable. Persisted drafts are messages in the Drafts folder, so they are covered too.
+- A folder is ONE path segment: its own slashes are percent-encoded ([Gmail]%2FSent Mail, Work%2F2024), so a trailing
+  number is always a message id and never a folder called "2024".
+- Moving between folders/messages pushes a history entry; Back/Forward apply the URL they land on. A message opened
+  from the combined lists or a search counts as being in its folder. Opening a link while signed out shows the
+  sign-in and then lands on the link; signing out resets the URL to /. A link to an account that isn't yours (or
+  an unrecognized path) falls back to the combined Inbox, the account case with a toast.
+- Settings, compose and search have no URL state (as asked). No server change: it already serves the app for every
+  non-API path, and the bundle's assets are absolute, so nested paths load fine (checked).
+- New src/lib/routes.ts (buildPath/parsePath). Tests: round-trips for awkward folder names and bad paths, and the
+  app starting on a message URL, pushing URLs on navigation, popstate, unknown account. The frontend test window now
+  has a real origin (http://localhost:3001) so location/history behave.
+- Not tried in a real browser against your accounts.
+
+
 2026-09-20 - Several passkeys per profile (6b5030c)
 -------------------------------------------------
 The passkey unlock of the saved password (browser-local, WebAuthn PRF) now supports more than one passkey per
