@@ -7,6 +7,32 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Date filter for the message lists (36e4d88)
+---------------------------------------------------------
+Next to "New" in the list header there is a "More" (three dots) button with "Filter by date...". Its dialog offers
+- Specific day,
+- Date range (from - to, both days included),
+- Since a date (that day and everything newer),
+- Before a date (everything older; that day is not included)
+("since / before" instead of "older / newer than a start date": it says which side of the date and, with the hint under the
+buttons, whether the day itself counts). Days are the user's own, in their time zone. The filter applies to a folder's list and
+to the combined Inbox / Sent, shows as a chip under the header (click = change, x = clear), is not offered while searching,
+and belongs to the list it was set on: another folder or mailbox starts without one. An empty result says
+"Nothing in the chosen dates."
+Queries (the point of "efficient"):
+- GET .../emails and GET /api/unified/:kind take after (inclusive) and before (exclusive) as ISO instants (normalized to the
+  stored format, 400 for a non-date or an empty window). The window is only plain range conditions on emails.date after
+  account_id and folder - no OR / IS NULL / function on the column - so the existing (account, folder, date, id) index serves
+  the list IN ORDER: a range scan, no folder scan, no sort. Checked with EXPLAIN QUERY PLAN in a test (uses idx_emails_folder_date,
+  no SCAN, no TEMP B-TREE) and timed: one day out of 200 000 messages, first 100 rows, a few ms.
+- The combined lists keep their design (one index query per account/folder, merged); each of those queries gets the window.
+- Messages without a date are outside every window (they are still in the unfiltered list).
+- Not covered: the window isn't in the URL, and search results have no date filter (a search has its own way to narrow).
+- Tests: bounds parsing and SQL, inclusive/exclusive edges, paging in a window, other folders/accounts, the query plan and
+  the 200 000-row timing, the HTTP routes, and the UI (each mode's request, validation, chip, clear, combined lists, reset per list).
+  Not looked at in a browser.
+
+
 2026-09-20 - Double-click a message: the list collapses (0b18493)
 -------------------------------------------------------------------
 Double-clicking a message in a list (folder list, search results, combined Inbox/Sent) opens it for reading with the message
