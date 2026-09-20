@@ -1,6 +1,7 @@
 import { VENDOR_LABELS, type AiCategory } from "../../ai/categories";
 import type { AiApiConfig, AiSkillRecord, AiUsage } from "../models/ai";
 import { peekSettings } from "../config/settings";
+import { ANY_QUOTES_AT_ENDS, parseJsonArray } from "./jsonAnswer";
 import { ApiError } from "../types";
 
 /**
@@ -158,24 +159,14 @@ export async function runSkill(skill: AiSkillRecord, api: AiApiConfig, text: str
  * otherwise (a model that added prose, or answered as a list) whatever comma/line-separated labels are in it.
  */
 export function parseTaxonomy(answer: string): string[] {
-  let labels: unknown[] = [];
-  const start = answer.indexOf("[");
-  const end = answer.lastIndexOf("]");
-  if (start !== -1 && end > start) {
-    try {
-      const parsed = JSON.parse(answer.slice(start, end + 1));
-      if (Array.isArray(parsed)) labels = parsed;
-    } catch {
-      // fall through to the loose parse
-    }
-  }
-  if (labels.length === 0) labels = answer.split(/[\n,;]+/);
+  let labels: unknown[] = parseJsonArray(answer) ?? [];
+  if (labels.length === 0) labels = answer.split(/[\n,;]+/); // not usable JSON: whatever comma/line-separated labels there are
 
   const seen = new Set<string>();
   const result: string[] = [];
   for (const raw of labels) {
     if (typeof raw !== "string") continue;
-    const label = raw.replace(/^[\s\-*•\d.)]+/, "").replace(/^["'`]+|["'`]+$/g, "").trim().slice(0, 40);
+    const label = raw.replace(/^[\s\-*•\d.)]+/, "").replace(ANY_QUOTES_AT_ENDS, "").trim().slice(0, 40);
     if (!label || seen.has(label.toLowerCase())) continue;
     seen.add(label.toLowerCase());
     result.push(label);

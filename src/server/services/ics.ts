@@ -1,3 +1,5 @@
+import { parseJsonArray } from "./jsonAnswer";
+
 /**
  * Calendar events found in a message by the AI, turned into iCalendar (.ics) files.
  *
@@ -82,17 +84,8 @@ const clean = (value: unknown, max: number): string | undefined => {
  * without a title or with a start that isn't a real date are dropped, as is an end before the start.
  */
 export function parseEventsAnswer(answer: string): FoundEvent[] {
-  const start = answer.indexOf("[");
-  const end = answer.lastIndexOf("]");
-  if (start === -1 || end <= start) return [];
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(answer.slice(start, end + 1));
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(parsed)) return [];
+  const parsed = parseJsonArray(answer);
+  if (!parsed) return [];
 
   const events: FoundEvent[] = [];
   const seen = new Set<string>();

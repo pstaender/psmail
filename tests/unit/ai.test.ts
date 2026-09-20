@@ -18,6 +18,8 @@ import {
   updateAiApi,
   updateAiSkill,
 } from "../../src/server/models/ai";
+import { parseJsonArray } from "../../src/server/services/jsonAnswer";
+import { parseEventsAnswer } from "../../src/server/services/ics";
 import { aiHttp, aiLog, complete, emailTextForAi, parseTaxonomy, renderPrompt } from "../../src/server/services/ai";
 import { SKILL_DEFAULTS, AI_CATEGORIES, defaultApiLabel } from "../../src/ai/categories";
 
@@ -394,5 +396,46 @@ describe("verbose AI logging (verboseAiApiCalls in settings.json)", () => {
     await complete(api, "S", "x".repeat(10_000));
     expect(sent.length).toBe(10_000);
     expect(lines.join("\n")).toContain("… (6000 more characters)");
+  });
+});
+
+describe("JSON arrays with typographic quotes", () => {
+  test("the categories from the report — written with “ ” — are read", () => {
+    expect(parseTaxonomy("[“veranstaltung”, “weiterleitung”, “einladung”, “musik”, “privat”]")).toEqual([
+      "veranstaltung",
+      "weiterleitung",
+      "einladung",
+      "musik",
+      "privat",
+    ]);
+  });
+
+  test("other quote styles are read too: „ “, « », single quotes, ‘ ’, and inside prose or a code fence", () => {
+    const expected = ["a", "b"];
+    for (const answer of ["[„a“, „b“]", "[«a», «b»]", "['a', 'b']", "[‘a’, ‘b’]", "Sure: [“a”, “b”] Done.", "```json\n[“a”, “b”]\n```", '["a", “b”]']) {
+      expect(parseTaxonomy(answer)).toEqual(expected);
+    }
+  });
+
+  test("valid JSON is parsed as it is: typographic quotes inside a proper string stay", () => {
+    expect(parseJsonArray('["say “hi”", "b"]')).toEqual(["say “hi”", "b"]);
+  });
+
+  test("labels that had to be split out loosely lose typographic quotes at their ends", () => {
+    expect(parseTaxonomy("“invoice”, ‘travel’, „action“")).toEqual(["invoice", "travel", "action"]);
+  });
+
+  test("parseJsonArray: an array or null", () => {
+    expect(parseJsonArray("no array here")).toBeNull();
+    expect(parseJsonArray("[oops")).toBeNull();
+    expect(parseJsonArray("[1, 2")).toBeNull();
+    expect(parseJsonArray("[]")).toEqual([]);
+    expect(parseJsonArray('[{“title”: “A”, “start”: “2026-09-30”}]')).toEqual([{ title: "A", start: "2026-09-30" }]);
+  });
+
+  test("events written with typographic quotes are found as well", () => {
+    expect(parseEventsAnswer('[{“title”: “Abgabe”, “start”: “2026-09-30”, “location”: “Büro”}]')).toEqual([
+      { title: "Abgabe", start: "2026-09-30", location: "Büro" },
+    ]);
   });
 });
