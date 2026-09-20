@@ -7,6 +7,23 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Reading pane: actions hidden until wanted (f68e24b)
+-------------------------------------------------------------
+The open message's action buttons (Reply, Forward, Translate, Mark read, Download, Move, Delete) no longer sit there all
+the time. A slim strip at the top of the reading pane shows only a small "..." icon; the toolbar fades in over the top of
+the message while
+- the pointer is on that strip (hover),
+- keyboard focus is in it (Tab reaches the buttons even while they're faded - they're never removed from the page), or
+- the icon was clicked - that pins it open, which is how touch screens (no hover) get to it. Clicking the icon again,
+  Esc, or picking an action closes it, and it starts closed for every message.
+It appears as an overlay, so the message doesn't jump when it does. The strip is 36 px instead of the old toolbar's 45.
+- A draft keeps its "Edit draft" button in view at the top right: editing is what a draft is for.
+- Choices made: hover + click rather than only one of them; mouse clicks that leave a button focused don't hold it open
+  (only keyboard focus does).
+- Tests: hidden by default, hover in/out, click/Esc/action closing, the buttons staying in the page, the draft button.
+  Not looked at in a browser - worth a glance at how the overlay feels (speed of the fade, whether the strip is easy to hit).
+
+
 2026-09-20 - Reading pane: Download button (a9ae44b)
 ----------------------------------------------------
 The open message's toolbar has a Download button that saves the message as its .eml file (the same download as the bulk
