@@ -7,6 +7,22 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Crash "aiSkills is undefined" fixed: AI really is optional (38e4264)
+--------------------------------------------------------------------------------
+Opening a message could fail with "TypeError: can't access property "filter", aiSkills is undefined" in
+MessageToolbar. AI skills are optional, so no component may depend on them being there:
+- MessageToolbar, MessageView, ComposeDialog and AiSkillButton now treat their AI props (aiSkills, aiBusy, the
+  callbacks, aiLanguage) as optional with safe defaults - no skills simply means no AI buttons, Summary tab
+  or Refine.
+- AppShell only ever stores a list from GET /api/ai/skills: a missing or odd answer (null, an error object,
+  an HTML page) now means "no skills" instead of putting a non-list into state.
+Most likely cause of what you saw (I couldn't log in to your running server to check - the profile has a
+password now): the browser's hot-reload had swapped in the new MessageToolbar while the parent still had the
+old code and didn't pass aiSkills. The defaults make that harmless as well; a full page reload also clears it.
+Tests: the toolbar renders with no AI props at all, and three odd skills answers (null / object / string) leave
+the app usable with no AI elements.
+
+
 2026-09-19 - Attachment download fix for non-ASCII filenames (afe36d5)
 ----------------------------------------------------------------------
 Downloading an attachment whose filename contains non-ASCII characters (e.g. "Flyer Chor Jubiläum Herder NEU.pdf")
