@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Archive,
   Ban,
@@ -26,6 +26,35 @@ import type { Account, DownloadJob } from "../../server/types";
 import type { FolderInfo } from "@/lib/api";
 import { NewFolderDialog } from "./NewFolderDialog";
 import { toast } from "sonner";
+
+interface FolderNode {
+  folder: FolderInfo;
+  /** Paths of the folders it sits inside, outermost first (only folders the list actually has). */
+  ancestors: string[];
+  depth: number;
+  hasChildren: boolean;
+  /** Unread messages in all the folders below it. */
+  hiddenUnread: number;
+}
+
+/** The flat folder list as a tree: nesting follows the paths (`Work/2024` is inside `Work`); the order is the server's. */
+function buildFolderTree(folders: FolderInfo[]): FolderNode[] {
+  const nodes = folders.map(folder => {
+    const ancestors = folders
+      .filter(other => other !== folder && other.delimiter && folder.path.startsWith(other.path + other.delimiter))
+      .sort((a, b) => a.path.length - b.path.length)
+      .map(other => other.path);
+    return { folder, ancestors, depth: ancestors.length, hasChildren: false, hiddenUnread: 0 };
+  });
+  for (const node of nodes) {
+    for (const ancestor of node.ancestors) {
+      const parent = nodes.find(n => n.folder.path === ancestor)!;
+      parent.hasChildren = true;
+      parent.hiddenUnread += node.folder.unread;
+    }
+  }
+  return nodes;
+}
 
 function folderIcon(folder: FolderInfo) {
   switch (folder.specialUse) {
@@ -88,6 +117,20 @@ export function AccountRow({
   const own = useFolders(usingShared ? null : expanded ? account.email : null);
   const { folders, loading, error, warning, refresh } = usingShared ? sharedFolders : own;
   const [newFolderOpen, setNewFolderOpen] = useState(false);
+  // Folders whose subfolders are showing; every folder starts collapsed.
+  const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
+  const setFolderOpen = (path: string, open: boolean) =>
+    setOpenFolders(prev => (prev.has(path) === open ? prev : new Set(open ? [...prev, path] : [...prev].filter(p => p !== path))));
+  const toggleFolder = (path: string) => setFolderOpen(path, !openFolders.has(path));
+  const tree = useMemo(() => buildFolderTree(folders), [folders]);
+  const visibleFolders = tree.filter(node => node.ancestors.every(path => openFolders.has(path)));
+  // The selected folder (a link, a new folder, a new-mail click…) is never hidden inside a collapsed parent.
+  const selectedPath = isSelectedAccount ? selected!.folder : null;
+  useEffect(() => {
+    const ancestors = tree.find(node => node.folder.path === selectedPath)?.ancestors;
+    if (ancestors?.some(path => !openFolders.has(path))) setOpenFolders(prev => new Set([...prev, ...ancestors]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPath, tree]);
   const job = syncJob;
   const isRunning = job?.status === "pending" || job?.status === "running";
   const syncLabel = job
@@ -179,7 +222,9 @@ export function AccountRow({
         folders={folders}
         open={newFolderOpen}
         onOpenChange={setNewFolderOpen}
-        onCreated={(_, path) => {
+        onCreated={(created, path) => {
+          const ancestors = buildFolderTree(created).find(node => node.folder.path === path)?.ancestors ?? [];
+          if (ancestors.length > 0) setOpenFolders(prev => new Set([...prev, ...ancestors])); // show it where it was put
           refresh(); // the server has remembered the new list; reload it (and the counts) the usual way
           toast.success(`Folder "${path}" was created.`);
         }}
@@ -199,28 +244,46 @@ export function AccountRow({
           </p>
         )}
 
-        {folders.map(folder => {
+        {visibleFolders.map(({ folder, depth, hasChildren, hiddenUnread }) => {
             const Icon = folderIcon(folder);
             const isSelected = selected?.accountEmail === account.email && selected.folder === folder.path;
-            const depth = folder.delimiter ? folder.path.split(folder.delimiter).length - 1 : 0;
+            const isOpen = openFolders.has(folder.path);
+            const unread = folder.unread + (hasChildren && !isOpen ? hiddenUnread : 0); // a collapsed folder still shows what's unread inside it
             return (
-              <button
-                key={folder.path}
-                onClick={() => onSelectFolder(account.email, folder.path)}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm truncate hover:bg-accent",
-                  isSelected && "bg-accent font-medium"
+              <div key={folder.path} className="flex items-center" style={depth > 0 ? { paddingLeft: `${depth * 0.75}rem` } : undefined}>
+                {/* Folders with subfolders start collapsed; the arrow (or a click on the folder) opens them. */}
+                {hasChildren ? (
+                  <button
+                    type="button"
+                    className="flex size-5 shrink-0 items-center justify-center text-muted-foreground"
+                    aria-label={`${isOpen ? "Collapse" : "Expand"} ${folder.name}`}
+                    aria-expanded={isOpen}
+                    onClick={() => toggleFolder(folder.path)}
+                  >
+                    <ChevronRight className={cn("size-3 transition-transform", isOpen && "rotate-90")} />
+                  </button>
+                ) : (
+                  <span className="size-5 shrink-0" /> // keeps the names aligned
                 )}
-                style={depth > 0 ? { paddingLeft: `${0.5 + depth * 0.75}rem` } : undefined}
-              >
-                <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate">{folder.name.toLowerCase() === 'inbox' ? 'Inbox' : folder.name}</span>
-                {folder.unread > 0 && (
-                  <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                    {folder.unread}
-                  </Badge>
-                )}
-              </button>
+                <button
+                  onClick={() => {
+                    if (hasChildren) setFolderOpen(folder.path, true);
+                    onSelectFolder(account.email, folder.path);
+                  }}
+                  className={cn(
+                    "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left text-sm truncate hover:bg-accent",
+                    isSelected && "bg-accent font-medium"
+                  )}
+                >
+                  <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="flex-1 truncate">{folder.name.toLowerCase() === 'inbox' ? 'Inbox' : folder.name}</span>
+                  {unread > 0 && (
+                    <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                      {unread}
+                    </Badge>
+                  )}
+                </button>
+              </div>
             );
           })}
       </CollapsibleContent>

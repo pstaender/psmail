@@ -212,6 +212,8 @@ function installMockFetch(
     liveFolders?: Record<string, unknown>[] | "fail";
     /** GET .../folders answers with the stored folders and this reason in x-folders-warning (the mail server can't be reached). */
     folderWarning?: string;
+    /** Folders next to the default ones (e.g. nested ones like Work/2024) in the account's folder list. */
+    extraFolders?: Record<string, unknown>[];
     /** Categories the user has AI skills for (all on one provider); they show up in GET /api/ai/skills. */
     aiSkillCategories?: string[];
     /** Provider records GET /api/ai/apis starts with. */
@@ -234,7 +236,7 @@ function installMockFetch(
   capturedCreateDraftBody = null;
   createFolderPosts = [];
   createFolderError = null;
-  const createdFolders: Record<string, unknown>[] = [];
+  const createdFolders: Record<string, unknown>[] = [...(opts.extraFolders ?? [])];
   capturedUpdateDraftBody = null;
   pagedRequests.length = 0;
   capturedSettingsPatches.length = 0;
@@ -574,6 +576,83 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       render(<App />);
       const dialog = await openNewFolderDialog();
       expect(dialog.getByRole("button", { name: "Create folder" }).hasAttribute("disabled")).toBe(true);
+    });
+  });
+
+  describe("subfolders", () => {
+    const folder = (path: string, unread = 0) => ({ path, name: path.split("/").pop(), delimiter: "/", specialUse: null, flags: [], total: unread, unread });
+    const nested = [folder("Work"), folder("Work/2024", 2), folder("Work/2024/Q1"), folder("Private")];
+
+    async function openTree() {
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+    }
+
+    test("folders with subfolders start collapsed, with an arrow; the arrow opens and closes them", async () => {
+      installMockFetch({ extraFolders: nested });
+      render(<App />);
+      await openTree();
+
+      await screen.findByText("Work");
+      expect(screen.getByText("Private")).toBeTruthy();
+      expect(screen.queryByText("2024")).toBeNull();
+      expect(screen.queryByLabelText("Expand Private")).toBeNull(); // no subfolders, no arrow (a hidden placeholder keeps the alignment)
+
+      await userEvent.click(screen.getByLabelText("Expand Work"));
+      expect(await screen.findByText("2024")).toBeTruthy();
+      expect(screen.queryByText("Q1")).toBeNull(); // each level opens on its own
+
+      await userEvent.click(screen.getByLabelText("Expand 2024"));
+      expect(await screen.findByText("Q1")).toBeTruthy();
+
+      await userEvent.click(screen.getByLabelText("Collapse Work"));
+      expect(screen.queryByText("2024")).toBeNull();
+      expect(screen.queryByText("Q1")).toBeNull();
+    });
+
+    test("clicking a folder with subfolders selects it and opens it", async () => {
+      installMockFetch({ extraFolders: nested });
+      render(<App />);
+      await openTree();
+
+      await userEvent.click(await screen.findByText("Work"));
+      expect(await screen.findByText("2024")).toBeTruthy();
+      await waitFor(() => expect(window.location.pathname).toBe("/a/me@example.com/Work/"));
+    });
+
+    test("a collapsed folder shows the unread count of what is inside it", async () => {
+      installMockFetch({ extraFolders: nested });
+      render(<App />);
+      await openTree();
+
+      const work = (await screen.findByText("Work")).closest("button")!;
+      expect(work.textContent).toContain("2");
+      await userEvent.click(screen.getByLabelText("Expand Work"));
+      expect((await screen.findByText("Work")).closest("button")!.textContent).not.toContain("2"); // now the subfolder shows it
+    });
+
+    test("the selected folder is never hidden in a collapsed parent (a link to it opens its parents)", async () => {
+      window.history.replaceState(null, "", "/a/me@example.com/Work%2F2024/");
+      installMockFetch({ extraFolders: nested });
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+
+      expect(await screen.findByText("2024")).toBeTruthy();
+      expect(screen.queryByText("Q1")).toBeNull();
+    });
+
+    test("a folder created inside another one is shown where it was put", async () => {
+      installMockFetch({ extraFolders: [folder("Work")] });
+      render(<App />);
+      await openTree();
+      await userEvent.click(screen.getByTitle("More actions"));
+      await userEvent.click(await screen.findByText("New folder…"));
+      const dialog = within((await screen.findByText("New folder", { selector: "[data-slot=dialog-title]" })).closest('[role="dialog"]') as HTMLElement);
+      await userEvent.type(dialog.getByLabelText("Name"), "Receipts");
+      await userEvent.selectOptions(dialog.getByLabelText("Inside"), "Work");
+      await userEvent.click(dialog.getByRole("button", { name: "Create folder" }));
+
+      expect(await screen.findByText("Receipts")).toBeTruthy();
     });
   });
 
