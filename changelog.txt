@@ -7,6 +7,22 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Search options: Full text search (1949523)
+--------------------------------------------------------
+While the search box is in use (focused, or its menu open) a "..." button appears beside the close (x) button. It opens a menu with a
+"Full text search" toggle. When on - remembered in localStorage (psmail.fullTextSearch) - the search always includes the message
+text, instead of only when subject and sender found nothing. The results header then says "Search: "x" . full text".
+- Server: GET /api/search?fulltext=1. Each word must be in the subject, the sender or the text (so the text pass finds everything
+  the subject/sender pass finds, and more); the two lists are merged newest first, a message found both ways once (as a
+  subject hit, not marked "in message text"). Paging, the date window, from: and favs work as before. A message without a plain
+  text part can still be found by its subject.
+- Cost: a search with the option on reads message texts every time (about 0.2 s on 20 000 x 5 KB, same bounds as the fallback:
+  newest 20 000 messages, 100 000 characters each). That is why it is an option and off by default.
+- The menu item stays open when toggled (you see the state change); the button sits before the x in the tab order.
+- Tests: the merge/dedupe/AND/paging/window in the model, the route flag, the button's visibility and place, the toggle
+  re-running the search, persistence and a stored "on". Not looked at in a browser (the show-on-focus behaviour especially).
+
+
 2026-09-20 - Date filter: More left of New, and combined with search (1b2485f)
 --------------------------------------------------------------------------------
 - The "More" button now sits to the LEFT of "New".
