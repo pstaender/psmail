@@ -309,3 +309,80 @@ describe("searchEmails", () => {
     });
   });
 });
+
+describe("search: falling back to the message text", () => {
+  async function mailbox() {
+    const db = createTestDb();
+    const user = await createUser(db, "alice", "pw");
+    const key = deriveEncryptionKey("pw", generateSalt());
+    const account = createAccount(
+      db,
+      user.id,
+      { email: "a@x.com", imapHost: "h", imapPort: 993, imapSecure: true, imapUsername: "a", imapPassword: "x", smtpHost: "h", smtpPort: 465, smtpSecure: true, smtpUsername: "a", smtpPassword: "x" },
+      key
+    );
+    const mail = (subject: string, plainText: string | null, date: string, extra = {}) =>
+      createEmail(db, account.id, { folder: "INBOX", isDraft: false, subject, plainText, date, from: [{ name: "Sender", address: "s@y.com" }], ...extra });
+    return { db, user, mail };
+  }
+
+  test("a query that matches no subject or sender finds messages by their text, marked as such", async () => {
+    const { db, user, mail } = await mailbox();
+    mail("Unterlagen", "Bitte senden Sie die Belege bis Ende September.", "2026-01-02T00:00:00.000Z");
+    mail("Hallo", "Nichts Besonderes.", "2026-01-03T00:00:00.000Z");
+
+    const results = searchEmails(db, user.id, "belege");
+    expect(results.map(r => r.subject)).toEqual(["Unterlagen"]);
+    expect(results[0]!.matchedInBody).toBe(true);
+  });
+
+  test("subject and sender hits come first and alone: the text is only searched when they found nothing", async () => {
+    const { db, user, mail } = await mailbox();
+    mail("Invoice May", "irrelevant", "2026-01-01T00:00:00.000Z");
+    mail("Other", "please pay the invoice today", "2026-01-02T00:00:00.000Z");
+
+    const results = searchEmails(db, user.id, "invoice");
+    expect(results.map(r => r.subject)).toEqual(["Invoice May"]);
+    expect(results[0]!.matchedInBody).toBeUndefined();
+  });
+
+  test("terms are still ANDed — each in the subject, the sender or the text — and wildcards, phrases and Unicode work", async () => {
+    const { db, user, mail } = await mailbox();
+    mail("Termin", "Wir treffen uns im Café am Marktplatz um 14 Uhr.", "2026-01-01T00:00:00.000Z");
+    mail("Termin", "Wir treffen uns im Büro.", "2026-01-02T00:00:00.000Z");
+
+    expect(searchEmails(db, user.id, "café marktplatz").map(r => r.id)).toHaveLength(1);
+    expect(searchEmails(db, user.id, "CAFÉ").map(r => r.matchedInBody)).toEqual([true]); // case-insensitive, non-ASCII
+    expect(searchEmails(db, user.id, '"am Marktplatz"')).toHaveLength(1);
+    expect(searchEmails(db, user.id, "treffen*Büro")).toHaveLength(1);
+    expect(searchEmails(db, user.id, "treffen zzz")).toEqual([]); // one term nowhere: nothing
+    expect(searchEmails(db, user.id, "termin marktplatz")).toHaveLength(1); // one in the subject, one in the text
+  });
+
+  test("from: and favs still restrict, and a query without general terms doesn't read bodies at all", async () => {
+    const { db, user, mail } = await mailbox();
+    mail("A", "the secret word", "2026-01-01T00:00:00.000Z", { from: [{ name: "Bob", address: "bob@y.com" }] });
+    mail("B", "the secret word", "2026-01-02T00:00:00.000Z", { from: [{ name: "Cy", address: "cy@y.com" }], isFlagged: true });
+
+    expect(searchEmails(db, user.id, "secret from:bob").map(r => r.subject)).toEqual(["A"]);
+    expect(searchEmails(db, user.id, "favs secret").map(r => r.subject)).toEqual(["B"]);
+    expect(searchEmails(db, user.id, "from:nobody")).toEqual([]);
+  });
+
+  test("newest first, paged; messages without a plain text part are skipped", async () => {
+    const { db, user, mail } = await mailbox();
+    for (let i = 1; i <= 5; i++) mail(`M${i}`, `contains needle ${i}`, `2026-01-0${i}T00:00:00.000Z`);
+    mail("HTML only", null, "2026-01-09T00:00:00.000Z");
+
+    expect(searchEmails(db, user.id, "needle").map(r => r.subject)).toEqual(["M5", "M4", "M3", "M2", "M1"]);
+    expect(searchEmails(db, user.id, "needle", { limit: 2, offset: 2 }).map(r => r.subject)).toEqual(["M3", "M2"]);
+    expect(searchEmails(db, user.id, "needle", { limit: 2, offset: 4 }).map(r => r.subject)).toEqual(["M1"]);
+  });
+
+  test("it only ever sees the user's own mail", async () => {
+    const { db, mail } = await mailbox();
+    mail("Mine", "shared word", "2026-01-01T00:00:00.000Z");
+    const other = await createUser(db, "bob", "pw");
+    expect(searchEmails(db, other.id, "shared")).toEqual([]);
+  });
+});

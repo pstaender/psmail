@@ -1008,7 +1008,7 @@ export function AppShell() {
             <div className="flex items-center justify-between border-b px-3 py-2">
               <span className="truncate text-sm font-medium">
                 {isSearching
-                  ? `Search: "${searchQuery.trim()}"`
+                  ? `Search: "${searchQuery.trim()}"${searchResults.length > 0 && searchResults.every(r => r.matchedInBody) ? " · in message text" : ""}`
                   : unifiedView
                     ? `${unifiedView === "inbox" ? "Inbox" : "Sent"} · all accounts`
                     : selectedFolder ?? "—"}

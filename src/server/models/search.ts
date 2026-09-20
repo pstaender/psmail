@@ -14,6 +14,8 @@ export interface SearchResult {
   /** Recipients — only filled by the unified Sent list, which shows who a message went to rather than who sent it. */
   to?: EmailAddress[];
   hasAttachments?: boolean;
+  /** Set when the message was found by its text (the fallback when subject and sender matched nothing), not by subject or sender. */
+  matchedInBody?: boolean;
   /** The message's categories (AI labels), when it has any. */
   taxonomyList?: string[];
   date: string | null;
@@ -93,6 +95,24 @@ function wildcardToRegExp(term: string): RegExp {
   return new RegExp(escaped, "iu");
 }
 
+/**
+ * The same term semantics as wildcardToRegExp (case-insensitive, `*` matches anything, a term without one matches anywhere),
+ * for long texts: the parts between the stars are looked up one after the other with indexOf, which stays linear where a
+ * regex with `.*` between two words backtracks for seconds on a few KB of text. Takes the text already lower-cased.
+ */
+function wildcardTextMatcher(term: string): (lowerText: string) => boolean {
+  const parts = term.toLowerCase().split("*").filter(part => part !== "");
+  return lowerText => {
+    let from = 0;
+    for (const part of parts) {
+      const at = lowerText.indexOf(part, from);
+      if (at === -1) return false;
+      from = at + part.length;
+    }
+    return true;
+  };
+}
+
 interface SearchRow {
   id: number;
   account_email: string;
@@ -130,6 +150,69 @@ function toSearchResult(row: SearchRow): SearchResult {
     from: parseAddresses(row.from_addr),
     date: row.date,
   };
+}
+
+/**
+ * How many of the newest messages (of the user, over all accounts) the text fallback reads at most, and how much of each
+ * message's text. Reading message bodies is the expensive part of a search — the header search only touches two short
+ * columns — so it is bounded: at worst about 20 000 bodies of up to 100 000 characters, and it stops at the first page of hits.
+ */
+export const BODY_SEARCH_MAX_MESSAGES = 20_000;
+const BODY_SEARCH_MAX_CHARS = 100_000;
+const BODY_CHUNK = 200;
+
+/**
+ * The fallback for a search that found nothing in subjects and senders: the same terms (each must be in the subject, the
+ * sender or the plain text of the message; `from:` terms still restrict the sender), newest first. Texts are read in chunks
+ * and the scan ends as soon as `wanted` messages matched, so a query that does hit is cheap and only a query that hits nothing
+ * reads everything (up to the limit above). Plain text only: a message that has just an HTML part isn't searched here.
+ */
+function searchBodies(
+  db: Database,
+  userId: number,
+  { generalTerms, generalRegexes, fromRegexes, favsOnly }: { generalTerms: string[]; generalRegexes: RegExp[]; fromRegexes: RegExp[]; favsOnly: boolean },
+  wanted: number
+): SearchResult[] {
+  // The newest messages first, without their texts: sorting rows that carry long bodies is what made this slow.
+  const headers = db
+    .query<SearchRow, [number, number]>(
+      `SELECT emails.id, accounts.email as account_email, emails.folder, emails.uid,
+              emails.is_read, emails.is_flagged, emails.subject, emails.from_addr, emails.date
+       FROM emails
+       JOIN accounts ON accounts.id = emails.account_id
+       WHERE accounts.user_id = ? AND emails.plain_text IS NOT NULL${favsOnly ? " AND emails.is_flagged = 1" : ""}
+       ORDER BY emails.date DESC
+       LIMIT ?`
+    )
+    .all(userId, BODY_SEARCH_MAX_MESSAGES);
+
+  // Then the texts, a chunk at a time, so that a query that has enough hits stops after reading only as many as it needed.
+  const bodyMatchers = generalTerms.map(wildcardTextMatcher);
+  const found: SearchResult[] = [];
+  for (let start = 0; start < headers.length && found.length < wanted; start += BODY_CHUNK) {
+    const chunk = headers.slice(start, start + BODY_CHUNK);
+    const bodies = new Map(
+      db
+        .query<{ id: number; body: string | null }, number[]>(
+          `SELECT id, substr(plain_text, 1, ${BODY_SEARCH_MAX_CHARS}) AS body FROM emails WHERE id IN (${chunk.map(() => "?").join(",")})`
+        )
+        .all(...chunk.map(row => row.id))
+        .map(row => [row.id, row.body ?? ""] as const)
+    );
+
+    for (const row of chunk) {
+      const fromText = addressSearchText(parseAddresses(row.from_addr));
+      if (fromRegexes.length > 0 && !fromRegexes.some(re => re.test(fromText))) continue;
+
+      const subject = row.subject ?? "";
+      const lowerBody = (bodies.get(row.id) ?? "").toLowerCase();
+      if (!generalRegexes.every((re, i) => re.test(subject) || re.test(fromText) || bodyMatchers[i]!(lowerBody))) continue;
+
+      found.push({ ...toSearchResult(row), matchedInBody: true });
+      if (found.length >= wanted) break;
+    }
+  }
+  return found;
 }
 
 export interface SearchOptions {
@@ -178,6 +261,11 @@ export function searchEmails(db: Database, userId: number, query: string, option
 
     results.push(toSearchResult(row));
     if (results.length >= offset + limit) break;
+  }
+
+  // Nothing matched subject or sender: look in the message text too.
+  if (results.length === 0 && generalTerms.length > 0) {
+    results.push(...searchBodies(db, userId, { generalTerms, generalRegexes, fromRegexes, favsOnly }, offset + limit));
   }
 
   const page = results.slice(offset, offset + limit);

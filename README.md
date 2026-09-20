@@ -127,6 +127,8 @@ Always case-insensitive; searches every account you own. A bare word matches if 
 - `from:someone@example.com` — a dedicated, sender-only filter (never checks the subject), combinable with other terms, e.g. `from:someone@example.com amazon*gutschein`. Multiple `from:` terms are OR'd together.
 - `favs` — as the **first word only**, restricts the search to flagged (starred) messages; the rest of the query filters as usual, so `favs amazon` = favorites matching "amazon" and a lone `favs` lists all favorites. Anywhere else, or quoted (`"favs"`), it's an ordinary search word.
 
+**Falling back to the message text.** Only when the search above finds nothing at all, it looks in the plain text of the messages too: each word must then be in the subject, the sender **or** the text (`*` and quotes work the same, `from:` and `favs` still restrict). Those hits are marked `matchedInBody` and the results header says "· in message text". A search that has hits never reads message texts, so it costs nothing there. Reading texts is the expensive part, so it is bounded: the newest 20 000 messages of the user, the first 100 000 characters of each, in chunks of 200 that stop as soon as a page of hits is full. Measured on a synthetic mailbox of 20 000 messages with about 5 KB of text each (100 MB): 0.2 s when nothing matches anywhere (the worst case), 50 ms when there are plenty of hits; 50 000 messages: 0.25 s (the cap applies). Messages that have only an HTML part are not searched by text, and older mail beyond the newest 20 000 isn't either.
+
 Implemented in `src/server/models/search.ts`; matching runs in JS (not SQL `LIKE`) so Unicode case-folding (e.g. `ä`/`Ä`) works correctly — stock SQLite's `LIKE`/`LOWER()` are ASCII-only without the ICU extension.
 
 ## CLI

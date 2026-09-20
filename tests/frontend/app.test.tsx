@@ -526,8 +526,10 @@ function installMockFetch(
     if (method === "GET" && path === "/api/search") {
       // The mock doesn't replicate real matching (that's covered by backend tests) —
       // it just returns a canned hit so the UI wiring (fetch -> render -> select) is exercised.
+      const inBody = new URL(url, "http://localhost").searchParams.get("q") === "only-in-the-text";
       return jsonResponse([
         {
+          ...(inBody ? { matchedInBody: true } : {}),
           id: SECOND_EMAIL.id,
           accountEmail: ACCOUNT.email,
           folder: SECOND_EMAIL.folder,
@@ -1848,6 +1850,21 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     } finally {
       globalThis.setInterval = realSetInterval;
     }
+  });
+
+  test("hits found only in the message text are said to be, in the results header", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+
+    const searchBox = screen.getByPlaceholderText(/search all mail/i);
+    await userEvent.type(searchBox, "second");
+    await waitFor(() => expect(screen.getByText(/Search: "second"/)).toBeTruthy());
+    expect(screen.getByText(/Search: "second"/).textContent).not.toContain("message text");
+
+    await userEvent.clear(searchBox);
+    await userEvent.type(searchBox, "only-in-the-text");
+    expect(await screen.findByText('Search: "only-in-the-text" · in message text')).toBeTruthy();
   });
 
   test("Esc closes the search, like its x button", async () => {
