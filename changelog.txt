@@ -7,6 +7,22 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - verboseAiApiCalls: AI API calls on the console (bfe5398)
+--------------------------------------------------------------------
+With "verboseAiApiCalls": true in settings.json every AI API call is written to the server's console (the terminal running
+"bun run dev" / "bun run start"). Off by default; settings are read at start, so restart after changing it.
+  [ai] -> anthropic claude-opus-5  POST https://api.anthropic.com/v1/messages  (system prompt 312 characters, input 4210)
+  [ai]   system prompt: ...   [ai]   input: ...
+  [ai] <- anthropic claude-opus-5  HTTP 200 in 1843 ms · 1204 tokens in, 88 out
+  [ai]   answer: ...
+- Failures are logged too: an HTTP error with the service's body, no answer (timeout / unreachable), an answer that isn't JSON,
+  an empty answer. Tokens the service didn't report are marked "(estimated)".
+- The API key is never logged. Mail text is (it is what is sent), hence off by default; each text is cut after 4000
+  characters in the log (the call itself is unchanged).
+- Covers every call, since they all go through one function: summarize, categorize, translate, Refine, provider Test.
+- Tests: off by default, the logged lines, the key kept out, estimated tokens, the four failure kinds, the cut.
+
+
 2026-09-20 - Sparkles icon to summarize, with a "generating" indicator (4cde603)
 ---------------------------------------------------------------------------------
 When a message has no AI summary yet and a Summarize skill exists, a lucide Sparkles icon button sits next to the subject
