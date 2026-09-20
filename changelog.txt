@@ -7,6 +7,18 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Double-click a message: the list collapses (0b18493)
+-------------------------------------------------------------------
+Double-clicking a message in a list (folder list, search results, combined Inbox/Sent) opens it for reading with the message
+list collapsed to a thin strip (the same look as the collapsed accounts panel), so the message gets the whole width. The
+strip's button "Show the message list" brings it back. Drafts still open for editing on double-click and leave the list alone;
+a double-click with Shift/Ctrl/Cmd (selection gestures) doesn't collapse.
+- The list also comes back by itself when there is nothing to read any more (the message was deleted/moved, or a folder was
+  chosen) and when a search is typed. Not remembered across page loads - it is a reading mode, not a setting.
+- Tests: collapse and restore, drafts, folder/search bringing it back, search results.
+  Not looked at in a browser.
+
+
 2026-09-20 - AI answers with typographic quotes are read (e97653e)
 ------------------------------------------------------------------
 A model answered the categories as ["veranstaltung", "weiterleitung", ...] written with curly quotes, which is not JSON, so
