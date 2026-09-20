@@ -7,6 +7,25 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Sparkles icon to summarize, with a "generating" indicator (4cde603)
+---------------------------------------------------------------------------------
+When a message has no AI summary yet and a Summarize skill exists, a lucide Sparkles icon button sits next to the subject
+in the reading pane ("Summarize this message with AI"). Clicking it starts the summary and shows
+"Generating the summary... this may take a moment." (a status line under the subject, the icon spinning meanwhile); when
+the summary is there (the Summary tab opens by itself, as before) the icon and the indicator are gone. A message that
+already has a summary never shows the icon. With several Summarize skills the icon opens the list to choose from, like the
+Summary tab's button; without a Summarize skill (AI not set up, only other skills, disabled account) there is no icon.
+- Summarizing again IS possible: the Summary tab's "Summarize again" button (it asks first, since it costs another AI call
+  and replaces the stored summary). The icon is only the first-time entry.
+- The "generating" state now belongs to the message it was started for (AppShell remembers the id), so switching to
+  another message while it runs doesn't show it there.
+- AiSkillButton got an iconOnly option for this.
+- Also in this commit, changes made by hand in the working tree: category chips (up to four, under the snippet), the
+  header's Settings button as an icon without the username, and the CSS. The username test and the README follow that.
+- Tests: the icon (offered, generating state, gone afterwards, not with a summary, not without a skill). Not looked at in
+  a browser.
+
+
 2026-09-20 - Categories in the message lists (0a1ee67)
 ------------------------------------------------------
 A message that has categories (the taxonomy labels a Categorize AI skill stores on it) now shows them in the lists: small
