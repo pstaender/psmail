@@ -1,13 +1,12 @@
 import { useState } from "react";
-import { Fingerprint } from "lucide-react";
-import { Loader2 } from "lucide-react";
+import { Fingerprint, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { hasVault, removeVault } from "@/lib/passkeyVault";
+import { addPasskey, hasVault, listPasskeys, passkeysAvailable, removePasskey, removeVault } from "@/lib/passkeyVault";
 
 /**
  * Changing the login password. The server re-encrypts the saved IMAP/SMTP passwords of every account
@@ -18,7 +17,9 @@ import { hasVault, removeVault } from "@/lib/passkeyVault";
 export function PasswordForm() {
   const { token, username } = useAuth();
   // Passkey unlock on this device (set up at sign-in): shown here so it can be removed, and it goes away with a password change.
-  const [vaultPresent, setVaultPresent] = useState(() => (username ? hasVault(username) : false));
+  const [passkeys, setPasskeys] = useState(() => (username ? listPasskeys(username) : []));
+  const [addingPasskey, setAddingPasskey] = useState(false);
+  const vaultPresent = passkeys.length > 0;
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -43,7 +44,7 @@ export function PasswordForm() {
       // What the passkey protects is the old password: it would only fail from now on.
       const hadVault = !!username && hasVault(username);
       if (username) removeVault(username);
-      setVaultPresent(false);
+      setPasskeys([]);
       const others =
         otherSessionsSignedOut > 0 ? ` ${otherSessionsSignedOut} other session${otherSessionsSignedOut === 1 ? " was" : "s were"} signed out.` : "";
       toast.success(`${next === "" ? "Password removed." : "Password changed."}${others}${hadVault ? " Passkey unlock was removed from this device; set it up again at your next sign-in." : ""}`);
@@ -93,20 +94,64 @@ export function PasswordForm() {
       </p>
 
       {vaultPresent && username && (
-        <div className="flex items-center gap-2 rounded-md border p-3 text-xs text-muted-foreground">
-          <Fingerprint className="size-4 shrink-0" />
-          <span className="flex-1">Passkey unlock is set up on this device: the sign-in screen can unlock your saved password with a passkey.</span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              removeVault(username);
-              setVaultPresent(false);
-            }}
-          >
-            Remove
-          </Button>
+        <div className="space-y-2 rounded-md border p-3 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <Fingerprint className="size-4 shrink-0" />
+            <span className="flex-1">
+              Passkey unlock is set up on this device: the sign-in screen can unlock your saved password with any of these passkeys.
+            </span>
+          </div>
+          <ul className="space-y-1">
+            {passkeys.map((passkey, index) => (
+              <li key={passkey.credentialId} className="flex items-center gap-2 pl-6">
+                <span className="flex-1 text-foreground">
+                  Passkey {index + 1}
+                  <span className="text-muted-foreground">
+                    {passkey.addedAt ? ` · added ${new Date(passkey.addedAt).toLocaleDateString()}` : ""}
+                  </span>
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  title={`Remove passkey ${index + 1}`}
+                  onClick={() => {
+                    removePasskey(username, passkey.credentialId);
+                    setPasskeys(listPasskeys(username));
+                  }}
+                >
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+          {passkeysAvailable() && (
+            <div className="pl-6">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={addingPasskey}
+                title="Add another passkey (a second device's authenticator or a backup security key)"
+                onClick={async () => {
+                  setAddingPasskey(true);
+                  setError(null);
+                  try {
+                    await addPasskey(username); // unlocks with an existing passkey first, then registers the new one
+                    setPasskeys(listPasskeys(username));
+                    toast.success("Another passkey was added.");
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : String(err));
+                  } finally {
+                    setAddingPasskey(false);
+                  }
+                }}
+              >
+                {addingPasskey ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+                Add another passkey
+              </Button>
+            </div>
+          )}
         </div>
       )}
 

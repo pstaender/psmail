@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { hasVault, passkeysAvailable, PasskeyError, removeVault, savePassword, unlockPassword } from "../../src/lib/passkeyVault";
+import { addPasskey, hasVault, listPasskeys, passkeysAvailable, PasskeyError, removePasskey, removeVault, savePassword, unlockPassword } from "../../src/lib/passkeyVault";
 import { installFakeAuthenticator, type FakeAuthenticator } from "../helpers/fakeAuthenticator";
 
 let authenticator: FakeAuthenticator | null = null;
@@ -39,7 +39,7 @@ describe("passkey vault", () => {
     const raw = stored("alice")!;
     expect(raw).not.toContain("correct horse");
     expect(raw).not.toContain(btoa("correct horse battery staple"));
-    expect(JSON.parse(raw)).toMatchObject({ v: 1, credentialId: expect.any(String), salt: expect.any(String), iv: expect.any(String), ciphertext: expect.any(String) });
+    expect(JSON.parse(raw)).toMatchObject({ v: 2, entries: [{ credentialId: expect.any(String), salt: expect.any(String), iv: expect.any(String), ciphertext: expect.any(String) }] });
 
     expect(await unlockPassword("alice")).toBe("correct horse battery staple");
     expect(authenticator.prompts.get).toBe(2); // one more prompt per unlock
@@ -48,9 +48,9 @@ describe("passkey vault", () => {
   test("every save uses a fresh salt and IV, so two blobs of the same password differ", async () => {
     authenticator = installFakeAuthenticator();
     await savePassword("alice", "same");
-    const first = JSON.parse(stored("alice")!);
+    const first = JSON.parse(stored("alice")!).entries[0];
     await savePassword("alice", "same");
-    const second = JSON.parse(stored("alice")!);
+    const second = JSON.parse(stored("alice")!).entries[0];
     expect(second.ciphertext).not.toBe(first.ciphertext);
     expect(second.salt).not.toBe(first.salt);
     expect(second.iv).not.toBe(first.iv);
@@ -82,7 +82,8 @@ describe("passkey vault", () => {
 
     // Tampering with the ciphertext.
     const vault = JSON.parse(stored("alice")!);
-    const tampered = { ...vault, ciphertext: vault.ciphertext.slice(0, -4) + "AAAA" };
+    const entry = vault.entries[0];
+    const tampered = { ...vault, entries: [{ ...entry, ciphertext: entry.ciphertext.slice(0, -4) + "AAAA" }] };
     localStorage.setItem("psmail.passkeyVault.alice", JSON.stringify(tampered));
     expect((await fail(unlockPassword("alice"))).kind).toBe("failed");
 
@@ -107,5 +108,82 @@ describe("passkey vault", () => {
     expect(hasVault("alice")).toBe(false);
     expect(hasVault("bob")).toBe(true);
     expect((await fail(unlockPassword("alice"))).kind).toBe("failed");
+  });
+
+  describe("several passkeys per profile", () => {
+    test("adding another passkey unlocks with an existing one first, and then either passkey opens the password", async () => {
+      authenticator = installFakeAuthenticator();
+      await savePassword("alice", "shared-secret");
+      expect(listPasskeys("alice")).toHaveLength(1);
+      const before = { ...authenticator.prompts };
+
+      authenticator.useDevice(1); // the second authenticator (a security key) is the one that registers now
+      await addPasskey("alice");
+      expect(authenticator.prompts).toEqual({ create: before.create + 1, get: before.get + 2 }); // unlock, then create + derive
+      expect(listPasskeys("alice")).toHaveLength(2);
+      expect(authenticator.credentialCount()).toBe(2);
+      expect(JSON.parse(stored("alice")!).entries.map((e: { ciphertext: string }) => e.ciphertext)).toHaveLength(2);
+      expect(stored("alice")).not.toContain("shared-secret");
+
+      // Both authenticators at hand: it opens.
+      expect(await unlockPassword("alice")).toBe("shared-secret");
+      // Only the second one is at hand (the first, say a laptop, is elsewhere): still opens.
+      authenticator.unplug(0);
+      expect(await unlockPassword("alice")).toBe("shared-secret");
+    });
+
+    test("the passkeys are independent: with only the first at hand it opens too", async () => {
+      authenticator = installFakeAuthenticator();
+      await savePassword("alice", "pw");
+      authenticator.useDevice(1);
+      await addPasskey("alice");
+      authenticator.unplug(1); // the backup key isn't plugged in
+      expect(await unlockPassword("alice")).toBe("pw");
+    });
+
+    test("the same authenticator can't be added twice, and a failed or cancelled add changes nothing", async () => {
+      authenticator = installFakeAuthenticator();
+      await savePassword("alice", "pw");
+      const snapshot = stored("alice");
+
+      // Adding from the very same authenticator: it refuses (the existing one is excluded).
+      expect((await fail(addPasskey("alice"))).kind).toBe("duplicate");
+      expect(stored("alice")).toBe(snapshot);
+
+      authenticator.cancelNext(); // the unlock step
+      expect((await fail(addPasskey("alice"))).kind).toBe("cancelled");
+      expect(stored("alice")).toBe(snapshot);
+    });
+
+    test("a passkey can be removed on its own; removing the last one removes the vault", async () => {
+      authenticator = installFakeAuthenticator();
+      await savePassword("alice", "pw");
+      authenticator.useDevice(1);
+      await addPasskey("alice");
+      const [first, second] = listPasskeys("alice");
+
+      removePasskey("alice", first!.credentialId);
+      expect(listPasskeys("alice").map(p => p.credentialId)).toEqual([second!.credentialId]);
+      expect(await unlockPassword("alice")).toBe("pw"); // the remaining one still works
+
+      removePasskey("alice", second!.credentialId);
+      expect(hasVault("alice")).toBe(false);
+      expect(stored("alice")).toBeNull();
+    });
+
+    test("a vault written before there were lists (one passkey, v1) still opens and can get a second passkey", async () => {
+      authenticator = installFakeAuthenticator();
+      await savePassword("alice", "legacy");
+      const { credentialId, salt, iv, ciphertext } = JSON.parse(stored("alice")!).entries[0];
+      localStorage.setItem("psmail.passkeyVault.alice", JSON.stringify({ v: 1, credentialId, salt, iv, ciphertext })); // the old format
+
+      expect(hasVault("alice")).toBe(true);
+      expect(await unlockPassword("alice")).toBe("legacy");
+      authenticator.useDevice(1);
+      await addPasskey("alice"); // an old-format vault can be extended
+      expect(listPasskeys("alice")).toHaveLength(2);
+      authenticator.unplug(0);
+      expect(await unlockPassword("alice")).toBe("legacy");
+    });
   });
 });

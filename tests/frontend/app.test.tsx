@@ -3219,6 +3219,67 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(screen.queryByText(/Passkey unlock is set up on this device: the sign-in screen/)).toBeNull();
     });
 
+    async function openCredentials() {
+      await userEvent.click(screen.getByTitle("Settings"));
+      await userEvent.click(await screen.findByRole("tab", { name: "Credentials" }));
+    }
+
+    test("Settings lists the passkeys and adds another one (unlocking with an existing one first); either then signs in", async () => {
+      authenticator = installFakeAuthenticator();
+      await signInAndRemember();
+      await waitFor(() => expect(localStorage.getItem(vaultKey)).toBeTruthy());
+      await openCredentials();
+      expect(await screen.findByText(/^Passkey 1/)).toBeTruthy();
+      expect(screen.queryByText(/^Passkey 2/)).toBeNull();
+
+      authenticator.useDevice(1); // the backup security key registers now
+      await userEvent.click(screen.getByRole("button", { name: /add another passkey/i }));
+      expect(await screen.findByText(/^Passkey 2/)).toBeTruthy();
+      expect(JSON.parse(localStorage.getItem(vaultKey)!).entries).toHaveLength(2);
+      expect(localStorage.getItem(vaultKey)).not.toContain("secret123");
+
+      // Sign out; only the second passkey is at hand (the first authenticator isn't): "Unlock with passkey" still works.
+      await userEvent.click(screen.getByRole("button", { name: "Close" }));
+      await userEvent.click(screen.getByTitle("Sign out"));
+      authenticator.unplug(0);
+      await userEvent.click(await screen.findByText("secure"));
+      loginPosts.length = 0;
+      await userEvent.click(await screen.findByRole("button", { name: /unlock with passkey/i }));
+      await openAccountInbox();
+      expect(loginPosts.at(-1)).toEqual({ username: "secure", password: "secret123" });
+    });
+
+    test("adding the same authenticator again is refused with an explanation, and nothing changes", async () => {
+      authenticator = installFakeAuthenticator();
+      await signInAndRemember();
+      await waitFor(() => expect(localStorage.getItem(vaultKey)).toBeTruthy());
+      const before = localStorage.getItem(vaultKey);
+      await openCredentials();
+
+      await userEvent.click(await screen.findByRole("button", { name: /add another passkey/i })); // same device: it refuses
+      expect(await screen.findByText(/already set up for this profile/)).toBeTruthy();
+      expect(localStorage.getItem(vaultKey)).toBe(before);
+    });
+
+    test("each passkey can be removed on its own; the last one takes the unlock feature away", async () => {
+      authenticator = installFakeAuthenticator();
+      await signInAndRemember();
+      await waitFor(() => expect(localStorage.getItem(vaultKey)).toBeTruthy());
+      await openCredentials();
+      authenticator.useDevice(1);
+      await userEvent.click(await screen.findByRole("button", { name: /add another passkey/i }));
+      await screen.findByText(/^Passkey 2/);
+
+      await userEvent.click(screen.getByTitle("Remove passkey 1"));
+      expect(screen.queryByText(/^Passkey 2/)).toBeNull(); // one left (renumbered)
+      expect(JSON.parse(localStorage.getItem(vaultKey)!).entries).toHaveLength(1);
+      expect(screen.getByText(/Passkey unlock is set up on this device: the sign-in screen/)).toBeTruthy();
+
+      await userEvent.click(screen.getByTitle("Remove passkey 1"));
+      expect(localStorage.getItem(vaultKey)).toBeNull();
+      expect(screen.queryByText(/Passkey unlock is set up on this device: the sign-in screen/)).toBeNull();
+    });
+
     test("changing the password removes the (now stale) passkey unlock and says so", async () => {
       authenticator = installFakeAuthenticator();
       await signInAndRemember();
