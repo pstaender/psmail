@@ -139,3 +139,33 @@ describe("RenderPureMarkdown", () => {
     expect(root?.getAttribute("aria-label")).toBe("Message body");
   });
 });
+
+describe("RenderPureMarkdown lists", () => {
+  test("bullet items keep their hyphen (a de-emphasized mark), as an AI summary is written", () => {
+    const summary = "- Frist für Einkommensteuererklärungen 2025 rückt näher\n- Unterlagen bitte bis Ende September (30.09.2026)\n- Rückfragen: +49 2443 911 406";
+    const { container } = render(<RenderPureMarkdown markdown={summary} />);
+
+    const items = Array.from(container.querySelectorAll("li"));
+    expect(items).toHaveLength(3);
+    expect(items[0]!.textContent).toBe("- Frist für Einkommensteuererklärungen 2025 rückt näher");
+    expect(items.every(li => li.querySelector(".md-mark")?.textContent === "- ")).toBe(true);
+  });
+
+  test("the marker is the one the source used, and ordered items show their numbers", () => {
+    const { container } = render(<RenderPureMarkdown markdown={"* star\n* items\n\n3. third\n4. fourth\n\n1) paren"} />);
+    const texts = Array.from(container.querySelectorAll("li")).map(li => li.textContent);
+    expect(texts).toEqual(["* star", "* items", "3. third", "4. fourth", "1) paren"]);
+  });
+
+  test("nested lists and inline formatting inside items still render", () => {
+    const { container } = render(<RenderPureMarkdown markdown={"- outer **bold**\n  - inner one\n  - inner two"} />);
+    expect(container.querySelectorAll("li")).toHaveLength(3);
+    expect(container.querySelector("li strong")?.textContent).toBe("**bold**");
+    expect(container.querySelector("li li")?.textContent).toBe("- inner one");
+  });
+
+  test("a list inside a quote is quoted too", () => {
+    const { container } = render(<RenderPureMarkdown markdown={"> - quoted item"} />);
+    expect(container.querySelector("blockquote li")?.textContent).toBe("> - quoted item");
+  });
+});

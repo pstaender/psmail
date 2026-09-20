@@ -325,15 +325,27 @@
   font-weight: bold;
 }
 
+/* The list markers are real text (`- `, `1. `, see list_item_open in RenderPureMarkdown), so there are no browser bullets;
+   a wrapped line hangs under the item's text, and nested lists step in. */
 .psmail-markdown-render ul,
 .psmail-markdown-render ol {
+  list-style: none;
+  padding-left: 0;
+}
+.psmail-markdown-render li > ul,
+.psmail-markdown-render li > ol {
   padding-left: 1.5em;
 }
 .psmail-markdown-render li {
   margin-bottom: 0.25em;
+  padding-left: 2ch;
+  text-indent: -2ch;
 }
-.psmail-markdown-render li::marker {
-  color: var(--muted-foreground);
+.psmail-markdown-render li > * {
+  text-indent: 0;
+}
+.psmail-markdown-render li > .md-mark {
+  text-indent: 0;
 }
 
 /* code */

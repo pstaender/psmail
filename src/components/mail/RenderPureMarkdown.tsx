@@ -46,6 +46,15 @@ function createRenderer(): InstanceType<typeof MarkdownIt> {
   rules.heading_open = (tokens: Token[], idx: number) => `<${tokens[idx]!.tag}>${quotePrefix()}${mark(tokens[idx]!.markup)} `;
   rules.heading_close = (tokens: Token[], idx: number) => `</${tokens[idx]!.tag}>`;
 
+  // List items keep their markdown marker — `- `, `* `, `1. ` — as a de-emphasized mark, like the other syntax. (The
+  // browser's own bullets and numbers don't show anyway: Tailwind's reset removes them.) Ordered items carry their
+  // number in `token.info`; the marker is the character the source used.
+  rules.list_item_open = (tokens: Token[], idx: number) => {
+    const token = tokens[idx]!;
+    const marker = token.info ? `${token.info}${token.markup || "."}` : token.markup || "-";
+    return `<li>${quotePrefix()}${mark(`${marker} `)}`;
+  };
+
   rules.strong_open = (tokens: Token[], idx: number) => `<strong>${mark(tokens[idx]!.markup)}`;
   rules.strong_close = (tokens: Token[], idx: number) => `${mark(tokens[idx]!.markup)}</strong>`;
 
