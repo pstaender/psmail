@@ -7,6 +7,25 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-20 - Search: falls back to the message text (739cb7a)
+-----------------------------------------------------------
+When a search finds nothing in subjects and senders, it now also searches the plain text of the messages: each word must be
+in the subject, the sender or the text (same rules: case-insensitive, Unicode, "*", quoted phrases; from: and favs still
+restrict). Those results carry matchedInBody and the results header says "Search: "x" . in message text". A search that has
+hits behaves exactly as before and never reads message texts.
+Performance - it makes sense, because it is bounded and only runs when the normal search came back empty:
+- Reading texts is the expensive part. First version: 0.5 s for a miss on 20 000 messages x 5 KB (sorting rows that carried
+  the bodies), and a wildcard like "a*b" took 2.9 s (a regex with .* backtracking on 5 KB texts).
+- Now: the newest messages are listed WITHOUT their texts, the texts are read in chunks of 200 and the scan stops when a
+  page of hits is full; texts are matched with indexOf (linear) instead of a regex. Measured on 20 000 x 5 KB (100 MB):
+  0.19 s for a miss (the worst case), 0.05 s with many hits, 0.19 s for a wildcard; 50 000 messages 0.25 s.
+- Bounds: the newest 20 000 messages of the user, the first 100 000 characters of each.
+- Not covered: messages that have only an HTML part (no plain text) and mail older than the newest 20 000. If that is ever
+  wanted, the next step is an SQLite FTS5 index (built at sync time), which would also allow it for hits, not just misses.
+- Tests: found by text and marked, not searched when subject/sender hit, AND across subject+text, Unicode/wildcards/phrases,
+  from: and favs, order and paging, other users' mail, and the header hint.
+
+
 2026-09-20 - Header: the Summarize sparkles button is removed (bea60c7)
 -------------------------------------------------------------------------
 The sparkles icon button next to the subject in the message header is gone. Summarizing is done from the Summary tab (its
