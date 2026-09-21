@@ -241,16 +241,24 @@ export interface ClassifyResult {
 
 const CHUNK = 500;
 
+export interface ClassifyOptions {
+  accountIds?: number[];
+  force?: boolean;
+  /** An account is about to be classified: how many messages there are to do, in which folders. */
+  onAccount?: (info: { account: string; total: number; folders: string[] }) => void;
+  /** After every chunk of up to 500 messages: how many of the current account's are done, and the running totals of the whole run. */
+  onProgress?: (info: { account: string; done: number; total: number; important: number }) => void;
+  /** Every single verdict, as it is made (for --verbose: it can be a lot of calls). */
+  onMessage?: (info: { account: string; row: { id: number; subject: string | null; from: string }; verdict: Classification }) => void;
+  /** One account is finished. */
+  onAccountDone?: (info: { account: string } & ClassifyResult) => void;
+}
+
 /**
- * Classifies the stored mail of some of the user's accounts: every message in an incoming folder that has no verdict yet, or all of
- * them with `force`. Messages are read in chunks of 500 by id, and a chunk's verdicts are written in one transaction, so it is
- * fast (tens of thousands of messages a second) and can be stopped at any time without losing what was done.
+ * The work of classifyAccounts as a generator that pauses after every chunk, so a caller that serves other requests (the streaming
+ * route) can let the event loop run between chunks; classifyAccounts itself just runs it to the end.
  */
-export function classifyAccounts(
-  db: Database,
-  userId: number,
-  options: { accountIds?: number[]; force?: boolean; onProgress?: (done: number) => void } = {}
-): ClassifyResult {
+export function* classifySteps(db: Database, userId: number, options: ClassifyOptions = {}): Generator<void, ClassifyResult> {
   const context = createImboxContext(db, userId);
   const accounts = db
     .query<AccountInfo & { id: number }, [number]>("SELECT id, email, display_name, sender_name, sent_folder, special_folders FROM accounts WHERE user_id = ? ORDER BY id")
@@ -262,30 +270,52 @@ export function classifyAccounts(
 
   for (const account of accounts) {
     const folders = inboxFolders(db, account, true);
-    if (folders.length === 0) continue;
     const marks = folders.map(() => "?").join(",");
-    const query = db.query<MessageRow, (string | number)[]>(
-      `SELECT ${MESSAGE_COLUMNS} FROM emails e
-       WHERE e.account_id = ? AND e.is_draft = 0 AND e.folder IN (${marks})${options.force ? "" : " AND e.imbox IS NULL"} AND e.id > ?
-       ORDER BY e.id LIMIT ${CHUNK}`
-    );
+    const where = `e.account_id = ? AND e.is_draft = 0 AND e.folder IN (${marks})${options.force ? "" : " AND e.imbox IS NULL"}`;
+    const total =
+      folders.length === 0 ? 0 : db.query<{ n: number }, (string | number)[]>(`SELECT COUNT(*) AS n FROM emails e WHERE ${where}`).get(account.id, ...folders)!.n;
+    options.onAccount?.({ account: account.email, total, folders });
 
-    let lastId = 0;
-    for (;;) {
-      const rows = query.all(account.id, ...folders, lastId);
-      if (rows.length === 0) break;
-      db.transaction(() => {
-        for (const row of rows) {
-          const verdict = context.classifyRow(row);
-          update.run(verdict.important ? 1 : 0, row.id);
-          result.examined += 1;
-          if (verdict.important) result.important += 1;
-          else result.notImportant += 1;
-        }
-      })();
-      lastId = rows[rows.length - 1]!.id;
-      options.onProgress?.(result.examined);
+    const mine: ClassifyResult = { examined: 0, important: 0, notImportant: 0 };
+    if (total > 0) {
+      const query = db.query<MessageRow, (string | number)[]>(`SELECT ${MESSAGE_COLUMNS} FROM emails e WHERE ${where} AND e.id > ? ORDER BY e.id LIMIT ${CHUNK}`);
+
+      let lastId = 0;
+      for (;;) {
+        const rows = query.all(account.id, ...folders, lastId);
+        if (rows.length === 0) break;
+        db.transaction(() => {
+          for (const row of rows) {
+            const verdict = context.classifyRow(row);
+            update.run(verdict.important ? 1 : 0, row.id);
+            mine.examined += 1;
+            if (verdict.important) mine.important += 1;
+            else mine.notImportant += 1;
+            options.onMessage?.({ account: account.email, row: { id: row.id, subject: row.subject, from: parseAddresses(row.from_addr)[0]?.address ?? "" }, verdict });
+          }
+        })();
+        lastId = rows[rows.length - 1]!.id;
+        options.onProgress?.({ account: account.email, done: mine.examined, total, important: mine.important });
+        yield;
+      }
     }
+    result.examined += mine.examined;
+    result.important += mine.important;
+    result.notImportant += mine.notImportant;
+    options.onAccountDone?.({ account: account.email, ...mine });
   }
   return result;
+}
+
+/**
+ * Classifies the stored mail of some of the user's accounts: every message in an incoming folder that has no verdict yet, or all of
+ * them with `force`. Messages are read in chunks of 500 by id, and a chunk's verdicts are written in one transaction, so it is
+ * fast (tens of thousands of messages a second) and can be stopped at any time without losing what was done.
+ */
+export function classifyAccounts(db: Database, userId: number, options: ClassifyOptions = {}): ClassifyResult {
+  const steps = classifySteps(db, userId, options);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
 }

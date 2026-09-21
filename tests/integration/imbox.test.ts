@@ -127,19 +127,35 @@ describe("the imbox over HTTP", () => {
 
     const one = await run("classify", "philipp@example.com");
     expect(one.code).toBe(0);
-    expect(one.out).toContain("philipp@example.com: 2 classified — 1 important, 1 not");
+    // It says what it does: who it signed in as, which accounts, how many messages, the result per account, and the total.
+    expect(one.out).toContain('as "phil"');
+    expect(one.out).toContain("Classifying 1 account(s): philipp@example.com");
+    expect(one.out).toContain("philipp@example.com: 2 message(s) to classify in INBOX");
+    expect(one.out).toContain("philipp@example.com: done — 2 classified: 1 important, 1 not");
+    expect(one.out).toContain("Finished in");
+    expect(one.out).toContain("2 message(s) classified, 1 important.");
     expect(one.out).not.toContain("work.example.org");
 
     const all = await run("classify");
-    expect(all.out).toContain("philipp@work.example.org: 1 classified");
-    expect(all.out).toContain("philipp@example.com: 0 classified");
+    expect(all.out).toContain("Classifying 2 account(s)");
+    expect(all.out).toContain("philipp@work.example.org: 1 message(s) to classify");
+    expect(all.out).toContain("philipp@example.com: nothing to classify");
+    expect(all.out).toContain("philipp@work.example.org: done — 1 classified");
     expect((await run("classify")).out).toContain("Nothing to do"); // everything has a verdict now
 
     const forced = await run("classify", "philipp@example.com", "--force"); // --force after the address
-    expect(forced.out).toContain("philipp@example.com: 2 classified");
+    expect(forced.out).toContain("all messages, again (--force)");
+    expect(forced.out).toContain("philipp@example.com: done — 2 classified");
     const forcedFirst = await run("classify", "--force", "philipp@example.com"); // and before it: the address isn't swallowed by the flag
-    expect(forcedFirst.out).toContain("philipp@example.com: 2 classified");
+    expect(forcedFirst.out).toContain("philipp@example.com: done — 2 classified");
     expect(forcedFirst.out).not.toContain("work.example.org");
+
+    // --verbose: every message with its verdict, score and main reasons
+    const verbose = await run("classify", "philipp@example.com", "--force", "--verbose");
+    expect(verbose.out).toMatch(/important\s+\+\d.*#\d+ Samstag\? — anna@friend\.example/);
+    expect(verbose.out).toContain("you have written to this address (+4)");
+    expect(verbose.out).toMatch(/not important\s+-\d.*#\d+ Rabatt — newsletter@shop\.example/);
+    expect(verbose.out).toContain("mailing-list / bulk headers (-4)");
 
     const explain = await run("explain", "philipp@example.com", String(friendId));
     expect(explain.out).toContain("IMPORTANT");
@@ -148,5 +164,43 @@ describe("the imbox over HTTP", () => {
     const bad = await run("explain", "philipp@example.com");
     expect(bad.code).toBe(1);
     expect(bad.err).toContain("Usage: psmail imbox explain");
+  });
+
+  test("the streaming route: events while it works — start, account, progress per chunk, account-done, done — and per-message ones with verbose", async () => {
+    db.exec("UPDATE emails SET imbox = NULL");
+    const account = ids["philipp@example.com"]!;
+    db.exec("BEGIN");
+    const insert = db.prepare("INSERT INTO emails (account_id, folder, uid, is_draft, subject, from_addr, to_addr, date, plain_text) VALUES (?, 'INBOX', ?, 0, ?, ?, ?, ?, ?)");
+    for (let i = 0; i < 1100; i++) insert.run(account, 10_000 + i, `Bulk ${i}`, JSON.stringify([{ address: `p${i % 40}@x.example` }]), JSON.stringify([{ address: "philipp@example.com" }]), "2026-01-01T00:00:00.000Z", "Hallo Philipp, wie geht es dir?");
+    db.exec("COMMIT");
+
+    const read = async (body: unknown) => {
+      const res = await fetch(`${base}/api/imbox/classify`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) });
+      expect(res.headers.get("content-type")).toContain("ndjson");
+      return (await res.text()).trim().split("\n").map(line => JSON.parse(line) as Record<string, any>);
+    };
+
+    const events = await read({ accounts: ["philipp@example.com"], stream: true });
+    expect(events.map(e => e.type)[0]).toBe("start");
+    expect(events.at(-1)!.type).toBe("done");
+    const account_ = events.find(e => e.type === "account")!;
+    expect(account_).toMatchObject({ account: "philipp@example.com", total: 1102 });
+    const progress = events.filter(e => e.type === "progress");
+    expect(progress.length).toBeGreaterThanOrEqual(3); // 1102 messages in chunks of 500
+    expect(progress.map(e => e.done)).toEqual([...progress.map(e => e.done)].sort((a, b) => a - b)); // only ever forward
+    expect(progress.at(-1)).toMatchObject({ done: 1102, total: 1102 });
+    expect(events.some(e => e.type === "message")).toBe(false); // not without verbose
+    expect(events.find(e => e.type === "account-done")).toMatchObject({ examined: 1102 });
+    expect(events.at(-1)!.results).toHaveLength(1);
+
+    db.exec("UPDATE emails SET imbox = NULL WHERE subject LIKE 'Bulk %'");
+    const verbose = await read({ accounts: ["philipp@example.com"], stream: true, verbose: true });
+    const messages = verbose.filter(e => e.type === "message");
+    expect(messages).toHaveLength(1100);
+    expect(messages[0]).toMatchObject({ account: "philipp@example.com", important: expect.any(Boolean), score: expect.any(Number) });
+    expect(messages[0]!.reasons.length).toBeGreaterThan(0);
+
+    const skipped = await read({ accounts: ["nobody@example.com"], stream: true }).catch(() => null);
+    expect(skipped).toBeNull(); // an unknown account is refused before anything is streamed (404, not ndjson)
   });
 });

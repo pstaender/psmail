@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { ApiClient, CliApiError } from "./client";
+import { ApiClient, CliApiError, type ClassifyEvent } from "./client";
 import { parseFlags, promptHidden } from "./args";
 import { renderProgress } from "./progress";
 
@@ -102,29 +102,19 @@ async function cmdSync(argv: string[]) {
  */
 async function cmdImbox(subcommand: string | undefined, argv: string[]) {
   const { positionals, flags } = parseFlags(argv);
-  // `--force a@b.example` would read the address as the flag's value; --force takes none.
+  // `--force a@b.example` would read the address as the flag's value; these flags take none.
+  for (const name of ["force", "verbose"]) if (typeof flags[name] === "string") positionals.push(flags[name] as string);
   const force = flags.force !== undefined && flags.force !== false;
-  if (typeof flags.force === "string") positionals.push(flags.force);
+  const verbose = flags.verbose !== undefined && flags.verbose !== false;
 
-  const client = new ApiClient(typeof flags.url === "string" ? flags.url : undefined);
+  const url = typeof flags.url === "string" ? flags.url : undefined;
+  const client = new ApiClient(url);
+  const username = typeof flags.user === "string" ? flags.user : "default";
   await loginFromFlags(client, flags);
+  console.log(`Signed in to ${url ?? process.env.PSMAIL_API_URL ?? "http://localhost:3001"} as "${username}".`);
 
   if (subcommand === "classify") {
-    const started = Date.now();
-    const { results } = await client.classifyImbox(positionals.length > 0 ? positionals : undefined, force);
-    let examined = 0;
-    let important = 0;
-    for (const result of results) {
-      examined += result.examined;
-      important += result.important;
-      console.log(
-        result.skipped
-          ? `${result.account}: skipped (${result.skipped})`
-          : `${result.account}: ${result.examined} classified — ${result.important} important, ${result.notImportant} not`
-      );
-    }
-    console.log(`Done in ${((Date.now() - started) / 1000).toFixed(1)} s: ${examined} message(s), ${important} important.`);
-    if (examined === 0 && !force) console.log("Nothing to do — every message has a verdict already (use --force to classify them again).");
+    await classifyCommand(client, positionals.length > 0 ? positionals : undefined, force, verbose);
   } else if (subcommand === "explain") {
     const [accountEmail, id] = positionals;
     if (!accountEmail || !id || !Number.isInteger(Number(id))) throw new Error("Usage: psmail imbox explain <account-email> <message-id> [--user <username>]");
@@ -135,8 +125,68 @@ async function cmdImbox(subcommand: string | undefined, argv: string[]) {
       console.log(`  ${points}  ${reason.signal}${reason.detail ? ` — ${reason.detail}` : ""}`);
     }
   } else {
-    throw new Error("Usage: psmail imbox classify [account-email ...] [--force]  |  psmail imbox explain <account-email> <message-id>");
+    throw new Error("Usage: psmail imbox classify [account-email ...] [--force] [--verbose]  |  psmail imbox explain <account-email> <message-id>");
   }
+}
+
+/** Runs the classification and says what is going on: which accounts, how many messages each, progress, and with --verbose every verdict. */
+async function classifyCommand(client: ApiClient, accounts: string[] | undefined, force: boolean, verbose: boolean) {
+  const tty = Boolean(process.stdout.isTTY);
+  const clearLine = () => tty && process.stdout.write("\r\x1b[K");
+  let lastPrinted = 0;
+
+  const onEvent = (event: ClassifyEvent) => {
+    switch (event.type) {
+      case "start":
+        console.log(
+          `Classifying ${event.accounts.length} account(s): ${event.accounts.join(", ") || "(none)"}` +
+            (event.force ? " — all messages, again (--force)" : " — only messages without a verdict (--force for all)")
+        );
+        break;
+      case "account":
+        lastPrinted = 0;
+        console.log(
+          event.total === 0
+            ? `\n${event.account}: nothing to classify${event.folders.length === 0 ? " (no incoming folders)" : ""}`
+            : `\n${event.account}: ${event.total} message(s) to classify in ${event.folders.join(", ")}`
+        );
+        break;
+      case "progress":
+        if (tty) renderProgress(event.done, event.total, `${event.account}: ${event.important} important —`);
+        else if (event.done - lastPrinted >= 2000 || event.done === event.total) {
+          console.log(`  ${event.done}/${event.total} (${event.important} important)`);
+          lastPrinted = event.done;
+        }
+        break;
+      case "message": {
+        clearLine();
+        const verdict = event.important ? "important    " : "not important";
+        const score = `${event.score > 0 ? "+" : ""}${event.score}`.padStart(6);
+        console.log(`  ${verdict} ${score}  #${event.id} ${(event.subject ?? "(no subject)").slice(0, 60)} — ${event.from}${event.ruledOut ? `  [ruled out: ${event.ruledOut}]` : ""}`);
+        if (event.reasons.length > 0) console.log(`                        ${event.reasons.join("; ")}`);
+        break;
+      }
+      case "account-done":
+        clearLine();
+        console.log(
+          event.skipped
+            ? `${event.account}: skipped (${event.skipped})`
+            : event.examined > 0
+              ? `${event.account}: done — ${event.examined} classified: ${event.important} important, ${event.notImportant} not`
+              : `${event.account}: done — nothing was classified`
+        );
+        break;
+      case "done": {
+        const examined = event.results.reduce((n, r) => n + r.examined, 0);
+        const important = event.results.reduce((n, r) => n + r.important, 0);
+        console.log(`\nFinished in ${event.seconds.toFixed(1)} s: ${examined} message(s) classified, ${important} important.`);
+        if (examined === 0 && !force) console.log("Nothing to do — every message has a verdict already (use --force to classify them again).");
+        break;
+      }
+    }
+  };
+
+  await client.classifyImboxStream({ accounts, force, verbose }, onEvent);
 }
 
 function printUsage() {
@@ -150,8 +200,9 @@ Usage:
                --smtp-host <host> --smtp-port <port> [--smtp-secure=true|false] --smtp-username <user> [--smtp-password <pw>]
                [--url <api-url>]
   psmail sync <account-email> [--user <username>] [--password <pw>] [--folder INBOX] [--url <api-url>]
-  psmail imbox classify [account-email ...] [--force] [--user <username>] [--password <pw>] [--url <api-url>]
-               classifies stored mail as important / not important (default: every account; --force redoes messages that have a verdict)
+  psmail imbox classify [account-email ...] [--force] [--verbose] [--user <username>] [--password <pw>] [--url <api-url>]
+               classifies stored mail as important / not important (default: every account; --force redoes messages that have a verdict;
+               --verbose prints every message with its verdict and main reasons)
   psmail imbox explain <account-email> <message-id> [--user <username>] [--password <pw>] [--url <api-url>]
 
 Env vars: PSMAIL_API_URL, PSMAIL_PASSWORD, PSMAIL_IMAP_PASSWORD, PSMAIL_SMTP_PASSWORD
