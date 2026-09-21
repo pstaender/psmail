@@ -7,6 +7,37 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-21 - Imbox: learning from the user, domain knowledge, calendar invitations, unread count (4367eec)
+-------------------------------------------------------------------------------------------------------
+Learning from the user
+- A quiet mark beside the subject in the message header (only while the imbox is on; lit while the message is in the Imbox, disabled on a
+  disabled account): one click marks the message important or not important. That is the strongest signal: the verdict is stored as set by hand
+  (emails.imbox_manual - no classification, not even "imbox classify --force", overwrites it) and it is ONE VOTE about the sender's address
+  (table imbox_feedback: counts per sender and the latest opinion). What arrives later from that address follows the latest opinion, whatever
+  the score - a newsletter marked important stays in, a friend's chain letter marked not important stays out; only Junk and one-time codes still
+  rule a message out. A message carries one vote (marking it the other way replaces it; taking the mark back removes it and hands the message
+  back to the classifier; a sender nobody has an opinion on any more is forgotten). The toast says what it will do for the sender.
+- Reading habits, from the same pass over the mailbox as before: starred earlier mail from the address (+2, +3 from three), usually read
+  (+1.5) / hardly ever read (-2), moved to Trash (-2.5). The message being classified is never its own history.
+- Domain knowledge: mail from another address at the domain of one of your accounts is a colleague (+2; free-mail domains don't count, mailing
+  lists don't); a sender whose mails all have the same subject shape (numbers, quoted parts, codes ignored) is a machine (-2.5).
+Calendar invitations
+- A .ics / text/calendar file is read (METHOD:REQUEST +3.5, CANCEL +3, REPLY or unreadable +2) unless the mail is mass mail; it also lifts the
+  no-reply / platform / notification penalties, so an invitation through a calendar system's address (Google Calendar) still counts. Event
+  announcements in newsletters count +0.5.
+Unread count
+- GET /api/unified/imbox/unread, and a badge on the Imbox entry; reading an important message lowers it at once, marking, moving, deleting and
+  syncing re-read it.
+Also: imbox explain shows "decided by your mark on this sender" and "set by hand"; the explain route returns manual and decidedBy.
+Tests: every new signal alone; marks and votes (replace, take back, latest opinion, per sender/user, protected from --force); the mailbox statistics
+(read/starred/Trash, the message itself excluded, shapes, own organisation); invitations read from real .ics files (and missing ones); the
+unread count; the HTTP flow; the header mark (states, request, toast, disabled account, badge). Not run on a real mailbox: weights are still
+tuned on fixtures - use "imbox explain" on your own mail and mark what is wrong; the marks are exactly the data that improves it.
+Not built: learning across senders (a mark teaches one exact address, not "everything from that domain"), reclassifying that sender's OLD mail
+when you mark one message (only future mail follows; old mail keeps its verdict unless you run "imbox classify --force"), and deletions that
+bypass Trash (a permanent delete leaves nothing to count).
+
+
 2026-09-21 - The username can be changed (Settings > Credentials) (7aa8a64)
 -----------------------------------------------------------------------------
 Settings > Credentials starts with a "Username" field (filled in) and a Rename button, enabled once the name is really different (spaces
