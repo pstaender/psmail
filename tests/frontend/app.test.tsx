@@ -1516,7 +1516,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await userEvent.click(await screen.findByTitle("Imbox of all accounts"));
       await screen.findByText("Imbox hello");
       await userEvent.click(screen.getByRole("button", { name: "More" }));
-      await userEvent.click(await screen.findByRole("menuitem", { name: /filter by category/i }));
+      await userEvent.click(await screen.findByRole("menuitemcheckbox", { name: /filter by category/i }));
       const dialog = within((await screen.findByText("Filter by category", { selector: "[data-slot=dialog-title]" })).closest('[role="dialog"]') as HTMLElement);
       await userEvent.click(dialog.getByRole("combobox", { name: "Add a category" }));
       await userEvent.click(await screen.findByRole("option", { name: /^finance/ }));
@@ -1675,7 +1675,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       const categoriesOf = (list: "folder" | "inbox" | "sent" | "search") => last(list).getAll("category");
       async function openCategoryDialog() {
         await userEvent.click(screen.getByRole("button", { name: "More" }));
-        await userEvent.click(await screen.findByRole("menuitem", { name: /filter by category/i }));
+        await userEvent.click(await screen.findByRole("menuitemcheckbox", { name: /filter by category/i }));
         return within((await screen.findByText("Filter by category", { selector: "[data-slot=dialog-title]" })).closest('[role="dialog"]') as HTMLElement);
       }
       async function choose(dialog: ReturnType<typeof within>, label: string) {
@@ -1686,8 +1686,19 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       test("the More menu has it beside Filter by date", async () => {
         await openFolder();
         await userEvent.click(screen.getByRole("button", { name: "More" }));
-        const labels = (await screen.findAllByRole("menuitem")).map(i => i.textContent!.trim());
-        expect(labels).toEqual(["Filter by date…", "Filter by category…"]);
+        await screen.findByRole("menuitem", { name: /filter by date/i });
+        const category = screen.getByRole("menuitemcheckbox", { name: /filter by category/i });
+        expect(category.getAttribute("aria-checked")).toBe("false"); // a checkmark once categories are chosen
+      });
+
+      test("the category entry shows a checkmark while categories are chosen", async () => {
+        await openFolder();
+        const dialog = await openCategoryDialog();
+        await choose(dialog, "travel");
+        await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
+        await waitFor(() => expect(categoriesOf("folder")).toEqual(["travel"]));
+        await userEvent.click(screen.getByRole("button", { name: "More" }));
+        expect((await screen.findByRole("menuitemcheckbox", { name: /filter by category/i })).getAttribute("aria-checked")).toBe("true");
       });
 
       test("the combobox lists the available categories with their counts, searchable; chosen ones become labels that can be removed", async () => {
@@ -1790,43 +1801,60 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     });
 
     describe("favorites and read / unread", () => {
-      const pick = async (name: RegExp | string, role: "menuitemcheckbox" | "menuitemradio") => {
+      const toggle = async (name: RegExp | string) => {
         await userEvent.click(screen.getByRole("button", { name: "More" }));
-        await userEvent.click(await screen.findByRole(role, { name }));
+        await userEvent.click(await screen.findByRole("menuitemcheckbox", { name }));
       };
 
-      test("the More menu offers Favorites only and Read and unread / Unread only / Read only, beside the date filter", async () => {
+      test("the More menu has Favorites, Read and Unread as check items (like the category filter), unchecked", async () => {
         await openFolder();
         await userEvent.click(screen.getByRole("button", { name: "More" }));
         expect(await screen.findByRole("menuitem", { name: /filter by date/i })).toBeTruthy();
-        expect(screen.getByRole("menuitemcheckbox", { name: /favorites only/i }).getAttribute("aria-checked")).toBe("false");
-        const radios = screen.getAllByRole("menuitemradio").map(r => [r.textContent!.trim(), r.getAttribute("aria-checked")]);
-        expect(radios).toEqual([["Read and unread", "true"], ["Unread only", "false"], ["Read only", "false"]]);
+        const items = screen.getAllByRole("menuitemcheckbox");
+        expect(items.map(i => [i.textContent!.trim(), i.getAttribute("aria-checked")])).toEqual([["Filter by category…", "false"], ["Favorites", "false"], ["Read", "false"], ["Unread", "false"]]);
+        expect(screen.queryByText(/only/i)).toBeNull(); // no "Favorites only" / "Unread only", no "Read and unread"
+        expect(screen.queryByRole("menuitemradio")).toBeNull();
       });
 
-      test("Favorites only asks the server for flagged messages, shows a chip and clears again", async () => {
+      test("a selected one shows a checkmark; Favorites asks the server for flagged messages, shows a chip and clears again", async () => {
         await openFolder();
         expect(last("folder").has("flagged")).toBe(false);
-        await pick(/favorites only/i, "menuitemcheckbox");
+        await toggle("Favorites");
         await waitFor(() => expect(last("folder").get("flagged")).toBe("true"));
-        const chips = within(screen.getByRole("list", { name: "Active filters" }));
-        expect(chips.getByText("Favorites")).toBeTruthy();
+        expect(within(screen.getByRole("list", { name: "Active filters" })).getByText("Favorites")).toBeTruthy();
+        await userEvent.click(screen.getByRole("button", { name: "More" }));
+        expect((await screen.findByRole("menuitemcheckbox", { name: "Favorites" })).getAttribute("aria-checked")).toBe("true");
+        await userEvent.keyboard("{Escape}");
 
         await userEvent.click(screen.getByLabelText("Remove the favorites filter"));
         await waitFor(() => expect(last("folder").has("flagged")).toBe(false));
         expect(screen.queryByRole("list", { name: "Active filters" })).toBeNull();
       });
 
-      test("Unread only / Read only send read=false / read=true; both combine with each other and with the date filter", async () => {
+      test("Read alone sends read=true, Unread alone read=false; both on or both off filter nothing", async () => {
         await openFolder();
-        await pick("Unread only", "menuitemradio");
+        expect(last("folder").has("read")).toBe(false);
+
+        await toggle("Unread");
         await waitFor(() => expect(last("folder").get("read")).toBe("false"));
         expect(within(screen.getByRole("list", { name: "Active filters" })).getByText("Unread")).toBeTruthy();
 
-        await pick("Read only", "menuitemradio");
-        await waitFor(() => expect(last("folder").get("read")).toBe("true"));
+        await toggle("Read"); // both selected: no filtering by them
+        await waitFor(() => expect(last("folder").has("read")).toBe(false));
+        expect(screen.queryByRole("list", { name: "Active filters" })).toBeNull();
 
-        await pick(/favorites only/i, "menuitemcheckbox");
+        await toggle("Unread"); // only Read remains
+        await waitFor(() => expect(last("folder").get("read")).toBe("true"));
+        expect(within(screen.getByRole("list", { name: "Active filters" })).getByText("Read")).toBeTruthy();
+
+        await toggle("Read"); // none selected
+        await waitFor(() => expect(last("folder").has("read")).toBe(false));
+      });
+
+      test("they combine with each other and the date filter; a chip's × removes it", async () => {
+        await openFolder();
+        await toggle("Read");
+        await toggle("Favorites");
         const dialog = await openDialog();
         setDay(dialog, "Day", "2026-03-02");
         await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
@@ -1841,7 +1869,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
       test("they narrow a search and the combined lists too, and each list starts without them", async () => {
         await openFolder();
-        await pick("Unread only", "menuitemradio");
+        await toggle("Unread");
         await userEvent.type(screen.getByPlaceholderText(/search all mail/i), "second");
         await waitFor(() => expect(listRequests.some(r => r.list === "search")).toBe(true));
         expect(last("search").get("q")).toBe("second");
@@ -1851,8 +1879,10 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
         await screen.findByText("Unified hello");
         expect(screen.queryByRole("list", { name: "Active filters" })).toBeNull();
         expect(last("inbox").has("read")).toBe(false);
-        await pick(/favorites only/i, "menuitemcheckbox");
+        await toggle("Favorites");
         await waitFor(() => expect(last("inbox").get("flagged")).toBe("true"));
+        await userEvent.click(screen.getByRole("button", { name: "More" }));
+        expect((await screen.findByRole("menuitemcheckbox", { name: "Unread" })).getAttribute("aria-checked")).toBe("false");
       });
 
       test("`favs` is no search command any more: it is searched for like any word", async () => {
