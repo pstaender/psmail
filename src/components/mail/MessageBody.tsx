@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { sanitizeEmailHtml } from "@/lib/sanitizeHtml";
 import { buildClearestText, markdownFromHtml } from "@/lib/textView";
+import { cn } from "@/lib/utils";
 import { Languages, Sparkles } from "lucide-react";
 import type { AiSkillRecord } from "../../server/models/ai";
 import { AiSummaryPanel } from "./AiSummaryPanel";
@@ -58,6 +59,7 @@ export function MessageBody({
   summarizeSkills = [],
   summarizing = false,
   onSummarize = () => {},
+  textViewOnly = false,
 }: {
   email: EmailRecord;
   preferredView: BodyView | null;
@@ -67,6 +69,8 @@ export function MessageBody({
   summarizeSkills?: AiSkillRecord[];
   summarizing?: boolean;
   onSummarize?: (skillId: number) => void;
+  /** Settings → UI: read every message as Text — the other views (MD, Plain, Safe HTML, HTML) aren't offered. */
+  textViewOnly?: boolean;
 }) {
   const [showExternal, setShowExternal] = useState(false);
 
@@ -102,16 +106,18 @@ export function MessageBody({
   // WITHOUT touching the remembered choice, so the next mail that has it opens on it again — and
   // downgrading "full" to "safe" for a message the user hasn't explicitly picked it for. Depending
   // only on email.id keeps this stable while the user is still on the same message.
+  // With "text view only" (Settings → UI) that is the one view — unless the message has no text to show (then the usual ones stay).
+  const textOnly = textViewOnly && clearestText !== null;
   const initialView = useMemo(
-    () => resolveInitialView(preferredView, { text: clearestText !== null, plain: hasPlain, html: hasHtml }),
+    () => (textOnly ? "text" : resolveInitialView(preferredView, { text: clearestText !== null, plain: hasPlain, html: hasHtml })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [email.id]
+    [email.id, textOnly]
   );
 
   // The open tab. Controlled so a translation that has just arrived can be shown right away; a new message
   // starts on its resolved initial view.
   const [tab, setTab] = useState<BodyView | "translated" | "summary">(initialView);
-  useEffect(() => setTab(initialView), [email.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setTab(initialView), [email.id, textOnly]); // eslint-disable-line react-hooks/exhaustive-deps
   const hadTranslation = useRef(!!email.translatedText);
   const hadSummary = useRef(!!email.aiSummary);
   useEffect(() => {
@@ -133,16 +139,17 @@ export function MessageBody({
       value={tab}
       onValueChange={value => {
         setTab(value as BodyView | "translated" | "summary");
-        if (value !== "translated" && value !== "summary") onViewChange(value as BodyView);
+        if (value !== "translated" && value !== "summary" && !textOnly) onViewChange(value as BodyView);
       }}
       className="gap-0"
     >
-      <TabsList className="mx-4 mt-3 w-fit">
+      {/* Text only and nothing else to switch to (no translation, no summary): no tabs at all. */}
+      <TabsList className={cn("mx-4 mt-3 w-fit", textOnly && !email.translatedText && !hasSummaryTab && "hidden")}>
         {clearestText !== null && <TabsTrigger value="text">Text</TabsTrigger>}
-        {hasHtml && <TabsTrigger value="md">MD</TabsTrigger>}
-        {hasPlain && <TabsTrigger value="plain">Plain</TabsTrigger>}
-        {hasHtml && <TabsTrigger value="safe">Safe HTML</TabsTrigger>}
-        {hasHtml && <TabsTrigger value="full">HTML</TabsTrigger>}
+        {hasHtml && !textOnly && <TabsTrigger value="md">MD</TabsTrigger>}
+        {hasPlain && !textOnly && <TabsTrigger value="plain">Plain</TabsTrigger>}
+        {hasHtml && !textOnly && <TabsTrigger value="safe">Safe HTML</TabsTrigger>}
+        {hasHtml && !textOnly && <TabsTrigger value="full">HTML</TabsTrigger>}
         {email.translatedText && (
           <TabsTrigger value="translated">
             <Languages className="size-3.5" /> Translation

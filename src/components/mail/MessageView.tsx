@@ -4,6 +4,7 @@ import { MessageHeader } from "./MessageHeader";
 import { MessageToolbar } from "./MessageToolbar";
 import { ConversationBar } from "./ConversationBar";
 import { useConversation } from "@/hooks/useConversation";
+import { useUiSettings } from "@/contexts/UiSettingsContext";
 import type { ConversationMessage } from "../../server/models/conversations";
 import type { EmailRecord } from "../../server/types";
 import type { FolderInfo } from "@/lib/api";
@@ -58,7 +59,8 @@ export function MessageView({
   onSummarize?: (skillId: number) => void;
   onTranslate?: (skillId: number) => void;
 }) {
-  const conversation = useConversation(accountEmail, email.id);
+  const { showConversations, textViewOnly } = useUiSettings();
+  const conversation = useConversation(accountEmail, email.id, showConversations);
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <MessageToolbar
@@ -87,7 +89,7 @@ export function MessageView({
         replyMessage={conversation?.messages.find(message => message.id === conversation.repliedBy) ?? null}
         onOpenReply={onOpenConversationMessage}
       />
-      <ConversationBar conversation={conversation} onOpen={onOpenConversationMessage} />
+      {showConversations && <ConversationBar conversation={conversation} onOpen={onOpenConversationMessage} />}
       <AttachmentList accountEmail={accountEmail} emailId={email.id} attachments={email.attachments ?? []} />
       <div className="flex-1 overflow-y-auto">
         <MessageBody
@@ -97,6 +99,7 @@ export function MessageView({
           summarizeSkills={accountDisabled ? [] : aiSkills.filter(skill => skill.category === "summarize")}
           summarizing={aiBusy === "summarize"}
           onSummarize={onSummarize}
+          textViewOnly={textViewOnly}
         />
       </div>
     </div>

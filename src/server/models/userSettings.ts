@@ -24,7 +24,15 @@ export interface UserSettings {
   imboxEnabled?: boolean;
   /** The language the translate skill translates into (e.g. "German"); unset means English. */
   aiTargetLanguage?: string;
+  /** Opt-in interface features — the default is a plain, distraction-free client. See UI_FLAGS. */
+  showConversations?: boolean;
+  showCategories?: boolean;
+  showUnreadBadges?: boolean;
+  textViewOnly?: boolean;
 }
+
+/** The interface options (Settings → UI): all off unless the user turns them on. */
+export const UI_FLAGS = ["showConversations", "showCategories", "showUnreadBadges", "textViewOnly"] as const;
 
 export const MAX_SYNC_INTERVAL_MINUTES = 24 * 60;
 
@@ -60,7 +68,7 @@ export function updateUserSettings(db: Database, userId: number, patch: Record<s
       if (value === null) delete next.imboxEnabled;
       else if (typeof value === "boolean") next.imboxEnabled = value;
       else throw new ApiError(400, "imboxEnabled must be true or false");
-    } else if (key === "notifyBrowser" || key === "notifyToast") {
+    } else if (key === "notifyBrowser" || key === "notifyToast" || (UI_FLAGS as readonly string[]).includes(key)) {
       if (value === null) delete next[key];
       else if (typeof value === "boolean") next[key] = value;
       else throw new ApiError(400, `${key} must be true or false`);

@@ -6,6 +6,7 @@ import { formatListDate } from "@/lib/time";
 import type { SearchResult } from "../../server/models/search";
 import { EmptyState } from "./EmptyState";
 import { CategoryChips } from "./CategoryChips";
+import { useUiSettings } from "@/contexts/UiSettingsContext";
 import { ConversationMarks } from "./ConversationMarks";
 
 function participantLabel(result: SearchResult, showRecipient: boolean): string {
@@ -50,6 +51,7 @@ export function SearchResultList({
   /** A date filter is on: an empty list means nothing in that period. */
   filtered?: boolean;
 }) {
+  const { showConversations, showCategories } = useUiSettings();
   const sentinelRef = useRef<HTMLLIElement>(null);
   const onLoadMoreRef = useRef(onLoadMore);
   onLoadMoreRef.current = onLoadMore;
@@ -126,10 +128,10 @@ export function SearchResultList({
               </div>
               <div className={cn("flex items-center gap-1.5 text-sm", !result.isRead && "font-medium")}>
                 <span className="flex-1 truncate">{result.subject || "(no subject)"}</span>
-                <ConversationMarks conversation={result.conversation} />
+                {showConversations && <ConversationMarks conversation={result.conversation} />}
                 {result.hasAttachments && <Paperclip aria-label="Has attachments" className="size-3.5 shrink-0 text-muted-foreground" />}
               </div>
-              <CategoryChips labels={result.taxonomyList} />
+              {showCategories && <CategoryChips labels={result.taxonomyList} />}
               <p className="truncate text-xs text-muted-foreground">
                 {result.accountEmail} · {result.folder}
               </p>

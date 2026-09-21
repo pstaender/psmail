@@ -17,6 +17,7 @@ import {
   Mail as MailIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { useUiSettings } from "@/contexts/UiSettingsContext";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -103,6 +104,7 @@ export function AccountRow({
   syncJob: DownloadJob | undefined;
   onSync: (accountEmail: string) => void;
 }) {
+  const { showUnreadBadges } = useUiSettings();
   // Collapsed until something in the account is selected (no account is, when the app has just loaded and
   // shows the combined Inbox) — which also means a collapsed account's folders aren't even fetched.
   const [expanded, setExpanded] = useState(false);
@@ -277,7 +279,7 @@ export function AccountRow({
                 >
                   <Icon className="size-3.5 shrink-0 text-muted-foreground" />
                   <span className="flex-1 truncate">{folder.name.toLowerCase() === 'inbox' ? 'Inbox' : folder.name}</span>
-                  {unread > 0 && (
+                  {showUnreadBadges && unread > 0 && (
                     <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
                       {unread}
                     </Badge>

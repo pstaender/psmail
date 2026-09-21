@@ -1,5 +1,6 @@
 import { Inbox, Loader2, MailCheck, PanelLeftClose, RefreshCw, Send } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { useUiSettings } from "@/contexts/UiSettingsContext";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { UnifiedKind } from "@/lib/api";
@@ -59,6 +60,7 @@ export function AccountTree({
   syncJobs: Record<string, DownloadJob>;
   onSync: (accountEmail: string) => void;
 }) {
+  const { showUnreadBadges } = useUiSettings();
   return (
     <div className="flex h-full flex-col border-r bg-muted/20 overflow-y-auto">
       <div className="flex items-center justify-between gap-2 px-3 py-3">
@@ -111,12 +113,12 @@ export function AccountTree({
                 </Button>
               </span>
             )}
-            {kind === "inbox" && unifiedInboxUnread > 0 && (
+            {showUnreadBadges && kind === "inbox" && unifiedInboxUnread > 0 && (
               <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
                 {unifiedInboxUnread}
               </Badge>
             )}
-            {kind === "imbox" && imboxUnread > 0 && (
+            {showUnreadBadges && kind === "imbox" && imboxUnread > 0 && (
               <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
                 {imboxUnread}
               </Badge>

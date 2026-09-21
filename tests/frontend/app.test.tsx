@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { PLAIN_UI, UiSettingsContext } from "../../src/contexts/UiSettingsContext";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
@@ -126,7 +127,7 @@ const DRAFT_EMAIL = {
 };
 
 // What the Settings dialog saves when only the fields a test touches were changed.
-const DEFAULT_PATCH = { syncIntervalMinutes: null, combinedInboxIncludesFolders: false, imboxEnabled: false, notifyBrowser: false, notifyToast: false, notificationSound: "crystal_clear" };
+const DEFAULT_PATCH = { syncIntervalMinutes: null, combinedInboxIncludesFolders: false, imboxEnabled: false, notifyBrowser: false, notifyToast: false, notificationSound: "crystal_clear", showConversations: true, showCategories: true, showUnreadBadges: true, textViewOnly: false };
 
 const SYNC_JOB = (status: string) => ({
   id: 1, accountId: 1, folder: null, status, progressCurrent: 0, progressTotal: 0, error: null, startedAt: NOW, finishedAt: null, createdAt: NOW,
@@ -208,6 +209,10 @@ function installMockFetch(
     pagedEmailCount?: number;
     /** The server-side user settings GET /api/settings starts out with. */
     settings?: {
+      showConversations?: boolean;
+      showCategories?: boolean;
+      showUnreadBadges?: boolean;
+      textViewOnly?: boolean;
       bodyView?: string;
       syncIntervalMinutes?: number;
       combinedInboxIncludesFolders?: boolean;
@@ -301,7 +306,8 @@ function installMockFetch(
   unreadRequests = 0;
   newMailRequests.length = 0;
   folderDelayMs = 0;
-  let currentSettings: Record<string, unknown> = { ...opts.settings };
+  // The interface options are opt-in; most tests are about what they switch on, so the mock user has them on (a test says `false` for the plain client).
+  let currentSettings: Record<string, unknown> = { showConversations: true, showCategories: true, showUnreadBadges: true, ...opts.settings };
 
   const warned = (response: Response) => {
     if (opts.folderWarning) response.headers.set("x-folders-warning", encodeURIComponent(opts.folderWarning));
@@ -1220,6 +1226,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
     test("list rows: quiet icons for a message in a conversation and one you replied to; nothing for a message on its own", () => {
       const { container } = render(
+        <UiSettingsContext.Provider value={{ ...PLAIN_UI, showConversations: true }}>
         <MessageList
           {...listProps}
           emails={[
@@ -1228,6 +1235,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
             { ...EMAIL, id: 3, subject: "Allein" } as never,
           ]}
         />
+        </UiSettingsContext.Provider>
       );
       const row = (subject: string) => within(screen.getByText(subject).closest("li")!);
       expect(row("Beantwortet").getByLabelText("Part of a conversation")).toBeTruthy();
@@ -3805,7 +3813,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await login();
       await userEvent.click(screen.getByTitle("Settings"));
       const tabs = (await screen.findAllByRole("tab")).map(t => t.textContent);
-      expect(tabs).toEqual(["Inboxes", "Notifications", "AI", "Credentials"]);
+      expect(tabs).toEqual(["Inboxes", "UI", "Notifications", "AI", "Credentials"]);
     });
 
     test("adding an AI provider sends vendor, model and key, and the list never shows the key", async () => {
@@ -4817,7 +4825,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     const listProps = { loading: false, hasMore: false, loadingMore: false, onLoadMore: () => {}, selectedId: null, selectedIds: new Set<number>(), folder: "INBOX", onSelect: () => {}, onToggleFlag: () => {}, onEditDraft: () => {} };
 
     test("a message with categories shows the first four as chips, the rest as +N (all in the tooltip)", () => {
-      render(<MessageList {...listProps} emails={[labelled as never]} />);
+      render(<UiSettingsContext.Provider value={{ ...PLAIN_UI, showCategories: true }}><MessageList {...listProps} emails={[labelled as never]} /></UiSettingsContext.Provider>);
       const chips = screen.getByRole("list", { name: "Categories" });
       expect(Array.from(chips.querySelectorAll("li")).map(li => li.textContent)).toEqual(["finance", "invoice", "tax", "2024", "+1"]);
       expect(chips.getAttribute("title")).toBe("finance, invoice, tax, 2024, paid");
@@ -4922,5 +4930,67 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
         expect(screen.queryByRole("button", { name: /translate/i })).toBeNull();
       });
     }
+  });
+
+  describe("the UI options (Settings → UI): opt-in, so the plain client is the default", () => {
+    const PLAIN = { showConversations: false, showCategories: false, showUnreadBadges: false, textViewOnly: false };
+    const conversation = { messages: [{ id: 9, folder: "INBOX", subject: "Vorher", from: { address: "a@example.com" }, snippet: "x", date: "2026-01-01T00:00:00Z", own: false, current: false }, { id: 10, folder: "INBOX", subject: "Hello there", from: { address: "a@example.com" }, snippet: "y", date: "2026-01-02T00:00:00Z", own: false, current: true }], repliedBy: null };
+
+    async function openHello(opts: Parameters<typeof installMockFetch>[0]) {
+      installMockFetch(opts);
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+      await userEvent.click(await screen.findByText("Hello there"));
+      await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+    }
+
+    test("without them: no unread badges, no conversation bar, no category filter", async () => {
+      await openHello({ settings: PLAIN, inboxUnread: 3, conversation: conversation as never });
+      expect(screen.getByTitle("Inbox of all accounts").textContent).not.toMatch(/\d/);
+      expect(screen.queryByText(/Conversation · /)).toBeNull();
+      await userEvent.click(screen.getByRole("button", { name: "More" }));
+      expect(await screen.findByText("Filter by date…")).toBeTruthy();
+      expect(screen.queryByText("Filter by category…")).toBeNull();
+    });
+
+    test("with them on, the same things show", async () => {
+      await openHello({ inboxUnread: 3, conversation: conversation as never });
+      await waitFor(() => expect(screen.getByTitle("Inbox of all accounts").textContent).toMatch(/\d/)); // opening the message already took one off
+      expect(await screen.findByText(/Conversation · 2 messages/)).toBeTruthy();
+      await userEvent.click(screen.getByRole("button", { name: "More" }));
+      expect(await screen.findByText("Filter by category…")).toBeTruthy();
+    });
+
+    test("text view only: the reading pane offers no other view", async () => {
+      await openHello({ settings: { textViewOnly: true } });
+      expect(screen.queryByRole("tab", { name: "Safe HTML" })).toBeNull();
+      expect(screen.queryByRole("tab", { name: "HTML" })).toBeNull();
+      expect(screen.queryByRole("tab", { name: "MD" })).toBeNull();
+      expect(screen.queryByRole("tab", { name: "Plain" })).toBeNull();
+      expect(await screen.findByLabelText("Message body")).toBeTruthy();
+    });
+
+    test("by default the reading pane still offers its views", async () => {
+      await openHello({});
+      expect(screen.getByRole("tab", { name: "Safe HTML" })).toBeTruthy();
+      expect(screen.getByRole("tab", { name: "Text" })).toBeTruthy();
+    });
+
+    test("the UI tab lists the four options, off by default, and saves them", async () => {
+      installMockFetch({ settings: PLAIN });
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+      await userEvent.click(screen.getByTitle("Settings"));
+      await userEvent.click(await screen.findByRole("tab", { name: "UI" }));
+      for (const name of ["Show conversations", "Show categories", "Show unread badges", "Always show the text view"])
+        expect(screen.getByLabelText(name).getAttribute("aria-checked")).toBe("false");
+
+      await userEvent.click(screen.getByLabelText("Show unread badges"));
+      await userEvent.click(screen.getByLabelText("Always show the text view"));
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(capturedSettingsPatches).toEqual([{ ...DEFAULT_PATCH, ...PLAIN, showUnreadBadges: true, textViewOnly: true }]));
+    });
   });
 });

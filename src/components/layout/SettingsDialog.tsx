@@ -22,7 +22,19 @@ export interface SettingsPatch {
   notifyBrowser: boolean;
   notifyToast: boolean;
   notificationSound: NonNullable<UserSettings["notificationSound"]>;
+  showConversations: boolean;
+  showCategories: boolean;
+  showUnreadBadges: boolean;
+  textViewOnly: boolean;
 }
+
+/** The interface options, in the order the UI tab lists them. */
+const UI_OPTIONS: { key: "showConversations" | "showCategories" | "showUnreadBadges" | "textViewOnly"; title: string; text: string }[] = [
+  { key: "showConversations", title: "Show conversations", text: "Marks messages that belong to a conversation or were replied to, offers \"See your reply\" and a bar to jump to the earlier and later messages of the conversation." },
+  { key: "showCategories", title: "Show categories", text: "Shows the AI categories of a message as chips in the message list, and offers filtering the list by category." },
+  { key: "showUnreadBadges", title: "Show unread badges", text: "Shows the number of unread messages next to the Inbox, Imbox and each folder." },
+  { key: "textViewOnly", title: "Always show the text view", text: "Reads every message as text: MD, Plain, Safe HTML and HTML are not offered." },
+];
 
 /** Per-user preferences, stored on the server (so they follow the user across browsers). */
 export function SettingsDialog({
@@ -50,6 +62,7 @@ export function SettingsDialog({
   const [notifyBrowser, setNotifyBrowser] = useState(false);
   const [notifyToast, setNotifyToast] = useState(false);
   const [sound, setSound] = useState<SettingsPatch["notificationSound"]>(DEFAULT_NOTIFICATION_SOUND);
+  const [ui, setUi] = useState({ showConversations: false, showCategories: false, showUnreadBadges: false, textViewOnly: false });
   const [tab, setTab] = useState("inboxes");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +76,12 @@ export function SettingsDialog({
       setNotifyBrowser(settings.notifyBrowser === true);
       setNotifyToast(settings.notifyToast === true);
       setSound(settings.notificationSound ?? DEFAULT_NOTIFICATION_SOUND);
+      setUi({
+        showConversations: settings.showConversations === true,
+        showCategories: settings.showCategories === true,
+        showUnreadBadges: settings.showUnreadBadges === true,
+        textViewOnly: settings.textViewOnly === true,
+      });
       setError(null);
       setTab("inboxes");
     }
@@ -98,7 +117,7 @@ export function SettingsDialog({
     setBusy(true);
     setError(null);
     try {
-      await onSave({ syncIntervalMinutes: minutes, combinedInboxIncludesFolders: includeFolders, imboxEnabled, notifyBrowser, notifyToast, notificationSound: sound });
+      await onSave({ syncIntervalMinutes: minutes, combinedInboxIncludesFolders: includeFolders, imboxEnabled, notifyBrowser, notifyToast, notificationSound: sound, ...ui });
       onOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -118,6 +137,7 @@ export function SettingsDialog({
         <Tabs value={tab} onValueChange={setTab} className="gap-4">
           <TabsList>
             <TabsTrigger value="inboxes">Inboxes</TabsTrigger>
+            <TabsTrigger value="ui">UI</TabsTrigger>
             <TabsTrigger value="notifications">Notifications</TabsTrigger>
             <TabsTrigger value="ai">AI</TabsTrigger>
             <TabsTrigger value="credentials">Credentials</TabsTrigger>
@@ -187,6 +207,21 @@ export function SettingsDialog({
           </div>
 
               </>
+            ) : tab === "ui" ? (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              P.S.Mail starts plain and distraction-free. Turn on what you want to see.
+            </p>
+            {UI_OPTIONS.map(option => (
+              <div key={option.key} className="flex items-start gap-2 rounded-md border p-3">
+                <Switch id={`settings-ui-${option.key}`} className="mt-0.5" checked={ui[option.key]} onCheckedChange={checked => setUi({ ...ui, [option.key]: checked })} />
+                <div className="space-y-0.5">
+                  <Label htmlFor={`settings-ui-${option.key}`}>{option.title}</Label>
+                  <p className="text-xs text-muted-foreground">{option.text}</p>
+                </div>
+              </div>
+            ))}
+          </div>
             ) : (
           <div className="space-y-4">
             <div className="flex items-start gap-2">

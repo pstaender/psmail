@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { UiSettingsContext } from "@/contexts/UiSettingsContext";
 import {
   CalendarDays,
   LogOut,
@@ -450,6 +451,16 @@ export function AppShell() {
   // The same for the Imbox entry: the unread messages among the important ones (only asked for when the imbox is on).
   const [imboxUnread, setImboxUnread] = useState(0);
   const imboxOn = settings.imboxEnabled === true;
+  // Settings → UI: opt-in interface features, handed down through a context (the plain client when none is set).
+  const uiSettings = useMemo(
+    () => ({
+      showConversations: settings.showConversations === true,
+      showCategories: settings.showCategories === true,
+      showUnreadBadges: settings.showUnreadBadges === true,
+      textViewOnly: settings.textViewOnly === true,
+    }),
+    [settings.showConversations, settings.showCategories, settings.showUnreadBadges, settings.textViewOnly],
+  );
   const refreshImboxUnread = useCallback(() => {
     if (!token || !imboxOn) return;
     api
@@ -1349,6 +1360,7 @@ export function AppShell() {
   );
 
   return (
+    <UiSettingsContext.Provider value={uiSettings}>
     <div className="flex h-full flex-col">
       <Toaster position="bottom-right" />
 
@@ -1567,11 +1579,13 @@ export function AppShell() {
                       >
                         <CalendarDays className="size-4" /> Filter by date…
                       </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onSelect={() => setCategoryFilterOpen(true)}
-                      >
-                        <Tags className="size-4" /> Filter by category…
-                      </DropdownMenuItem>
+                      {uiSettings.showCategories && (
+                        <DropdownMenuItem
+                          onSelect={() => setCategoryFilterOpen(true)}
+                        >
+                          <Tags className="size-4" /> Filter by category…
+                        </DropdownMenuItem>
+                      )}
                       {dateFilter && (
                         <DropdownMenuItem onSelect={() => setDateFilter(null)}>
                           Clear date filter
@@ -1881,5 +1895,6 @@ export function AppShell() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+    </UiSettingsContext.Provider>
   );
 }

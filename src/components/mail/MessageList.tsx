@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { formatListDate } from "@/lib/time";
 import type { EmailRecord } from "../../server/types";
 import { CategoryChips } from "./CategoryChips";
+import { useUiSettings } from "@/contexts/UiSettingsContext";
 import { ConversationMarks } from "./ConversationMarks";
 import { EmptyState } from "./EmptyState";
 
@@ -52,6 +53,7 @@ export function MessageList({
   /** A date filter is on: an empty list means nothing in that period, not an empty folder. */
   filtered?: boolean;
 }) {
+  const { showConversations, showCategories } = useUiSettings();
   const sentinelRef = useRef<HTMLLIElement>(null);
   const onLoadMoreRef = useRef(onLoadMore);
   onLoadMoreRef.current = onLoadMore;
@@ -123,7 +125,7 @@ export function MessageList({
               </div>
               <div className={cn("flex items-center gap-1.5 truncate text-sm", !email.isRead && "font-medium")}>
                 <span className="flex-1 truncate">{email.subject || "(no subject)"}</span>
-                <ConversationMarks conversation={email.conversation} />
+                {showConversations && <ConversationMarks conversation={email.conversation} />}
                 {((email.attachmentCount ?? email.attachments?.length) ?? 0) > 0 && (
                   <Paperclip aria-label="Has attachments" className="size-3.5 shrink-0 text-muted-foreground" />
                 )}
@@ -131,7 +133,7 @@ export function MessageList({
               {email.plainText && (
                 <p className="truncate text-xs text-muted-foreground">{email.plainText.replace(/\s+/g, " ").trim()}</p>
               )}
-              <CategoryChips labels={email.taxonomyList} />
+              {showCategories && <CategoryChips labels={email.taxonomyList} />}
             </button>
           </li>
         ))}

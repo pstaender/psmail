@@ -57,6 +57,11 @@ export interface UserSettings {
   notificationSound?: "crystal_clear" | "cute_bell" | "marimba" | "none";
   /** The language the translate skill translates into (unset = English). */
   aiTargetLanguage?: string;
+  /** Interface options (Settings → UI), all opt-in: conversation marks/bar, category chips, unread badges, only the Text view. */
+  showConversations?: boolean;
+  showCategories?: boolean;
+  showUnreadBadges?: boolean;
+  textViewOnly?: boolean;
 }
 
 export interface BulkResult {
