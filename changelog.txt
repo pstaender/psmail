@@ -7,6 +7,22 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-21 - The username can be changed (Settings > Credentials) (7aa8a64)
+-----------------------------------------------------------------------------
+Settings > Credentials starts with a "Username" field (filled in) and a Rename button, enabled once the name is really different (spaces
+around it don't count). Renaming changes only the sign-in name: the encryption key of the saved account passwords comes from the password
+and sessions/data hang on the user's id, so nothing is re-encrypted and no session ends (this browser's saved session and the dialog's
+"For <name>" line follow at once). POST /api/auth/change-username { username }: trimmed, 1-64 characters, no control characters (400), a
+name that is taken 409, the same name again a no-op.
+What did carry the name:
+- the user's attachment folder (attachments/<username>/...): it is renamed and the stored file paths follow, in one transaction (the folder is
+  moved back if the database refuses), so downloads keep finding their files; left where it is if a folder of the new name already exists;
+- the passkey unlock stored in this browser: it is bound to the name, so it is removed with a note ("set it up again at your next sign-in").
+Tests: server (validation, conflict, sign-in with the new name and not the old, session and saved passwords untouched, attachment folder and
+paths moved and still served, renaming back, other users' files untouched, existing target folder) and UI (prefilled field, the button's states,
+the request, the session, a refused name, the passkey note). Not looked at in a browser.
+
+
 2026-09-21 - "imbox classify" is verbose (e3fbbf3)
 -------------------------------------------------
 The CLI used to print one line at the very end (or nothing at all while it worked). Now "bun run cli imbox classify" says what it does:
