@@ -7,6 +7,34 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-21 - Safe HTML: no inline images, no embedded SVG; script removal checked (f5db612)
+-------------------------------------------------------------------------------------------
+Checked first, as asked: scripts were ALREADY removed in both HTML views (DOMPurify's defaults plus an explicit forbid list:
+script, iframe, object, embed, form, base, link, meta, srcdoc), and both views render in a sandboxed iframe without allow-scripts
+as a second layer. What was missing was PROOF: the tests' DOM (happy-dom) cannot run DOMPurify - it hands the HTML back untouched -
+so nothing had ever tested it. The new tests (tests/frontend/sanitizeHtml.test.ts) run the real DOMPurify on a real DOM (jsdom, a new
+dev dependency; the sanitizer takes an optional purifier for that) and check both views: script elements in odd spellings and in SVG,
+on* handlers on any element (SVG and MathML too), javascript:/vbscript:/data:text/html URLs in links, images, forms, SVG references
+and video posters, and iframe/object/embed/base/meta/link/form. They all passed - no hole found.
+New, for Safe HTML only (the HTML view shows the mail as sent and keeps them):
+- inline images are removed: data: and blob: sources, cid: references to an inline attachment, an <img> whose odd data: spelling the
+  sanitizer already refused, picture/source with inline sources, and inline CSS images - url(data:...) in style attributes and <style>;
+- every embedded SVG is removed (<svg> elements with everything inside, SVG as a data image), and MathML;
+- this holds when "Show images" is on: remote images may come back, inline ones never do.
+Also: @import in a style is dropped while remote content is blocked (it pulled in a whole remote stylesheet), and url("...") with
+quotes and parentheses is now matched.
+Not changed: the Text/MD tabs, which are built from the HTML by the markdown converter.
+
+2026-09-21 - Reading mode also collapses the accounts/folders bar (af74fd5)
+-----------------------------------------------------------------------
+Double-clicking a message (reading mode) now collapses the accounts/folders bar together with the message list, so the message gets
+the whole width. Only for now: the bar's remembered collapsed state (localStorage) is not touched - a bar the user collapsed themselves
+stays collapsed afterwards, an open one is back. Either strip's button ("Show accounts and the message list" / "Show the message list")
+brings both back, as do a typed search or nothing being open any more. Picking a folder in the sidebar needs the bar first, of course.
+This commit also carries the login title change ("Mail" next to the new logo, edited by hand) and the two tests that checked the old title.
+Tests: the bar hidden and restored, the remembered state untouched, a self-collapsed bar staying collapsed. Not looked at in a browser.
+
+
 2026-09-20 - Opening a result no longer changes the list's scope (86c415a)
 --------------------------------------------------------------------------
 Clicking a message in a search result (or in the combined Inbox/Sent) used to make that message's account and folder THE selected ones:
