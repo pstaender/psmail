@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import type { EmailAddress } from "../types";
 import { emailIdsWithAttachments, taxonomyListsFor } from "./emails";
 import type { SearchResult } from "./search";
-import { dateBoundsSql } from "./dateBounds";
+import { listFilterSql } from "./dateBounds";
 
 export type UnifiedKind = "inbox" | "sent";
 
@@ -92,7 +92,7 @@ export function listUnifiedEmails(
   db: Database,
   userId: number,
   kind: UnifiedKind,
-  options: { limit?: number; offset?: number; includeFolders?: boolean; after?: string; before?: string } = {}
+  options: { limit?: number; offset?: number; includeFolders?: boolean; after?: string; before?: string; categories?: string[] } = {}
 ): SearchResult[] {
   const limit = Math.min(Math.max(options.limit ?? 50, 1), 500);
   const offset = Math.max(options.offset ?? 0, 0);
@@ -104,7 +104,7 @@ export function listUnifiedEmails(
     .all(userId);
 
   // With a date window the same per-folder query just gains range conditions on `date`, still served by the index in order.
-  const window = dateBoundsSql(options);
+  const window = listFilterSql(options);
   const query = db.query<Row, (string | number)[]>(
     `SELECT id, folder, uid, is_read, is_flagged, subject, from_addr, to_addr, date FROM emails
      WHERE account_id = ? AND folder = ?${window.sql} ORDER BY date DESC, id DESC LIMIT ?`

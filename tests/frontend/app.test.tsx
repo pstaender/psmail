@@ -386,7 +386,7 @@ function installMockFetch(
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails") {
       const listParams = new URL(url, "http://localhost").searchParams;
       listRequests.push({ list: "folder", params: listParams });
-      if (listParams.has("after") || listParams.has("before")) return jsonResponse([]); // the mock has nothing in any date window
+      if (listParams.has("after") || listParams.has("before") || listParams.has("category")) return jsonResponse([]); // the mock has nothing in any date window or category
       if (opts.pagedEmailCount !== undefined) {
         const params = new URL(url, "http://localhost").searchParams;
         const limit = Number(params.get("limit") ?? 50);
@@ -463,7 +463,7 @@ function installMockFetch(
     if (method === "GET" && (path === "/api/unified/inbox" || path === "/api/unified/sent")) {
       const listParams = new URL(url, "http://localhost").searchParams;
       listRequests.push({ list: path.endsWith("inbox") ? "inbox" : "sent", params: listParams });
-      if (listParams.has("after") || listParams.has("before")) return jsonResponse([]);
+      if (listParams.has("after") || listParams.has("before") || listParams.has("category")) return jsonResponse([]);
     }
     if (method === "GET" && path === "/api/unified/inbox") {
       if (opts.unifiedInboxRows) return jsonResponse(opts.unifiedInboxRows);
@@ -533,6 +533,9 @@ function installMockFetch(
       const body = init?.body ? JSON.parse(init.body as string) : { ids: [] };
       bulkRequests.push({ account: decodeURIComponent(bulk[1]!), method, move: bulk[2] ? decodeURIComponent(bulk[2].slice(6)) : null, body });
       return jsonResponse((body.ids as number[]).map(id => ({ id, ok: true, ...(method === "DELETE" ? { softDeleted: false } : {}) })));
+    }
+    if (method === "GET" && path === "/api/categories") {
+      return jsonResponse([{ label: "finance", count: 5 }, { label: "travel", count: 2 }, { label: "invoice", count: 1 }]);
     }
     if (method === "GET" && path === "/api/search") {
       // The mock doesn't replicate real matching (that's covered by backend tests) —
@@ -1188,7 +1191,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
       await waitFor(() => expect(last("folder").get("after")).toBe(localDay(2026, 3, 2).toISOString()));
       expect(last("folder").get("before")).toBe(localDay(2026, 3, 3).toISOString()); // to the start of the next day
-      expect(await screen.findByText("Nothing in the chosen dates.")).toBeTruthy();
+      expect(await screen.findByText("Nothing matches the filter.")).toBeTruthy();
       expect(screen.getByTitle("Change the date filter").textContent).toContain("2026");
 
       await userEvent.click(screen.getByLabelText("Clear the date filter"));
@@ -1298,6 +1301,124 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
       await userEvent.click(screen.getAllByText("Inbox")[1]!);
       await waitFor(() => expect(window.location.pathname).toBe("/a/me@example.com/inbox/"));
+    });
+
+    describe("by category", () => {
+      const categoriesOf = (list: "folder" | "inbox" | "sent" | "search") => last(list).getAll("category");
+      async function openCategoryDialog() {
+        await userEvent.click(screen.getByRole("button", { name: "More" }));
+        await userEvent.click(await screen.findByRole("menuitem", { name: /filter by category/i }));
+        return within((await screen.findByText("Filter by category", { selector: "[data-slot=dialog-title]" })).closest('[role="dialog"]') as HTMLElement);
+      }
+      async function choose(dialog: ReturnType<typeof within>, label: string) {
+        await userEvent.click(dialog.getByRole("combobox", { name: "Add a category" }));
+        await userEvent.click(await screen.findByRole("option", { name: new RegExp(`^${label}`) }));
+      }
+
+      test("the More menu has it beside Filter by date", async () => {
+        await openFolder();
+        await userEvent.click(screen.getByRole("button", { name: "More" }));
+        const labels = (await screen.findAllByRole("menuitem")).map(i => i.textContent!.trim());
+        expect(labels).toEqual(["Filter by date…", "Filter by category…"]);
+      });
+
+      test("the combobox lists the available categories with their counts, searchable; chosen ones become labels that can be removed", async () => {
+        await openFolder();
+        const dialog = await openCategoryDialog();
+        expect(dialog.getByText("No category chosen: every message is shown.")).toBeTruthy();
+
+        await userEvent.click(dialog.getByRole("combobox", { name: "Add a category" }));
+        expect((await screen.findAllByRole("option")).map(o => o.textContent)).toEqual(["finance5", "travel2", "invoice1"]);
+        await userEvent.type(screen.getByPlaceholderText("Find a category…"), "inv");
+        await waitFor(() => expect(screen.getAllByRole("option").map(o => o.textContent)).toEqual(["invoice1"]));
+        await userEvent.click(screen.getByRole("option", { name: /^invoice/ }));
+
+        const chosen = dialog.getByRole("list", { name: "Chosen categories" });
+        expect(within(chosen).getByText("invoice")).toBeTruthy();
+        await choose(dialog, "finance");
+        expect(Array.from(chosen.querySelectorAll("li")).map(li => li.textContent)).toEqual(["invoice", "finance"]);
+
+        await userEvent.click(dialog.getByRole("combobox", { name: "Add a category" })); // a chosen one isn't offered again
+        expect((await screen.findAllByRole("option")).map(o => o.textContent)).toEqual(["travel2"]);
+        await userEvent.keyboard("{Escape}");
+
+        await userEvent.click(dialog.getByRole("button", { name: "Remove invoice" }));
+        expect(Array.from(chosen.querySelectorAll("li")).map(li => li.textContent)).toEqual(["finance"]);
+      });
+
+      test("Apply filters the list by every chosen category, and shows them; Cancel changes nothing", async () => {
+        await openFolder();
+        let dialog = await openCategoryDialog();
+        await choose(dialog, "finance");
+        await userEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+        await waitFor(() => expect(screen.queryByText("Filter by category", { selector: "[data-slot=dialog-title]" })).toBeNull());
+        expect(last("folder").has("category")).toBe(false);
+
+        dialog = await openCategoryDialog();
+        await choose(dialog, "finance");
+        await choose(dialog, "travel");
+        await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
+
+        await waitFor(() => expect(categoriesOf("folder")).toEqual(["finance", "travel"]));
+        expect(await screen.findByText("Nothing matches the filter.")).toBeTruthy();
+        const bar = screen.getByLabelText("Category filter");
+        expect(Array.from(bar.querySelectorAll("li")).map(li => li.textContent)).toEqual(["finance", "travel"]);
+
+        await userEvent.click(screen.getByRole("button", { name: "Remove finance from the filter" })); // × on a label in the list header
+        await waitFor(() => expect(categoriesOf("folder")).toEqual(["travel"]));
+        await userEvent.click(screen.getByRole("button", { name: "Remove travel from the filter" }));
+        await waitFor(() => expect(last("folder").has("category")).toBe(false));
+        expect(await screen.findByText("Hello there")).toBeTruthy();
+        expect(screen.queryByLabelText("Category filter")).toBeNull();
+      });
+
+      test("the dialog shows what is in effect and can clear it", async () => {
+        await openFolder();
+        let dialog = await openCategoryDialog();
+        await choose(dialog, "finance");
+        await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
+        await screen.findByLabelText("Category filter");
+
+        dialog = await openCategoryDialog();
+        expect(within(dialog.getByRole("list", { name: "Chosen categories" })).getByText("finance")).toBeTruthy();
+        await userEvent.click(dialog.getByRole("button", { name: "Clear filter" }));
+        await waitFor(() => expect(screen.queryByLabelText("Category filter")).toBeNull());
+      });
+
+      test("it combines with the date filter and with a search, and each list starts without", async () => {
+        await openFolder();
+        let dialog = await openCategoryDialog();
+        await choose(dialog, "finance");
+        await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
+        const dateDialog = await openDialog();
+        setDay(dateDialog, "Day", "2026-03-02");
+        await userEvent.click(dateDialog.getByRole("button", { name: "Apply" }));
+        await waitFor(() => expect(last("folder").get("after")).toBe(localDay(2026, 3, 2).toISOString()));
+        expect(categoriesOf("folder")).toEqual(["finance"]); // both apply
+
+        await userEvent.type(screen.getByPlaceholderText(/search all mail/i), "second");
+        await waitFor(() => expect(listRequests.some(r => r.list === "search")).toBe(true));
+        expect(last("search").get("q")).toBe("second");
+        expect(categoriesOf("search")).toEqual(["finance"]); // the same query, within the categories (and dates)
+        expect(last("search").get("after")).toBe(localDay(2026, 3, 2).toISOString());
+
+        await userEvent.clear(screen.getByPlaceholderText(/search all mail/i));
+        await userEvent.click(screen.getByTitle("Sent of all accounts")); // another list: no filters
+        await screen.findByText("Unified outgoing");
+        expect(screen.queryByLabelText("Category filter")).toBeNull();
+        expect(last("sent").has("category")).toBe(false);
+        dialog = within(document.body);
+      });
+
+      test("it works in the combined Inbox", async () => {
+        render(<App />);
+        await userEvent.click(await screen.findByText("default"));
+        await screen.findByText("Unified hello");
+        const dialog = await openCategoryDialog();
+        await choose(dialog, "travel");
+        await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
+        await waitFor(() => expect(categoriesOf("inbox")).toEqual(["travel"]));
+      });
     });
 
     test("More sits to the left of New", async () => {

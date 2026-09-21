@@ -71,3 +71,36 @@ describe("date windows over HTTP (after inclusive, before exclusive)", () => {
     expect((await call("GET", "/api/unified/inbox?after=garbage", { token })).status).toBe(400);
   });
 });
+
+describe("categories over HTTP", () => {
+  let token = "";
+  test("GET /api/categories lists the user's labels; category parameters filter the lists and the search", async () => {
+    await call("POST", "/api/users", { body: { username: "cat", password: "pw" } });
+    token = (await call("POST", "/api/auth/login", { body: { username: "cat", password: "pw" } })).json.token;
+    const acc = await call("POST", "/api/accounts", {
+      token,
+      body: { email: "cat@example.com", imapHost: "h", imapPort: 993, imapUsername: "u", imapPassword: "x", smtpHost: "h", smtpPort: 465, smtpUsername: "u", smtpPassword: "y" },
+    });
+    const make = (subject: string, labels: string[], date: string) => {
+      const email = createEmail(db, acc.json.id, { folder: "INBOX", isDraft: false, subject, date, from: [{ address: "s@y.com" }] });
+      db.query("UPDATE emails SET taxonomy_list = ? WHERE id = ?").run(JSON.stringify(labels), email.id);
+    };
+    make("Invoice A", ["finance", "invoice"], "2026-03-03T10:00:00.000Z");
+    make("Invoice B", ["finance"], "2026-03-02T10:00:00.000Z");
+    make("Trip", ["travel"], "2026-03-01T10:00:00.000Z");
+
+    expect((await call("GET", "/api/categories", { token })).json).toEqual([
+      { label: "finance", count: 2 },
+      { label: "invoice", count: 1 },
+      { label: "travel", count: 1 },
+    ]);
+    expect((await call("GET", "/api/categories")).status).toBe(401);
+
+    const subjects = async (path: string) => (await call("GET", path, { token })).json.map((e: { subject: string }) => e.subject);
+    expect(await subjects("/api/accounts/cat%40example.com/emails?folder=INBOX&category=finance")).toEqual(["Invoice A", "Invoice B"]);
+    expect(await subjects("/api/accounts/cat%40example.com/emails?folder=INBOX&category=finance&category=invoice")).toEqual(["Invoice A"]);
+    expect(await subjects("/api/unified/inbox?category=travel")).toEqual(["Trip"]);
+    expect(await subjects("/api/search?q=invoice&category=invoice")).toEqual(["Invoice A"]);
+    expect((await call("GET", `/api/unified/inbox?category=${"x".repeat(101)}`, { token })).status).toBe(400);
+  });
+});

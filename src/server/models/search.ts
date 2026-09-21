@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import type { EmailAddress } from "../types";
 import { emailIdsWithAttachments, taxonomyListsFor } from "./emails";
-import { dateBoundsSql, type DateBounds } from "./dateBounds";
+import { listFilterSql, type ListFilter } from "./dateBounds";
 
 export interface SearchResult {
   id: number;
@@ -171,11 +171,11 @@ const BODY_CHUNK = 200;
 function searchBodies(
   db: Database,
   userId: number,
-  { generalTerms, generalRegexes, fromRegexes, favsOnly, window }: { generalTerms: string[]; generalRegexes: RegExp[]; fromRegexes: RegExp[]; favsOnly: boolean; window: DateBounds },
+  { generalTerms, generalRegexes, fromRegexes, favsOnly, window }: { generalTerms: string[]; generalRegexes: RegExp[]; fromRegexes: RegExp[]; favsOnly: boolean; window: ListFilter },
   wanted: number
 ): SearchResult[] {
   // The newest messages first, without their texts: sorting rows that carry long bodies is what made this slow.
-  const dates = dateBoundsSql(window, "emails.date");
+  const dates = listFilterSql(window, { date: "emails.date", taxonomy: "emails.taxonomy_list" });
   const headers = db
     .query<SearchRow, (string | number)[]>(
       `SELECT emails.id, accounts.email as account_email, emails.folder, emails.uid,
@@ -217,7 +217,7 @@ function searchBodies(
   return found;
 }
 
-export interface SearchOptions extends DateBounds {
+export interface SearchOptions extends ListFilter {
   limit?: number;
   offset?: number;
   /** Always search the message text too, not only when subject and sender found nothing. */
@@ -242,8 +242,8 @@ export function searchEmails(db: Database, userId: number, query: string, option
   const fromRegexes = fromTerms.map(wildcardToRegExp);
 
   // A date window (the list's date filter) narrows what is looked at in the first place: search "as before", but only there.
-  const window: DateBounds = { after: options.after, before: options.before };
-  const dates = dateBoundsSql(window, "emails.date");
+  const window: ListFilter = { after: options.after, before: options.before, categories: options.categories };
+  const dates = listFilterSql(window, { date: "emails.date", taxonomy: "emails.taxonomy_list" });
   const rows = db
     .query<SearchRow, (string | number)[]>(
       `SELECT emails.id, accounts.email as account_email, emails.folder, emails.uid,

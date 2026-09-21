@@ -3,10 +3,10 @@ import { createTestDb } from "../helpers/db";
 import { createUser } from "../../src/server/models/users";
 import { deriveEncryptionKey, generateSalt } from "../../src/server/crypto/secrets";
 import { createAccount } from "../../src/server/models/accounts";
-import { createEmail, listEmails } from "../../src/server/models/emails";
+import { createEmail, listCategories, listEmails } from "../../src/server/models/emails";
 import { listUnifiedEmails } from "../../src/server/models/unified";
 import { searchEmails } from "../../src/server/models/search";
-import { dateBoundsSql, readDateBounds } from "../../src/server/models/dateBounds";
+import { dateBoundsSql, readDateBounds, readListFilter } from "../../src/server/models/dateBounds";
 import { ApiError } from "../../src/server/types";
 
 const key = deriveEncryptionKey("pw", generateSalt());
@@ -159,5 +159,101 @@ describe("search within a date window", () => {
     const inWindow = searchEmails(db, user.id, "needle", { before: "2011-09-20T00:00:00.000Z" });
     expect(inWindow.map(r => r.subject)).toEqual(["Old"]);
     expect(inWindow[0]!.matchedInBody).toBe(true);
+  });
+});
+
+describe("category filter", () => {
+  async function labelled() {
+    const { db, user, a, b, mail } = await setup();
+    const tag = (accountId: number, subject: string, date: string, labels: string[] | null | string, folder = "INBOX") => {
+      const email = mail(accountId, subject, date, folder);
+      if (labels !== null) db.query("UPDATE emails SET taxonomy_list = ? WHERE id = ?").run(typeof labels === "string" ? labels : JSON.stringify(labels), email.id);
+      return email;
+    };
+    return { db, user, a, b, tag };
+  }
+
+  test("readListFilter reads repeated category parameters, trimmed and without duplicates, next to the dates", () => {
+    expect(readListFilter(q("category=invoice&category=%20travel%20&category=invoice&category=&before=2026-03-02"))).toEqual({
+      before: "2026-03-02T00:00:00.000Z",
+      categories: ["invoice", "travel"],
+    });
+    expect(readListFilter(q(""))).toEqual({});
+    expect(() => readListFilter(q(Array.from({ length: 21 }, (_, i) => `category=c${i}`).join("&")))).toThrow(ApiError);
+    expect(() => readListFilter(q(`category=${"x".repeat(101)}`))).toThrow(ApiError);
+  });
+
+  test("a message must have EVERY chosen category; messages without labels, or with a broken list, never match", async () => {
+    const { db, a, tag } = await labelled();
+    tag(a.id, "both", "2026-03-05T10:00:00.000Z", ["invoice", "travel"]);
+    tag(a.id, "invoice only", "2026-03-04T10:00:00.000Z", ["invoice"]);
+    tag(a.id, "travel only", "2026-03-03T10:00:00.000Z", ["travel", "other"]);
+    tag(a.id, "none", "2026-03-02T10:00:00.000Z", null);
+    tag(a.id, "empty", "2026-03-01T10:00:00.000Z", []);
+    tag(a.id, "broken", "2026-02-28T10:00:00.000Z", "not json{");
+
+    const subjects = (categories: string[]) => listEmails(db, a.id, { folder: "INBOX", categories }).map(e => e.subject);
+    expect(subjects(["invoice"])).toEqual(["both", "invoice only"]);
+    expect(subjects(["travel"])).toEqual(["both", "travel only"]);
+    expect(subjects(["invoice", "travel"])).toEqual(["both"]);
+    expect(subjects(["nothing"])).toEqual([]);
+    expect(listEmails(db, a.id, { folder: "INBOX", categories: [] })).toHaveLength(6); // no categories, no restriction
+  });
+
+  test("it combines with the date window, paging, and other folders/accounts stay out", async () => {
+    const { db, user, a, b, tag } = await labelled();
+    for (let i = 1; i <= 6; i++) tag(a.id, `M${i}`, `2026-03-0${i}T10:00:00.000Z`, i % 2 ? ["odd"] : ["even"]);
+    tag(a.id, "elsewhere", "2026-03-03T10:00:00.000Z", ["odd"], "Archive");
+    tag(b.id, "b-odd", "2026-03-03T10:00:00.000Z", ["odd"]);
+
+    expect(listEmails(db, a.id, { folder: "INBOX", categories: ["odd"] }).map(e => e.subject)).toEqual(["M5", "M3", "M1"]);
+    expect(listEmails(db, a.id, { folder: "INBOX", categories: ["odd"], limit: 1, offset: 1 }).map(e => e.subject)).toEqual(["M3"]);
+    expect(listEmails(db, a.id, { folder: "INBOX", categories: ["odd"], after: "2026-03-02T00:00:00.000Z", before: "2026-03-05T00:00:00.000Z" }).map(e => e.subject)).toEqual(["M3"]);
+    expect(listUnifiedEmails(db, user.id, "inbox", { categories: ["odd"] }).map(r => r.subject)).toEqual(["M5", "b-odd", "M3", "M1"]);
+  });
+
+  test("search within a category, by subject and by text", async () => {
+    const { db, user, a, tag } = await labelled();
+    tag(a.id, "Invoice one", "2026-03-02T10:00:00.000Z", ["finance"]);
+    tag(a.id, "Invoice two", "2026-03-01T10:00:00.000Z", ["private"]);
+
+    expect(searchEmails(db, user.id, "invoice").map(r => r.subject)).toEqual(["Invoice one", "Invoice two"]);
+    expect(searchEmails(db, user.id, "invoice", { categories: ["finance"] }).map(r => r.subject)).toEqual(["Invoice one"]);
+    expect(searchEmails(db, user.id, "invoice", { categories: ["finance"], fullText: true }).map(r => r.subject)).toEqual(["Invoice one"]);
+  });
+
+  test("listCategories: every label the user's messages have, with counts, most used first", async () => {
+    const { db, user, a, b, tag } = await labelled();
+    tag(a.id, "1", "2026-03-01T10:00:00.000Z", ["invoice", "travel"]);
+    tag(a.id, "2", "2026-03-02T10:00:00.000Z", ["invoice"]);
+    tag(b.id, "3", "2026-03-03T10:00:00.000Z", ["private", "invoice", "invoice"]);
+    tag(a.id, "4", "2026-03-04T10:00:00.000Z", "broken");
+    const other = await createUser(db, "bob", "pw");
+
+    expect(listCategories(db, user.id)).toEqual([{ label: "invoice", count: 3 }, { label: "private", count: 1 }, { label: "travel", count: 1 }]);
+    expect(listCategories(db, other.id)).toEqual([]);
+  });
+
+  test("the category conditions ride on the date index: a page of a rare label in a big folder is quick", async () => {
+    const { db, a } = await labelled();
+    db.exec("BEGIN");
+    const insert = db.prepare("INSERT INTO emails (account_id, folder, uid, is_draft, subject, date, taxonomy_list) VALUES (?, 'INBOX', ?, 0, ?, ?, ?)");
+    const start = Date.UTC(2020, 0, 1);
+    for (let i = 0; i < 100_000; i++) {
+      insert.run(a.id, i, `S${i}`, new Date(start + i * 60_000).toISOString(), i % 20 === 0 ? '["rare","x"]' : i % 3 === 0 ? '["common"]' : null);
+    }
+    db.exec("COMMIT");
+
+    const time = (categories: string[]) => {
+      const t = performance.now();
+      const rows = listEmails(db, a.id, { folder: "INBOX", categories, limit: 100 });
+      return { rows: rows.length, ms: performance.now() - t };
+    };
+    const rare = time(["rare"]);
+    expect(rare.rows).toBe(100);
+    expect(rare.ms).toBeLessThan(500); // it walks the newest 2 000 rows of the index to find 100 hits, not the folder
+    const both = time(["rare", "x"]);
+    expect(both.rows).toBe(100);
+    expect(time(["nothing"]).ms).toBeLessThan(2000); // a miss reads the whole folder's (small) label column once
   });
 });

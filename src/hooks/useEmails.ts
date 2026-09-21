@@ -5,7 +5,8 @@ import { useAuth } from "../contexts/AuthContext";
 
 const PAGE_SIZE = 100;
 
-export function useEmails(accountEmail: string | null, folder: string | null, bounds: { after?: string; before?: string } = {}) {
+export function useEmails(accountEmail: string | null, folder: string | null, bounds: { after?: string; before?: string; categories?: string[] } = {}) {
+  const categoryKey = (bounds.categories ?? []).join("\u0001");
   const { token } = useAuth();
   const [emails, setEmails] = useState<EmailRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -14,7 +15,7 @@ export function useEmails(accountEmail: string | null, folder: string | null, bo
   const [error, setError] = useState<string | null>(null);
 
   // Identifies the current account+folder; responses that arrive for an older one are dropped.
-  const viewKey = `${accountEmail}/${folder}/${bounds.after ?? ""}/${bounds.before ?? ""}`;
+  const viewKey = `${accountEmail}/${folder}/${bounds.after ?? ""}/${bounds.before ?? ""}/${categoryKey}`;
   const viewKeyRef = useRef(viewKey);
   viewKeyRef.current = viewKey;
   const loadedCountRef = useRef(0);
@@ -47,7 +48,8 @@ export function useEmails(accountEmail: string | null, folder: string | null, bo
         if (viewKeyRef.current === key) setLoading(false);
       }
     },
-    [token, accountEmail, folder, bounds.after, bounds.before]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [token, accountEmail, folder, bounds.after, bounds.before, categoryKey]
   );
 
   const refresh = useCallback(() => load(true), [load]);
@@ -84,7 +86,8 @@ export function useEmails(accountEmail: string | null, folder: string | null, bo
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [token, accountEmail, folder, hasMore, bounds.after, bounds.before]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, accountEmail, folder, hasMore, bounds.after, bounds.before, categoryKey]);
 
   const patchLocal = useCallback((id: number, patch: Partial<EmailRecord>) => {
     setEmails(prev => prev.map(e => (e.id === id ? { ...e, ...patch } : e)));

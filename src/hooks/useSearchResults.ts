@@ -12,7 +12,7 @@ const PAGE_SIZE = 100;
  * Both come back as SearchResults and page in `PAGE_SIZE` chunks via `loadMore`. Empty queries with
  * no unified mailbox return nothing without hitting the API.
  */
-export function useSearchResults(query: string, unified: UnifiedKind | null = null, bounds: { after?: string; before?: string } = {}, fullText = false) {
+export function useSearchResults(query: string, unified: UnifiedKind | null = null, bounds: { after?: string; before?: string; categories?: string[] } = {}, fullText = false) {
   const { token } = useAuth();
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -23,7 +23,7 @@ export function useSearchResults(query: string, unified: UnifiedKind | null = nu
   const trimmed = query.trim();
   // A date filter narrows a search too: the same query, within the window.
   const window = bounds;
-  const windowKey = `${window.after ?? ""}:${window.before ?? ""}`;
+  const windowKey = `${window.after ?? ""}:${window.before ?? ""}:${(window.categories ?? []).join("\u0001")}`;
   const sourceKey = trimmed ? `search:${trimmed}:${windowKey}:${fullText ? "full" : ""}` : unified ? `unified:${unified}:${windowKey}` : "";
   const sourceKeyRef = useRef(sourceKey);
   sourceKeyRef.current = sourceKey;
@@ -33,7 +33,8 @@ export function useSearchResults(query: string, unified: UnifiedKind | null = nu
   const fetchPage = useCallback(
     (limit: number, offset: number) =>
       trimmed ? api.search(token!, trimmed, { limit, offset, fullText, ...window }) : api.listUnified(token!, unified!, { limit, offset, ...window }),
-    [token, trimmed, unified, window.after, window.before, fullText]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [token, trimmed, unified, windowKey, fullText]
   );
 
   // `keepLoaded` re-fetches as many results as are already showing, so a refresh doesn't drop scrolled-in pages.

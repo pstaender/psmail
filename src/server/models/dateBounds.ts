@@ -42,3 +42,45 @@ export function dateBoundsSql(bounds: DateBounds | undefined, column = "date"): 
   }
   return { sql, params };
 }
+
+/**
+ * What narrows a message list: a date window and/or categories (the AI's taxonomy labels). A message must have EVERY
+ * chosen category.
+ */
+export interface ListFilter extends DateBounds {
+  categories?: string[];
+}
+
+export const MAX_FILTER_CATEGORIES = 20;
+const MAX_CATEGORY_LENGTH = 100;
+
+/** `after` / `before` and any number of `category` parameters; a bad date is a 400, as is a category that is far too long or too many. */
+export function readListFilter(params: URLSearchParams): ListFilter {
+  const filter: ListFilter = readDateBounds(params);
+  const categories = [...new Set(params.getAll("category").map(label => label.trim()).filter(label => label !== ""))];
+  if (categories.length > MAX_FILTER_CATEGORIES) throw new ApiError(400, `At most ${MAX_FILTER_CATEGORIES} categories can be combined`);
+  if (categories.some(label => label.length > MAX_CATEGORY_LENGTH)) throw new ApiError(400, "A category is too long");
+  if (categories.length > 0) filter.categories = categories;
+  return filter;
+}
+
+/**
+ * The SQL for a whole filter: the date range (see dateBoundsSql) and one condition per category, each an EXISTS over the
+ * message's own label list (a small JSON array in `taxonomy_list`). The conditions only look at the row being considered, so
+ * the list is still walked in the date index's order and stops as soon as the page is full; a message with no labels, or
+ * with a list that isn't valid JSON, simply doesn't match. `columns` name the (qualified) date and taxonomy columns.
+ */
+export function listFilterSql(
+  filter: ListFilter | undefined,
+  columns: { date?: string; taxonomy?: string } = {}
+): { sql: string; params: string[] } {
+  const dates = dateBoundsSql(filter, columns.date ?? "date");
+  const taxonomy = columns.taxonomy ?? "taxonomy_list";
+  let sql = dates.sql;
+  const params = [...dates.params];
+  for (const label of filter?.categories ?? []) {
+    sql += ` AND CASE WHEN json_valid(${taxonomy}) THEN EXISTS (SELECT 1 FROM json_each(${taxonomy}) WHERE value = ?) ELSE 0 END`;
+    params.push(label);
+  }
+  return { sql, params };
+}

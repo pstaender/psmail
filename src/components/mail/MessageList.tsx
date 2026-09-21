@@ -77,7 +77,7 @@ export function MessageList({
   }
 
   if (emails.length === 0) {
-    return <EmptyState title="No messages" description={filtered ? "Nothing in the chosen dates." : "This folder is empty."} />;
+    return <EmptyState title="No messages" description={filtered ? "Nothing matches the filter." : "This folder is empty."} />;
   }
 
   return (

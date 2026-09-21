@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { recordContacts } from "./contacts";
 import { NotFoundError, type AttachmentRecord, type EmailAddress, type EmailRecord } from "../types";
-import { dateBoundsSql, type DateBounds } from "./dateBounds";
+import { listFilterSql, type ListFilter } from "./dateBounds";
 
 type SqlBindings = (string | number | null)[];
 
@@ -208,7 +208,7 @@ function recordContactsFor(db: Database, accountId: number, email: EmailRecord, 
   recordContacts(db, accountId, own, email, outgoing);
 }
 
-export interface ListEmailsOptions extends DateBounds {
+export interface ListEmailsOptions extends ListFilter {
   folder?: string;
   limit?: number;
   offset?: number;
@@ -247,7 +247,7 @@ export function listEmails(db: Database, accountId: number, options: ListEmailsO
 
   // A date window is plain range conditions after the folder, so the (account, folder, date, id) index still serves the
   // list in order: the rows come straight off a range of it, without reading the rest of the folder or sorting.
-  const window = dateBoundsSql(options);
+  const window = listFilterSql(options);
   const rows = options.folder
     ? db
         .query<EmailRow, (string | number)[]>(
@@ -464,6 +464,26 @@ export function taxonomyListsFor(db: Database, ids: number[]): Map<number, strin
     }
   }
   return found;
+}
+
+/**
+ * Every category (AI taxonomy label) the user's messages have, with how many messages carry it — most used first, then by name.
+ * Only messages that have labels are read, and only that one small column.
+ */
+export function listCategories(db: Database, userId: number): { label: string; count: number }[] {
+  const counts = new Map<string, number>();
+  const rows = db
+    .query<{ taxonomy_list: string }, [number]>(
+      `SELECT emails.taxonomy_list FROM emails JOIN accounts ON accounts.id = emails.account_id
+       WHERE accounts.user_id = ? AND emails.taxonomy_list IS NOT NULL AND emails.taxonomy_list != '[]'`
+    )
+    .all(userId);
+  for (const row of rows) {
+    for (const label of new Set(parseStringList(row.taxonomy_list))) {
+      if (typeof label === "string" && label.trim() !== "") counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+  }
+  return [...counts].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 }
 
 /** Of the given message ids, those that have at least one real (non-inline) attachment — for lists that don't load attachments themselves. */

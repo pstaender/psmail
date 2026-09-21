@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, LogOut, Mail, MoreHorizontal, PanelLeftOpen, PenSquare, Search, Settings, X } from "lucide-react";
+import { CalendarDays, LogOut, Mail, MoreHorizontal, PanelLeftOpen, PenSquare, Search, Settings, Tags, X } from "lucide-react";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { DateFilterDialog } from "@/components/mail/DateFilterDialog";
 import { boundsOf, describeFilter, type DateFilter } from "@/lib/dateFilter";
+import { CategoryFilterDialog } from "@/components/mail/CategoryFilterDialog";
+import { Badge } from "@/components/ui/badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -195,9 +197,17 @@ export function AppShell() {
   // Show only the messages of a day or period. It belongs to the list it was set on: another folder or mailbox starts without.
   const [dateFilter, setDateFilter] = useState<DateFilter | null>(null);
   const [dateFilterOpen, setDateFilterOpen] = useState(false);
+  // …and likewise the categories a message must have (all of them).
+  const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
+  const [categoryFilterOpen, setCategoryFilterOpen] = useState(false);
   const dateBounds = useMemo(() => boundsOf(dateFilter), [dateFilter]);
+  const listFilter = useMemo(() => ({ ...dateBounds, categories: categoryFilter }), [dateBounds, categoryFilter]);
+  const filtering = dateFilter !== null || categoryFilter.length > 0;
   const listKey = unifiedView ? `unified:${unifiedView}` : `${selectedAccountEmail}/${selectedFolder}`;
-  useEffect(() => setDateFilter(null), [listKey]);
+  useEffect(() => {
+    setDateFilter(null);
+    setCategoryFilter([]);
+  }, [listKey]);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const {
     results: searchResults,
@@ -208,7 +218,7 @@ export function AppShell() {
     refresh: refreshSearchResults,
     patchLocal: patchSearchResult,
     removeLocal: removeSearchResult,
-  } = useSearchResults(searchQuery, unifiedView, dateBounds, fullTextSearch);
+  } = useSearchResults(searchQuery, unifiedView, listFilter, fullTextSearch);
   const isSearching = searchQuery.trim().length > 0;
   // The cross-account result list (search hits or a unified mailbox) replaces the folder's message list.
   const showingResults = isSearching || unifiedView !== null;
@@ -287,7 +297,7 @@ export function AppShell() {
   const { emails, loading: emailsLoading, loadingMore, hasMore, loadMore, refresh: refreshEmails, patchLocal, removeLocal } = useEmails(
     selectedAccountEmail,
     selectedFolder,
-    dateBounds
+    listFilter
   );
   const { folders, loading: foldersLoading, error: foldersError, warning: foldersWarning, refresh: refreshFolders, patchCounts: patchRawFolderCounts } =
     useFolders(messageAccountEmail);
@@ -1095,7 +1105,11 @@ export function AppShell() {
                     <DropdownMenuItem onSelect={() => setDateFilterOpen(true)}>
                       <CalendarDays className="size-4" /> Filter by date…
                     </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setCategoryFilterOpen(true)}>
+                      <Tags className="size-4" /> Filter by category…
+                    </DropdownMenuItem>
                     {dateFilter && <DropdownMenuItem onSelect={() => setDateFilter(null)}>Clear date filter</DropdownMenuItem>}
+                    {categoryFilter.length > 0 && <DropdownMenuItem onSelect={() => setCategoryFilter([])}>Clear category filter</DropdownMenuItem>}
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <Button
@@ -1120,6 +1134,30 @@ export function AppShell() {
               </button>
             </div>
           )}
+          {categoryFilter.length > 0 && selectionItems.length === 0 && (
+            <div className="flex items-start gap-2 border-b bg-muted/30 px-3 py-1 text-xs text-muted-foreground" aria-label="Category filter">
+              <button className="mt-0.5 shrink-0 hover:text-foreground" title="Change the category filter" aria-label="Change the category filter" onClick={() => setCategoryFilterOpen(true)}>
+                <Tags className="size-3.5" />
+              </button>
+              <ul className="flex min-w-0 flex-1 flex-wrap gap-1">
+                {categoryFilter.map(label => (
+                  <li key={label}>
+                    <Badge variant="secondary" className="h-5 gap-1 pr-1 text-[11px] font-normal">
+                      {label}
+                      <button
+                        className="rounded-sm p-0.5 hover:bg-background/60"
+                        title={`Remove ${label} from the filter`}
+                        aria-label={`Remove ${label} from the filter`}
+                        onClick={() => setCategoryFilter(prev => prev.filter(l => l !== label))}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="min-h-0 flex-1">
             {showingResults ? (
               <SearchResultList
@@ -1134,7 +1172,7 @@ export function AppShell() {
                 selectedIds={selectedIds}
                 onSelect={selectResult}
                 onOpen={() => setListCollapsed(true)}
-                filtered={dateFilter !== null}
+                filtered={filtering}
               />
             ) : messageAccountEmail && selectedFolder ? (
               <MessageList
@@ -1150,7 +1188,7 @@ export function AppShell() {
                 onToggleFlag={toggleFlag}
                 onEditDraft={email => openCompose(editDraft(email))}
                 onOpen={() => setListCollapsed(true)}
-                filtered={dateFilter !== null}
+                filtered={filtering}
               />
             ) : (
               <EmptyState title="No account selected" description="Add or select an account to see messages." />
@@ -1191,6 +1229,7 @@ export function AppShell() {
       </div>
 
       <DateFilterDialog open={dateFilterOpen} onOpenChange={setDateFilterOpen} value={dateFilter} onApply={setDateFilter} />
+      <CategoryFilterDialog open={categoryFilterOpen} onOpenChange={setCategoryFilterOpen} value={categoryFilter} onApply={setCategoryFilter} />
 
       {messageAccountEmail && (
         <ComposeDialog

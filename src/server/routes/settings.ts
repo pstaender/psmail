@@ -3,7 +3,7 @@ import { json, readJsonBody, requireAuth, withErrorHandling } from "../http";
 import { getUserSettings, updateUserSettings } from "../models/userSettings";
 import { countUnifiedInboxUnread, isUnifiedKind, listNewInboxMail, listUnifiedEmails } from "../models/unified";
 import { ApiError } from "../types";
-import { readDateBounds } from "../models/dateBounds";
+import { readListFilter } from "../models/dateBounds";
 
 export function settingsRoutes(db: Database) {
   return {
@@ -47,7 +47,7 @@ export function settingsRoutes(db: Database) {
         const limit = Number(url.searchParams.get("limit") ?? 50);
         const offset = Number(url.searchParams.get("offset") ?? 0);
         const includeFolders = getUserSettings(db, session.userId).combinedInboxIncludesFolders === true;
-        return json(listUnifiedEmails(db, session.userId, kind, { limit, offset, includeFolders, ...readDateBounds(url.searchParams) }));
+        return json(listUnifiedEmails(db, session.userId, kind, { limit, offset, includeFolders, ...readListFilter(url.searchParams) }));
       }),
     },
   };

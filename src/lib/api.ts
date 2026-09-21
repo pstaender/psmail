@@ -160,8 +160,9 @@ export const api = {
       body: { name, parent: parent ?? undefined },
     }),
 
-  listEmails: (token: string, accountEmail: string, folder: string, opts: { limit?: number; offset?: number; after?: string; before?: string } = {}) => {
+  listEmails: (token: string, accountEmail: string, folder: string, opts: { limit?: number; offset?: number; after?: string; before?: string; categories?: string[] } = {}) => {
     const params = new URLSearchParams({ folder });
+    for (const category of opts.categories ?? []) params.append("category", category);
     if (opts.after) params.set("after", opts.after);
     if (opts.before) params.set("before", opts.before);
     if (opts.limit) params.set("limit", String(opts.limit));
@@ -293,8 +294,9 @@ export const api = {
   /** Unread messages across all accounts' Inboxes — the combined Inbox's badge. */
   unifiedInboxUnread: (token: string) => request<{ count: number }>("GET", "/api/unified/inbox/unread", { token }),
   /** Newest-first messages across all accounts' Inboxes (`inbox`) or Sent folders (`sent`). */
-  listUnified: (token: string, kind: UnifiedKind, opts: { limit?: number; offset?: number; after?: string; before?: string } = {}) => {
+  listUnified: (token: string, kind: UnifiedKind, opts: { limit?: number; offset?: number; after?: string; before?: string; categories?: string[] } = {}) => {
     const params = new URLSearchParams();
+    for (const category of opts.categories ?? []) params.append("category", category);
     if (opts.after) params.set("after", opts.after);
     if (opts.before) params.set("before", opts.before);
     if (opts.limit) params.set("limit", String(opts.limit));
@@ -302,8 +304,11 @@ export const api = {
     return request<SearchResult[]>("GET", `/api/unified/${kind}?${params}`, { token });
   },
   /** Searches across every account the user owns. See src/server/models/search.ts for query syntax. */
-  search: (token: string, query: string, opts: { limit?: number; offset?: number; after?: string; before?: string; fullText?: boolean } = {}) => {
+  /** The categories (AI labels) the user's messages have, most used first, with how many messages carry each. */
+  listCategories: (token: string) => request<{ label: string; count: number }[]>("GET", "/api/categories", { token }),
+  search: (token: string, query: string, opts: { limit?: number; offset?: number; after?: string; before?: string; categories?: string[]; fullText?: boolean } = {}) => {
     const params = new URLSearchParams({ q: query });
+    for (const category of opts.categories ?? []) params.append("category", category);
     if (opts.fullText) params.set("fulltext", "1");
     if (opts.after) params.set("after", opts.after);
     if (opts.before) params.set("before", opts.before);

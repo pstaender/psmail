@@ -74,7 +74,7 @@ export function SearchResultList({
   }
 
   if (results.length === 0) {
-    return <EmptyState title={filtered ? "No messages" : "No results"} description={filtered ? "Nothing in the chosen dates." : "Try a different search term."} />;
+    return <EmptyState title={filtered ? "No messages" : "No results"} description={filtered ? "Nothing matches the filter." : "Try a different search term."} />;
   }
 
   return (
