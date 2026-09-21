@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { ApiClient, CliApiError, type ClassifyEvent } from "./client";
+import { ApiClient, CliApiError, type ClassifyEvent, type SummarizeEvent } from "./client";
 import { parseFlags, promptHidden } from "./args";
 import { renderProgress } from "./progress";
 
@@ -191,6 +191,86 @@ async function classifyCommand(client: ApiClient, accounts: string[] | undefined
   await client.classifyImboxStream({ accounts, force, verbose }, onEvent);
 }
 
+/**
+ * `psmail summarize [account-email ...] [--folder <name>] [--force] [--verbose]` — summarizes stored mail like the Summarize button
+ * (plus categories and dates when those skills exist): every account and every folder by default, only messages without a summary
+ * unless --force. One AI call can take a while, so each message is announced before it is sent.
+ */
+async function cmdSummarize(argv: string[]) {
+  const { positionals, flags } = parseFlags(argv);
+  // `--force a@b.example` would read the address as the flag's value; these flags take none.
+  for (const name of ["force", "verbose"]) if (typeof flags[name] === "string") positionals.push(flags[name] as string);
+  const force = flags.force !== undefined && flags.force !== false;
+  const verbose = flags.verbose !== undefined && flags.verbose !== false;
+  if (flags.folder === true) throw new Error("--folder needs a folder name, e.g. --folder INBOX");
+  const folder = typeof flags.folder === "string" ? flags.folder : undefined;
+
+  const url = typeof flags.url === "string" ? flags.url : undefined;
+  const client = new ApiClient(url);
+  const username = typeof flags.user === "string" ? flags.user : "default";
+  await loginFromFlags(client, flags);
+  console.log(`Signed in to ${url ?? process.env.PSMAIL_API_URL ?? "http://localhost:3001"} as "${username}".`);
+
+  const short = (text: string | null, length: number) => (text ?? "(no subject)").replace(/\s+/g, " ").slice(0, length);
+  const tty = Boolean(process.stdout.isTTY);
+  const clearLine = () => tty && process.stdout.write("\r\x1b[K");
+
+  const onEvent = (event: SummarizeEvent) => {
+    switch (event.type) {
+      case "start":
+        console.log(
+          `Summarizing ${event.accounts.length} account(s): ${event.accounts.join(", ") || "(none)"} — ${event.folder ? `folder ${event.folder}` : "all folders"}` +
+            (event.force ? ", all messages, again (--force)" : ", only messages without a summary (--force for all)")
+        );
+        break;
+      case "account":
+        console.log(
+          event.total === 0
+            ? `\n${event.account}: nothing to summarize${event.folders.length === 0 && folder ? ` (no folder "${folder}" here)` : ""}`
+            : `\n${event.account}: ${event.total} message(s) to summarize in ${event.folders.join(", ")}`
+        );
+        break;
+      case "working":
+        // The AI call can take long: say which message it is on before waiting for it.
+        if (tty) process.stdout.write(`\r\x1b[K  [${event.done}/${event.total}] ${event.folder}: #${event.id} ${short(event.subject, 50)} — waiting for the AI …`);
+        break;
+      case "message": {
+        clearLine();
+        const label = `#${event.id} ${event.folder}: ${short(event.subject, 60)} — ${event.from}`;
+        if (event.ok) {
+          const extras = [event.categories.length > 0 ? event.categories.join(", ") : "", event.dates > 0 ? `${event.dates} date(s)` : ""].filter(Boolean).join("; ");
+          console.log(`  summarized  ${label} (${event.seconds.toFixed(1)} s${extras ? `; ${extras}` : ""})`);
+          for (const warning of event.warnings) console.log(`              warning: ${warning}`);
+          if (event.summary) console.log(event.summary.split("\n").map(line => `              ${line}`).join("\n"));
+        } else if (event.skipped) {
+          console.log(`  skipped     ${label} (${event.skipped})`);
+        } else {
+          console.log(`  FAILED      ${label}\n              ${event.error}`);
+        }
+        break;
+      }
+      case "progress":
+        if (!tty && event.done % 10 === 0) console.log(`  ${event.done}/${event.total} (${event.summarized} summarized, ${event.failed} failed)`);
+        break;
+      case "account-done":
+        console.log(
+          `${event.account}: ${event.skipped ? `${event.skipped} — ` : ""}${event.examined} looked at, ${event.summarized} summarized${event.failed > 0 ? `, ${event.failed} failed` : ""}`
+        );
+        break;
+      case "done": {
+        const summarized = event.results.reduce((n, r) => n + r.summarized, 0);
+        const failed = event.results.reduce((n, r) => n + r.failed, 0);
+        console.log(`\nFinished in ${event.seconds.toFixed(1)} s: ${summarized} message(s) summarized${failed > 0 ? `, ${failed} failed` : ""}.`);
+        if (summarized === 0 && failed === 0 && !force) console.log("Nothing to do — every message has a summary already (use --force to summarize them again).");
+        if (failed > 0) process.exitCode = 1;
+        break;
+      }
+    }
+  };
+
+  await client.summarizeStream({ accounts: positionals.length > 0 ? positionals : undefined, folder, force, verbose }, onEvent);
+}
+
 function printUsage() {
   console.log(`P.S.Mail CLI
 
@@ -206,6 +286,11 @@ Usage:
                classifies stored mail as important / not important (default: every account; --force redoes messages that have a verdict;
                --verbose prints every message with its verdict and main reasons)
   psmail imbox explain <account-email> <message-id> [--user <username>] [--password <pw>] [--url <api-url>]
+  psmail summarize [account-email ...] [--folder <name>] [--force] [--verbose] [--user <username>] [--password <pw>] [--url <api-url>]
+               summarizes stored mail with your AI Summarize skill, like the Summarize button (also categories and dates when those skills
+               exist): default every account and every folder, newest first, only messages without a summary; --folder limits it to one
+               folder (e.g. INBOX), --force summarizes messages again, --verbose prints each summary. One AI call can take a while: the
+               message it is waiting for is shown; a message that fails is reported and skipped, five failures in a row stop the account.
 
 Env vars: PSMAIL_API_URL, PSMAIL_PASSWORD, PSMAIL_IMAP_PASSWORD, PSMAIL_SMTP_PASSWORD
 `);
@@ -221,6 +306,8 @@ async function main() {
       await cmdAccountAdd(rest);
     } else if (group === "imbox") {
       await cmdImbox(subcommand, rest);
+    } else if (group === "summarize") {
+      await cmdSummarize([subcommand, ...rest].filter((x): x is string => x !== undefined));
     } else if (group === "sync") {
       await cmdSync([subcommand, ...rest].filter((x): x is string => x !== undefined));
     } else {

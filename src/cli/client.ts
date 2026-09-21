@@ -20,6 +20,22 @@ export type ClassifyEvent =
   | { type: "done"; results: AccountResult[]; seconds: number }
   | { type: "error"; message: string };
 
+type SummarizeResult = { account: string; examined: number; summarized: number; failed: number; skipped?: string };
+
+/** What the server says while it summarizes (POST /api/ai/summarize with stream). */
+export type SummarizeEvent =
+  | { type: "start"; accounts: string[]; folder: string | null; force: boolean }
+  | { type: "account"; account: string; total: number; folders: string[] }
+  | { type: "working"; account: string; id: number; folder: string; subject: string | null; from: string; done: number; total: number }
+  | ({ type: "message"; account: string; id: number; folder: string; subject: string | null; from: string } & (
+      | { ok: true; seconds: number; categories: string[]; dates: number; warnings: string[]; summary?: string }
+      | { ok: false; skipped?: string; error?: string }
+    ))
+  | { type: "progress"; account: string; done: number; total: number; summarized: number; failed: number }
+  | ({ type: "account-done" } & SummarizeResult)
+  | { type: "done"; results: SummarizeResult[]; seconds: number }
+  | { type: "error"; message: string };
+
 export class ApiClient {
   private baseUrl: string;
   private token: string | null = null;
@@ -97,9 +113,22 @@ export class ApiClient {
     options: { accounts?: string[]; force: boolean; verbose: boolean },
     onEvent: (event: ClassifyEvent) => void
   ): Promise<ClassifyEvent & { type: "done" }> {
+    return this.streamEvents<ClassifyEvent>("/api/imbox/classify", options, onEvent);
+  }
+
+  /** Summarizes stored mail on the server (like the Summarize button), reporting each message as it goes — see SummarizeEvent. */
+  async summarizeStream(
+    options: { accounts?: string[]; folder?: string; force: boolean; verbose: boolean },
+    onEvent: (event: SummarizeEvent) => void
+  ): Promise<SummarizeEvent & { type: "done" }> {
+    return this.streamEvents<SummarizeEvent>("/api/ai/summarize", options, onEvent);
+  }
+
+  /** POSTs with `stream: true` and hands every newline-separated JSON event to `onEvent`; resolves with the final `done`. */
+  private async streamEvents<E extends { type: string }>(path: string, options: object, onEvent: (event: E) => void): Promise<E & { type: "done" }> {
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (this.token) headers.authorization = `Bearer ${this.token}`;
-    const res = await fetch(`${this.baseUrl}/api/imbox/classify`, {
+    const res = await fetch(`${this.baseUrl}${path}`, {
       method: "POST",
       headers,
       body: JSON.stringify({ ...options, stream: true }),
@@ -111,21 +140,21 @@ export class ApiClient {
 
     // A server that predates the streaming answers with plain JSON: treat that as one `done`.
     if (!(res.headers.get("content-type") ?? "").includes("ndjson")) {
-      const { results } = (await res.json()) as { results: ClassifyEvent extends { results: infer R } ? R : never };
-      const done = { type: "done" as const, results, seconds: 0 };
+      const { results } = (await res.json()) as { results: unknown };
+      const done = { type: "done" as const, results, seconds: 0 } as unknown as E & { type: "done" };
       onEvent(done);
       return done;
     }
 
-    let final: (ClassifyEvent & { type: "done" }) | null = null;
+    let final: (E & { type: "done" }) | null = null;
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
     const handle = (line: string) => {
       if (!line.trim()) return;
-      const event = JSON.parse(line) as ClassifyEvent;
+      const event = JSON.parse(line) as E & { message?: string };
       if (event.type === "error") throw new Error(`The server stopped: ${event.message}`);
-      if (event.type === "done") final = event;
+      if (event.type === "done") final = event as E & { type: "done" };
       onEvent(event);
     };
     for (;;) {

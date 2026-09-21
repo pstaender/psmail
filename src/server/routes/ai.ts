@@ -18,7 +18,7 @@ import {
   type AiSkillInput,
   type AiSkillRecord,
 } from "../models/ai";
-import { assertAccountEnabled } from "../models/accounts";
+import { assertAccountEnabled, listAccounts } from "../models/accounts";
 import { getEmail, getEmailRow, setEmailAiFields } from "../models/emails";
 import { getUserSettings } from "../models/userSettings";
 import { complete, emailTextForAi, listModels, parseTaxonomy, runSkill } from "../services/ai";
@@ -86,7 +86,163 @@ export function aiRoutes(db: Database) {
     return setEmailAiFields(db, emailId, { calendarEvents: icsFromAnswer(answer, emailId) });
   }
 
+  /** Summarizes a message and stores the summary; the taxonomy and the events too, when those skills exist (their failure keeps the summary). */
+  async function summarizeMessage(userId: number, encryptionKey: Buffer, email: ReturnType<typeof getEmail>, skillId?: unknown) {
+    const skill = requireSkill(userId, "summarize", skillId);
+    const api = getAiApiConfig(db, userId, skill.aiApiId, encryptionKey);
+    const summary = await runCounted(skill, api, emailTextForAi(email), DEFAULT_LANGUAGE);
+    let updated = setEmailAiFields(db, email.id, { aiSummary: summary });
+
+    let taxonomyError: string | undefined;
+    if (findSkillForCategory(db, userId, "categorize")) {
+      try {
+        updated = await categorizeMessage(userId, encryptionKey, email.id);
+      } catch (error) {
+        taxonomyError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    let eventsError: string | undefined;
+    if (findSkillForCategory(db, userId, "events")) {
+      try {
+        updated = await findEvents(userId, encryptionKey, email.id);
+      } catch (error) {
+        eventsError = error instanceof Error ? error.message : String(error);
+      }
+    }
+    return { email: updated, taxonomyError, eventsError };
+  }
+
+  /**
+   * Summarizes the stored mail of the chosen accounts one message at a time (newest first, so an interrupted run has done the most
+   * useful part), reporting through `send`: `start`, `account`, `working` (before each AI call — they can take long), `message` (after
+   * it; with `verbose` incl. the summary), `progress`, `account-done`, `done`. Without `force` only messages without a summary; `folder`
+   * limits it to one folder. A message that fails is reported and skipped; five failures in a row (a wrong key, a server that is
+   * down) stop that account instead of grinding through the rest.
+   */
+  async function summarizeBatch(
+    userId: number,
+    encryptionKey: Buffer,
+    accounts: ReturnType<typeof listAccounts>,
+    options: { folder?: string; force: boolean; verbose: boolean },
+    send: (event: Record<string, unknown>) => void
+  ) {
+    const started = Date.now();
+    const results: Record<string, unknown>[] = [];
+    send({ type: "start", accounts: accounts.map(a => a.email), folder: options.folder ?? null, force: options.force });
+
+    for (const account of accounts) {
+      if (account.disabled) {
+        const skipped = { account: account.email, examined: 0, summarized: 0, failed: 0, skipped: "the account is disabled" };
+        results.push(skipped);
+        send({ type: "account-done", ...skipped });
+        continue;
+      }
+      const stored = db.query<{ folder: string }, [number]>("SELECT DISTINCT folder FROM emails WHERE account_id = ?").all(account.id).map(r => r.folder);
+      const folders = options.folder ? stored.filter(f => f.toLowerCase() === options.folder!.toLowerCase()) : stored;
+      const ids =
+        folders.length === 0
+          ? []
+          : db
+              .query<{ id: number }, (string | number)[]>(
+                `SELECT id FROM emails WHERE account_id = ? AND folder IN (${folders.map(() => "?").join(",")})${
+                  options.force ? "" : " AND (ai_summary IS NULL OR ai_summary = '')"
+                } ORDER BY date DESC, id DESC`
+              )
+              .all(account.id, ...folders)
+              .map(r => r.id);
+      send({ type: "account", account: account.email, total: ids.length, folders: folders.sort() });
+
+      let summarized = 0;
+      let failed = 0;
+      let inARow = 0;
+      let stopped: string | undefined;
+      let done = 0;
+      for (const id of ids) {
+        const email = getEmail(db, id);
+        const subject = email.subject;
+        const from = email.from[0]?.address ?? "unknown";
+        done++;
+        if (!email.plainText?.trim() && !email.htmlText?.trim()) {
+          send({ type: "message", account: account.email, id, folder: email.folder, subject, from, ok: false, skipped: "no text" });
+          continue;
+        }
+        send({ type: "working", account: account.email, id, folder: email.folder, subject, from, done, total: ids.length });
+        const began = Date.now();
+        try {
+          const result = await summarizeMessage(userId, encryptionKey, email);
+          summarized++;
+          inARow = 0;
+          send({
+            type: "message",
+            account: account.email,
+            id,
+            folder: email.folder,
+            subject,
+            from,
+            ok: true,
+            seconds: (Date.now() - began) / 1000,
+            categories: result.email.taxonomyList ?? [],
+            dates: result.email.calendarEvents?.length ?? 0,
+            warnings: [result.taxonomyError, result.eventsError].filter(Boolean),
+            ...(options.verbose ? { summary: result.email.aiSummary } : {}),
+          });
+        } catch (error) {
+          failed++;
+          inARow++;
+          send({ type: "message", account: account.email, id, folder: email.folder, subject, from, ok: false, error: error instanceof Error ? error.message : String(error) });
+          if (inARow >= 5) {
+            stopped = `stopped after ${inARow} failures in a row`;
+            break;
+          }
+        }
+        send({ type: "progress", account: account.email, done, total: ids.length, summarized, failed });
+      }
+      const result = { account: account.email, examined: done, summarized, failed, ...(stopped ? { skipped: stopped } : {}) };
+      results.push(result);
+      send({ type: "account-done", ...result });
+    }
+    send({ type: "done", results, seconds: (Date.now() - started) / 1000 });
+    return results;
+  }
+
   return {
+    /**
+     * Summarizes stored mail like the Summarize button, for many messages (the CLI uses this). Body: `accounts?` (addresses; default
+     * every account of the user), `folder?` (default all folders), `force?` (also messages that have a summary), `verbose?`, `stream?`
+     * (newline-separated JSON events while it works — one AI call can take minutes).
+     */
+    "/api/ai/summarize": {
+      POST: withErrorHandling(async req => {
+        const { session, encryptionKey } = requireAuth(req, db);
+        const body = await optionalBody(req) as { accounts?: unknown; folder?: unknown; force?: unknown; verbose?: unknown; stream?: unknown };
+        if (body.accounts !== undefined && (!Array.isArray(body.accounts) || body.accounts.some(a => typeof a !== "string"))) throw new ApiError(400, "accounts must be a list of account addresses");
+        if (body.folder !== undefined && (typeof body.folder !== "string" || !body.folder.trim())) throw new ApiError(400, "folder must be a folder name");
+        requireSkill(session.userId, "summarize"); // before anything starts: without one there is nothing to do
+
+        const all = listAccounts(db, session.userId);
+        const wanted = body.accounts as string[] | undefined;
+        for (const address of wanted ?? []) if (!all.some(account => account.email === address)) throw new NotFoundError(`Account "${address}" not found`);
+        const chosen = all.filter(account => !wanted || wanted.includes(account.email));
+        const options = { folder: body.folder as string | undefined, force: body.force === true, verbose: body.verbose === true };
+
+        if (body.stream !== true) return json({ results: await summarizeBatch(session.userId, encryptionKey, chosen, options, () => {}) });
+
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            try {
+              await summarizeBatch(session.userId, encryptionKey, chosen, options, event => controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`)));
+            } catch (error) {
+              controller.enqueue(encoder.encode(`${JSON.stringify({ type: "error", message: error instanceof Error ? error.message : String(error) })}\n`));
+            } finally {
+              controller.close();
+            }
+          },
+        });
+        return new Response(stream, { headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" } });
+      }),
+    },
     "/api/ai/apis": {
       GET: withErrorHandling(async req => json(listAiApis(db, requireAuth(req, db).session.userId))),
       POST: withErrorHandling(async req => {
@@ -169,29 +325,7 @@ export function aiRoutes(db: Database) {
         const email = ownedEmail(req, session.userId);
         const body = await optionalBody(req);
 
-        const skill = requireSkill(session.userId, "summarize", body.skillId);
-        const api = getAiApiConfig(db, session.userId, skill.aiApiId, encryptionKey);
-        const summary = await runCounted(skill, api, emailTextForAi(email), DEFAULT_LANGUAGE);
-        let updated = setEmailAiFields(db, email.id, { aiSummary: summary });
-
-        let taxonomyError: string | undefined;
-        if (findSkillForCategory(db, session.userId, "categorize")) {
-          try {
-            updated = await categorizeMessage(session.userId, encryptionKey, email.id);
-          } catch (error) {
-            taxonomyError = error instanceof Error ? error.message : String(error);
-          }
-        }
-
-        let eventsError: string | undefined;
-        if (findSkillForCategory(db, session.userId, "events")) {
-          try {
-            updated = await findEvents(session.userId, encryptionKey, email.id);
-          } catch (error) {
-            eventsError = error instanceof Error ? error.message : String(error);
-          }
-        }
-        return json({ email: updated, taxonomyError, eventsError });
+        return json(await summarizeMessage(session.userId, encryptionKey, email, body.skillId));
       }),
     },
     "/api/accounts/:email/emails/:emailId/ai/categorize": {

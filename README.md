@@ -199,9 +199,14 @@ bun run cli sync me@example.com --user <username> [--folder <name>]   # default:
 # Imbox: classify the mail that is already stored (new mail is classified as it is synced)
 bun run cli imbox classify [account@example.com ...] [--force] [--verbose] --user <username>   # default: every account
 bun run cli imbox explain me@example.com <message-id> --user <username>            # score and reasons for one message
+
+# AI: summarize stored mail like the Summarize button
+bun run cli summarize [account@example.com ...] [--folder <name>] [--force] [--verbose] --user <username>   # default: every account, every folder
 ```
 
 `imbox classify` says what it does: who it signed in as, which accounts, how many messages each has to do (and in which folders), a progress bar (a line per 2 000 messages when the output is not a terminal), the result per account and the total; **`--verbose`** also prints every message as it is classified — verdict, score, `#id`, subject, sender and its three strongest reasons. It only looks at messages that have no verdict yet; `--force` classifies them all again (which also replaces verdicts set by hand). Disabled accounts are skipped. It prints a line per account and a total; `imbox explain` lists every reason with its points, which is the way to see why a message landed where it did.
+
+`summarize` runs your **Summarize** skill (Settings → AI) over the stored mail, exactly like the button — the summary is stored on the message, and with a Categorize / Find dates and events skill their results too. Default: every account, every folder, newest first, only messages that have no summary yet; **`--folder INBOX`** limits it to one folder (case doesn't matter), an account address limits it to that account, **`--force`** summarizes messages again (replacing their summaries), **`--verbose`** prints each summary. Because one AI call can take a long while, it says which message it is waiting for ("[3/120] INBOX: #481 Quarterly report — waiting for the AI …"), then how long it took and the categories/dates found. A message that fails is reported and skipped; five failures in a row (a wrong key, a server that is down) stop that account; messages without any text are skipped; disabled accounts are left alone. The exit code is 1 when something failed. The server side is `POST /api/ai/summarize` `{ accounts?, folder?, force?, verbose?, stream? }` (with `stream`, newline-separated JSON events: `start`, `account`, `working`, `message`, `progress`, `account-done`, `done`).
 
 ## Testing the webclient with real sample mail
 
