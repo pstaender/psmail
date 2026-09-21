@@ -55,15 +55,24 @@ describe("conversations over HTTP", () => {
 
   test("the folder list marks the answered message and its answer, and leaves the quiet one alone", async () => {
     const inbox = (await call("GET", "/api/accounts/me%40example.com/emails?folder=INBOX", { token })).json;
-    expect(inbox.find((e: { id: number }) => e.id === questionId).conversation).toEqual({ replied: true, related: 1 });
+    expect(inbox.find((e: { id: number }) => e.id === questionId).conversation).toEqual({ replied: true, forwarded: false, related: 1 });
     expect(inbox.find((e: { id: number }) => e.id === aloneId)).not.toHaveProperty("conversation");
     const sent = (await call("GET", "/api/accounts/me%40example.com/emails?folder=Sent", { token })).json;
-    expect(sent[0].conversation).toEqual({ replied: false, related: 1 });
+    expect(sent[0].conversation).toEqual({ replied: false, forwarded: false, related: 1 });
+  });
+
+  test("PATCH isForwarded marks the message: the lists and the conversation say so, and it can't be taken back", async () => {
+    const patch = (isForwarded: boolean) => call("PATCH", `/api/accounts/me%40example.com/emails/${aloneId}`, { token, body: { isForwarded } });
+    expect((await patch(true)).json.isForwarded).toBe(true);
+    const inbox = (await call("GET", "/api/accounts/me%40example.com/emails?folder=INBOX", { token })).json;
+    expect(inbox.find((e: { id: number }) => e.id === aloneId).conversation).toEqual({ replied: false, forwarded: true, related: 0 });
+    expect((await call("GET", conv(aloneId), { token })).json.messages[0].forwarded).toBe(true);
+    expect((await patch(false)).json.isForwarded).toBe(true);
   });
 
   test("the combined lists and the search carry it too", async () => {
     const unified = (await call("GET", "/api/unified/inbox", { token })).json;
-    expect(unified.find((r: { id: number }) => r.id === questionId).conversation).toEqual({ replied: true, related: 1 });
+    expect(unified.find((r: { id: number }) => r.id === questionId).conversation).toEqual({ replied: true, forwarded: false, related: 1 });
     const found = (await call("GET", "/api/search?q=Frage", { token })).json;
     expect(found.find((r: { id: number }) => r.id === questionId).conversation.replied).toBe(true);
   });

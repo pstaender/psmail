@@ -112,8 +112,10 @@ async function reconcileExisting(
       deleteEmail(db, ref.id);
       continue;
     }
-    if (state.seen !== ref.isRead || state.flagged !== ref.isFlagged) {
-      updateEmail(db, ref.id, { isRead: state.seen, isFlagged: state.flagged });
+    // "Forwarded" is only ever turned on (another client set $Forwarded); a server that doesn't keep the keyword doesn't undo it.
+    const newlyForwarded = state.forwarded && !ref.isForwarded;
+    if (state.seen !== ref.isRead || state.flagged !== ref.isFlagged || newlyForwarded) {
+      updateEmail(db, ref.id, { isRead: state.seen, isFlagged: state.flagged, ...(newlyForwarded ? { isForwarded: true } : {}) });
     }
   }
 }

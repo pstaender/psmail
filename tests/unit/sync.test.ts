@@ -7,7 +7,7 @@ import { createUser } from "../../src/server/models/users";
 import { deriveEncryptionKey, generateSalt } from "../../src/server/crypto/secrets";
 import { createAccount, getAccountRow } from "../../src/server/models/accounts";
 import { createDownloadJob, getDownloadJob } from "../../src/server/models/downloads";
-import { findEmailByUid, listEmails } from "../../src/server/models/emails";
+import { findEmailByUid, getEmail, listEmails } from "../../src/server/models/emails";
 import { performDelete } from "../../src/server/routes/emails";
 import { listDeletedUids } from "../../src/server/models/tombstones";
 import { isSyncableFolder, runSync } from "../../src/server/services/sync";
@@ -382,6 +382,26 @@ describe("runSync", () => {
     const first = afterSync.find(e => e.subject === "First")!;
     expect(first.isRead).toBe(false);
     expect(first.isFlagged).toBe(false);
+  });
+
+  test("two-way sync: a message another client marked $Forwarded becomes forwarded here, and stays so", async () => {
+    const { db, user, account } = await setup();
+    const run = async (forwardedUids: number[]) => {
+      const job = createDownloadJob(db, account.id, "INBOX");
+      await runSync({
+        db, account, username: user.username, folder: "INBOX", downloadJobId: job.id,
+        imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+        fetchMessages: fakeFetchMessages,
+        fetchRemoteFlags: async (_creds: unknown, _folder: string, uids: number[]) =>
+          new Map(uids.map(uid => [uid, { seen: false, flagged: false, forwarded: forwardedUids.includes(uid) }] as [number, RemoteFlagState])),
+      });
+      return listEmails(db, account.id, { folder: "INBOX" }).map(e => getEmail(db, e.id));
+    };
+    expect((await run([])).some(e => e.isForwarded)).toBe(false);
+    const forwarded = (await run([2])).filter(e => e.isForwarded);
+    expect(forwarded.map(e => e.subject)).toEqual(["Second"]);
+    // A server that no longer reports the keyword doesn't undo it.
+    expect((await run([])).filter(e => e.isForwarded).map(e => e.subject)).toEqual(["Second"]);
   });
 
   test("two-way sync: removes a message no longer present in the folder on the server", async () => {

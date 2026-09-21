@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, MailCheck, Reply, Sparkles, Star } from "lucide-react";
+import { ChevronDown, Forward, MailCheck, Reply, Sparkles, Star } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { useUiSettings } from "@/contexts/UiSettingsContext";
 import type { ConversationMessage } from "../../server/models/conversations";
 import { formatFullDate } from "@/lib/time";
 import type { EmailAddress, EmailRecord } from "../../server/types";
@@ -48,6 +49,7 @@ export function MessageHeader({
   replyMessage?: ConversationMessage | null;
   onOpenReply?: (message: ConversationMessage) => void;
 }) {
+  const { showConversations } = useUiSettings();
   const [expanded, setExpanded] = useState(false);
   // "Expand all details": Cc/Bcc (and To) unclamped, plus the message id, which is hidden otherwise.
   const [allDetails, setAllDetails] = useState(false);
@@ -91,6 +93,11 @@ export function MessageHeader({
             >
               <Reply className="size-4" />
             </button>
+          )}
+          {showConversations && email.isForwarded && (
+            <span className="mt-0.5 p-0.5 text-muted-foreground/60" title="You forwarded this message">
+              <Forward aria-label="Forwarded" className="size-4" />
+            </span>
           )}
           {email.isFlagged && <Star aria-label="Starred" className="mt-1 size-4 shrink-0 fill-yellow-400 text-yellow-500" />}
         </div>

@@ -3,7 +3,7 @@ import { createTestDb } from "../helpers/db";
 import { createUser } from "../../src/server/models/users";
 import { deriveEncryptionKey, generateSalt } from "../../src/server/crypto/secrets";
 import { createAccount } from "../../src/server/models/accounts";
-import { createEmail, listEmails } from "../../src/server/models/emails";
+import { createEmail, getEmail, listEmails, updateEmail } from "../../src/server/models/emails";
 import { conversationInfoFor, getConversation } from "../../src/server/models/conversations";
 import { listUnifiedEmails } from "../../src/server/models/unified";
 import { searchEmails } from "../../src/server/models/search";
@@ -38,8 +38,8 @@ describe("what a list needs to know: answered, and related", () => {
     const alone = mail(account.id, { from: person("bob@x.example"), subject: "Etwas", messageId: "<b@x>" });
 
     const info = conversationInfoFor(db, user.id, [question.id, answer.id, alone.id]);
-    expect(info.get(question.id)).toEqual({ replied: true, related: 1 });
-    expect(info.get(answer.id)).toEqual({ replied: false, related: 1 }); // it answers something that is stored
+    expect(info.get(question.id)).toEqual({ replied: true, forwarded: false, related: 1 });
+    expect(info.get(answer.id)).toEqual({ replied: false, forwarded: false, related: 1 }); // it answers something that is stored
     expect(info.has(alone.id)).toBe(false);
   });
 
@@ -48,7 +48,24 @@ describe("what a list needs to know: answered, and related", () => {
     const post = mail(account.id, { from: person("anna@x.example"), messageId: "<p@x>" });
     mail(account.id, { from: person("bob@x.example"), messageId: "<r1@x>", inReplyTo: "<p@x>" });
     mail(account.id, { from: person("cy@x.example"), messageId: "<r2@x>", inReplyTo: "<p@x>" });
-    expect(conversationInfoFor(db, user.id, [post.id]).get(post.id)).toEqual({ replied: false, related: 2 });
+    expect(conversationInfoFor(db, user.id, [post.id]).get(post.id)).toEqual({ replied: false, forwarded: false, related: 2 });
+  });
+
+  test("a forwarded message is marked in every list and in the conversation, even without relatives; it stays forwarded", async () => {
+    const { db, user, account, mail } = await setup();
+    const plain = mail(account.id, { from: person("anna@x.example"), subject: "Weiter", messageId: "<w@x>" });
+    const other = mail(account.id, { from: person("bob@x.example"), subject: "Nicht", messageId: "<n@x>" });
+    expect(conversationInfoFor(db, user.id, [plain.id]).size).toBe(0);
+
+    updateEmail(db, plain.id, { isForwarded: true });
+    expect(conversationInfoFor(db, user.id, [plain.id, other.id]).get(plain.id)).toEqual({ replied: false, forwarded: true, related: 0 });
+    expect(conversationInfoFor(db, user.id, [other.id]).size).toBe(0);
+    expect(listUnifiedEmails(db, user.id, "inbox").find(r => r.id === plain.id)?.conversation).toEqual({ replied: false, forwarded: true, related: 0 });
+    expect(getConversation(db, user.id, plain.id).messages[0]).toMatchObject({ current: true, forwarded: true });
+    expect(getEmail(db, plain.id).isForwarded).toBe(true);
+
+    updateEmail(db, plain.id, { isForwarded: false }); // it can't be taken back
+    expect(getEmail(db, plain.id).isForwarded).toBe(true);
   });
 
   test("a reply whose parent isn't stored is not related to anything; drafts don't answer", async () => {
@@ -79,9 +96,9 @@ describe("what a list needs to know: answered, and related", () => {
     expect(folder).toHaveLength(2);
     // (the folder route adds it; the model functions for the combined lists and search do it themselves)
     const unified = listUnifiedEmails(db, user.id, "inbox");
-    expect(unified.find(r => r.id === question.id)?.conversation).toEqual({ replied: true, related: 1 });
+    expect(unified.find(r => r.id === question.id)?.conversation).toEqual({ replied: true, forwarded: false, related: 1 });
     expect(unified.find(r => r.subject === "Ruhig")).not.toHaveProperty("conversation");
-    expect(searchEmails(db, user.id, "Frage").find(r => r.id === question.id)?.conversation).toEqual({ replied: true, related: 1 });
+    expect(searchEmails(db, user.id, "Frage").find(r => r.id === question.id)?.conversation).toEqual({ replied: true, forwarded: false, related: 1 });
   });
 });
 

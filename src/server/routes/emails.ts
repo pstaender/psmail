@@ -102,6 +102,12 @@ async function performFlagUpdate(
   if (Object.keys(flagChanges).length > 0 && canPushToImap(account, existing.uid)) {
     await setMessageFlags(client!, existing.folder, existing.uid!, flagChanges);
   }
+  // The $Forwarded keyword is a courtesy to the user's other clients: a server that refuses it doesn't stop it being noted here.
+  if (patch.isForwarded === true && canPushToImap(account, existing.uid) && client) {
+    await setMessageFlags(client, existing.folder, existing.uid!, { forwarded: true }).catch(error =>
+      console.error(`Could not set $Forwarded on ${account.email} #${existing.id}:`, error instanceof Error ? error.message : error)
+    );
+  }
   return updateEmail(db, existing.id, patch);
 }
 
@@ -395,7 +401,7 @@ export function emailsRoutes(db: Database) {
         const body = await readJsonBody<EmailInput>(req);
 
         const needsPush =
-          (body.isRead !== undefined || body.isFlagged !== undefined) && canPushToImap(account, existing.uid);
+          (body.isRead !== undefined || body.isFlagged !== undefined || body.isForwarded !== undefined) && canPushToImap(account, existing.uid);
 
         let updated: EmailRecord;
         if (needsPush) {

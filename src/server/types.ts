@@ -50,6 +50,8 @@ export interface EmailRecord {
   isDraft: boolean;
   isRead: boolean;
   isFlagged: boolean;
+  /** Forwarded by the user (here, or by another client that set the IMAP keyword $Forwarded). */
+  isForwarded?: boolean;
   messageId: string | null;
   inReplyTo: string | null;
   from: EmailAddress[];
@@ -87,7 +89,7 @@ export interface EmailRecord {
   /** Number of real (non-inline) attachments — set on message-list rows, where `attachments` itself isn't loaded. */
   attachmentCount?: number;
   /** On message-list rows that are part of a conversation or were answered: see models/conversations.ts. Absent otherwise. */
-  conversation?: { replied: boolean; related: number };
+  conversation?: { replied: boolean; forwarded: boolean; related: number };
 }
 
 export interface AttachmentRecord {

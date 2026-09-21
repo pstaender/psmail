@@ -17,7 +17,7 @@ export interface SearchResult {
   to?: EmailAddress[];
   hasAttachments?: boolean;
   /** Part of a conversation, or answered by the user (absent when neither). */
-  conversation?: { replied: boolean; related: number };
+  conversation?: { replied: boolean; forwarded: boolean; related: number };
   /** Set when the message was found by its text (the fallback when subject and sender matched nothing), not by subject or sender. */
   matchedInBody?: boolean;
   /** The message's categories (AI labels), when it has any. */

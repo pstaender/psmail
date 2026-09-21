@@ -188,6 +188,8 @@ const contactRequests: (string | null)[] = [];
 const aiRequests: [string, string, any][] = [];
 // Paths of every PATCH .../emails/:id (flags, read state, ...).
 const emailPatches: string[] = [];
+// [path, body] of the same.
+const emailPatchBodies: [string, any][] = [];
 // Bodies of POST /api/auth/login.
 const loginPosts: { username: string; password: string }[] = [];
 const bulkRequests: { account: string; method: string; move: string | null; body: Record<string, unknown> }[] = [];
@@ -285,6 +287,7 @@ function installMockFetch(
   bulkRequests.length = 0;
   loginPosts.length = 0;
   emailPatches.length = 0;
+  emailPatchBodies.length = 0;
   aiRequests.length = 0;
   let currentAiApis = [...(opts.aiApis ?? [])];
   // "summarize" or "summarize:Short" (a skill with a name of its own; unnamed ones are named after their category, like the server does).
@@ -562,8 +565,11 @@ function installMockFetch(
       capturedResultPatches.push(init?.body ? JSON.parse(init.body as string) : {});
       return jsonResponse({ ...EMAIL, id: 20, ...(init?.body ? JSON.parse(init.body as string) : {}) });
     }
-    if (method === "PATCH" && path.startsWith("/api/accounts/me%40example.com/emails/")) emailPatches.push(path);
-    if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse({ ...EMAIL, isRead: true });
+    if (method === "PATCH" && path.startsWith("/api/accounts/me%40example.com/emails/")) {
+      emailPatches.push(path);
+      emailPatchBodies.push([path, init?.body ? JSON.parse(init.body as string) : {}]);
+    }
+    if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse({ ...EMAIL, isRead: true, ...(init?.body ? JSON.parse(init.body as string) : {}) });
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse({ ...SECOND_EMAIL, isRead: true });
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/12") return jsonResponse({ ...THIRD_EMAIL, isRead: true });
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/13") {
@@ -1248,7 +1254,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(container.querySelector('[title="Part of a conversation — 1 related message"]')).toBeTruthy();
     });
 
-    test("the bar is one quiet line with the count; it opens into the messages, oldest first, and the current one can't be clicked", async () => {
+    test("the bar is one quiet line with the count; it opens into the messages, newest first, and the current one can't be clicked", async () => {
       const opened: number[] = [];
       render(<ConversationBar conversation={THREE as never} onOpen={m => opened.push(m.id)} />);
       expect(screen.getByText(/Conversation · 3 messages/)).toBeTruthy();
@@ -1258,13 +1264,77 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await userEvent.click(screen.getByText(/Conversation · 3 messages/));
       const list = await screen.findByLabelText("Messages in this conversation");
       const rows = within(list).getAllByRole("button");
-      expect(rows.map(r => r.textContent)).toEqual([expect.stringContaining("Wie weit seid ihr?"), expect.stringContaining("Fast fertig."), expect.stringContaining("Danke, super.")]);
+      expect(rows.map(r => r.textContent)).toEqual([expect.stringContaining("Danke, super."), expect.stringContaining("Fast fertig."), expect.stringContaining("Wie weit seid ihr?")]);
       expect(rows[1]!.getAttribute("aria-current")).toBe("true");
       expect(rows[1]!.hasAttribute("disabled")).toBe(true);
       expect(within(list).getByText("You")).toBeTruthy(); // my own message says so
 
-      await userEvent.click(rows[0]!);
+      await userEvent.click(rows[2]!);
       expect(opened).toEqual([9]);
+    });
+
+    test("a forwarded message is marked with an arrow in the list, in the conversation bar and in the message header", async () => {
+      const { container } = render(
+        <UiSettingsContext.Provider value={{ ...PLAIN_UI, showConversations: true }}>
+          <MessageList {...listProps} emails={[{ ...EMAIL, id: 1, subject: "Weitergeleitet", conversation: { replied: false, forwarded: true, related: 0 } } as never, { ...EMAIL, id: 2, subject: "Nicht" } as never]} />
+        </UiSettingsContext.Provider>
+      );
+      const row = (subject: string) => within(screen.getByText(subject).closest("li")!);
+      expect(row("Weitergeleitet").getByLabelText("Forwarded")).toBeTruthy();
+      expect(row("Weitergeleitet").queryByLabelText("Part of a conversation")).toBeNull();
+      expect(row("Nicht").queryByLabelText("Forwarded")).toBeNull();
+      expect(container.querySelector('[title="Forwarded"]')).toBeTruthy();
+      cleanup();
+
+      const withForward = { ...THREE, messages: THREE.messages.map(m => (m.id === 9 ? { ...m, forwarded: true } : m)) };
+      render(<ConversationBar conversation={withForward as never} onOpen={() => {}} />);
+      await userEvent.click(screen.getByText(/Conversation · 3 messages/));
+      const list = await screen.findByLabelText("Messages in this conversation");
+      const rows = within(list).getAllByRole("button");
+      expect(within(rows[2]!).getByLabelText("Forwarded")).toBeTruthy(); // 9, the oldest, is last
+      expect(within(rows[0]!).queryByLabelText("Forwarded")).toBeNull();
+      cleanup();
+
+      render(
+        <UiSettingsContext.Provider value={{ ...PLAIN_UI, showConversations: true }}>
+          <MessageHeader email={{ ...EMAIL, isForwarded: true } as never} />
+        </UiSettingsContext.Provider>
+      );
+      expect(screen.getByLabelText("Forwarded")).toBeTruthy();
+      cleanup();
+      render(<MessageHeader email={{ ...EMAIL, isForwarded: true } as never} />); // the plain client shows none
+      expect(screen.queryByLabelText("Forwarded")).toBeNull();
+    });
+
+    test("sending a forward marks the forwarded message — the header shows the arrow, and the list is asked again", async () => {
+      installMockFetch();
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+      await userEvent.click(await screen.findByText("Hello there"));
+      await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+      expect(screen.queryByLabelText("Forwarded")).toBeNull();
+
+      await userEvent.click(screen.getByRole("button", { name: /^forward$/i }));
+      expect(await screen.findByText("New message")).toBeTruthy();
+      await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+      await waitFor(() => expect(emailPatchBodies.filter(([, body]) => body?.isForwarded === true).map(([path]) => path)).toEqual(["/api/accounts/me%40example.com/emails/10"]));
+      expect(await screen.findByLabelText("Forwarded")).toBeTruthy();
+    });
+
+    test("a reply or a new message does not mark anything as forwarded", async () => {
+      installMockFetch();
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+      await userEvent.click(await screen.findByText("Hello there"));
+      await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+      await userEvent.click(screen.getByRole("button", { name: /^reply$/i }));
+      expect(await screen.findByText("New message")).toBeTruthy();
+      await userEvent.click(screen.getByRole("button", { name: /send/i }));
+      expect((await screen.findAllByText("E-Mail sent")).length).toBeGreaterThan(0);
+      expect(emailPatchBodies.filter(([, body]) => body?.isForwarded)).toEqual([]);
     });
 
     test("'See your reply' opens the answer; without one there is no such button; a message alone shows no bar at all", async () => {

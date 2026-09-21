@@ -171,6 +171,15 @@ describe("setMessageFlags", () => {
     ]);
   });
 
+  test("adds the $Forwarded keyword", async () => {
+    const { client, calls } = createFakeClient();
+    await setMessageFlags(client, "INBOX", 42, { forwarded: true });
+    expect(calls).toEqual([
+      { method: "mailboxOpen", args: ["INBOX"] },
+      { method: "messageFlagsAdd", args: [[42], ["$Forwarded"], { uid: true }] },
+    ]);
+  });
+
   test("removes \\Seen when marking unread", async () => {
     const { client, calls } = createFakeClient();
     await setMessageFlags(client, "INBOX", 42, { seen: false });
@@ -282,8 +291,8 @@ describe("fetchRemoteFlags", () => {
     ]);
     expect(result).toEqual(
       new Map([
-        [1, { seen: true, flagged: false }],
-        [3, { seen: true, flagged: true }],
+        [1, { seen: true, flagged: false, forwarded: false }],
+        [3, { seen: true, flagged: true, forwarded: false }],
       ])
     );
   });

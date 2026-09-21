@@ -244,6 +244,8 @@ export async function fetchNewMessages(
 export interface FlagChanges {
   seen?: boolean;
   flagged?: boolean;
+  /** The `$Forwarded` keyword — many servers allow it, some don't: callers treat it as best effort. */
+  forwarded?: true;
 }
 
 /** Adds/removes \Seen and/or \Flagged on one message, by UID. Only the flags actually present in `changes` are touched. */
@@ -256,6 +258,7 @@ export async function setMessageFlags(client: ImapFlow, folder: string, uid: num
   if (changes.seen === false) toRemove.push("\\Seen");
   if (changes.flagged === true) toAdd.push("\\Flagged");
   if (changes.flagged === false) toRemove.push("\\Flagged");
+  if (changes.forwarded === true) toAdd.push("$Forwarded");
 
   if (toAdd.length > 0) {
     const ok = await client.messageFlagsAdd([uid], toAdd, { uid: true });
@@ -309,6 +312,8 @@ export async function checkImapCapabilities(creds: ImapCredentials): Promise<{ u
 export interface RemoteFlagState {
   seen: boolean;
   flagged: boolean;
+  /** The `$Forwarded` keyword is set (optional: a server or a test double that doesn't know it says nothing). */
+  forwarded?: boolean;
 }
 
 /**
@@ -329,7 +334,7 @@ export async function fetchRemoteFlags(client: ImapFlow, folder: string, uids: n
   const range = `${Math.min(...uids)}:${Math.max(...uids)}`;
   for await (const message of client.fetch(range, { uid: true, flags: true }, { uid: true })) {
     const flags = message.flags ?? new Set<string>();
-    result.set(message.uid, { seen: flags.has("\\Seen"), flagged: flags.has("\\Flagged") });
+    result.set(message.uid, { seen: flags.has("\\Seen"), flagged: flags.has("\\Flagged"), forwarded: flags.has("$Forwarded") });
   }
   return result;
 }

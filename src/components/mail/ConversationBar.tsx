@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, MessagesSquare, Reply } from "lucide-react";
+import { ChevronDown, Forward, MessagesSquare, Reply } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { formatListDate } from "@/lib/time";
@@ -10,7 +10,7 @@ const who = (message: ConversationMessage) => (message.own ? "You" : message.fro
 
 /**
  * Under the message header, only for a message that is part of a conversation: one quiet line — "Conversation · 3 messages" — that
- * unfolds into the messages before and after this one (oldest first, who wrote each, when, and how it starts). A click on one opens it
+ * unfolds into the messages before and after this one (newest first, who wrote each, when, and how it starts; a small arrow marks a forwarded one). A click on one opens it
  * in the reading pane, so the earlier messages of a conversation are one click away, wherever they are (the Inbox, Sent, another
  * account). When the user has answered this message, "See your reply" jumps to the answer.
  */
@@ -46,7 +46,7 @@ export function ConversationBar({
 
       <CollapsibleContent>
         <ul className="mt-1.5 space-y-0.5 pb-1" aria-label="Messages in this conversation">
-          {messages.map(message => (
+          {[...messages].reverse().map(message => (
             <li key={message.id}>
               <button
                 type="button"
@@ -62,6 +62,7 @@ export function ConversationBar({
                 <span className="w-28 shrink-0 truncate">{who(message)}</span>
                 <span className="w-16 shrink-0 text-muted-foreground">{formatListDate(message.date)}</span>
                 <span className="min-w-0 flex-1 truncate text-muted-foreground">{message.snippet || message.subject || "(no text)"}</span>
+                {message.forwarded && <Forward aria-label="Forwarded" className="size-3 shrink-0 self-center text-muted-foreground/70" />}
                 {!message.isRead && !message.own && <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-label="Unread" />}
               </button>
             </li>

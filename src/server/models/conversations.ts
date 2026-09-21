@@ -15,6 +15,8 @@ import { NotFoundError } from "../types";
 export interface ConversationInfo {
   /** One of the user's own addresses has answered this message. */
   replied: boolean;
+  /** The message was forwarded (by the user here, or in another client that marked it $Forwarded). */
+  forwarded: boolean;
   /** How many messages in the mailbox are directly related to it: the one it answers (if stored) and the ones that answer it. */
   related: number;
 }
@@ -31,6 +33,8 @@ export interface ConversationMessage {
   own: boolean;
   /** The start of the text, whitespace collapsed. */
   snippet: string;
+  /** Forwarded, like ConversationInfo.forwarded. */
+  forwarded: boolean;
   /** The message the conversation was asked for. */
   current: boolean;
 }
@@ -99,8 +103,8 @@ function collectInfo(db: Database, scope: Scope, ids: number[], result: Map<numb
   const scoped = scope.accountIds.join(",");
 
   const rows = db
-    .query<{ id: number; message_id: string | null; in_reply_to: string | null }, number[]>(
-      `SELECT id, message_id, in_reply_to FROM emails WHERE id IN (${marks(ids.length)}) AND account_id IN (${scoped})`
+    .query<{ id: number; message_id: string | null; in_reply_to: string | null; is_forwarded: number }, number[]>(
+      `SELECT id, message_id, in_reply_to, is_forwarded FROM emails WHERE id IN (${marks(ids.length)}) AND account_id IN (${scoped})`
     )
     .all(...ids);
   const messageIds = [...new Set(rows.map(r => r.message_id).filter((v): v is string => !!v))];
@@ -134,7 +138,7 @@ function collectInfo(db: Database, scope: Scope, ids: number[], result: Map<numb
   for (const row of rows) {
     const answered = row.message_id ? answers.get(row.message_id) : undefined;
     const related = (answered?.count ?? 0) + (row.in_reply_to && storedParents.has(row.in_reply_to) ? 1 : 0);
-    if (related > 0 || answered?.ownAnswer) result.set(row.id, { replied: answered?.ownAnswer ?? false, related });
+    if (related > 0 || answered?.ownAnswer || row.is_forwarded) result.set(row.id, { replied: answered?.ownAnswer ?? false, forwarded: !!row.is_forwarded, related });
   }
 }
 
@@ -149,10 +153,11 @@ interface ConversationRow {
   from_addr: string | null;
   date: string | null;
   is_read: number;
+  is_forwarded: number;
   snippet: string | null;
 }
 
-const COLUMNS = `id, account_id, folder, message_id, in_reply_to, headers_raw, subject, from_addr, date, is_read, substr(plain_text, 1, 400) AS snippet`;
+const COLUMNS = `id, account_id, folder, message_id, in_reply_to, headers_raw, subject, from_addr, date, is_read, is_forwarded, substr(plain_text, 1, 400) AS snippet`;
 
 /**
  * The conversation a message is part of: walks from the message to what it answers (In-Reply-To, References) and to what answers it,
@@ -213,6 +218,7 @@ export function getConversation(db: Database, userId: number, emailId: number): 
       date: row.date,
       isRead: !!row.is_read,
       own: isOwn(scope, row.from_addr),
+      forwarded: !!row.is_forwarded,
       snippet: (row.snippet ?? "").replace(/\s+/g, " ").trim().slice(0, SNIPPET_LENGTH),
       current: row.id === start.id,
     })),

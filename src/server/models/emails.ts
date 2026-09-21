@@ -13,6 +13,7 @@ interface EmailRow {
   is_draft: number;
   is_read: number;
   is_flagged: number;
+  is_forwarded?: number;
   message_id: string | null;
   in_reply_to: string | null;
   from_addr: string | null;
@@ -85,6 +86,7 @@ function toEmail(row: EmailRow, attachments?: AttachmentRow[]): EmailRecord {
     isDraft: !!row.is_draft,
     isRead: !!row.is_read,
     isFlagged: !!row.is_flagged,
+    isForwarded: !!row.is_forwarded,
     messageId: row.message_id,
     inReplyTo: row.in_reply_to,
     from: parseAddrList(row.from_addr),
@@ -136,6 +138,8 @@ export interface EmailInput {
   isDraft?: boolean;
   isRead?: boolean;
   isFlagged?: boolean;
+  /** The message was forwarded (never turned off again). */
+  isForwarded?: boolean;
   messageId?: string | null;
   inReplyTo?: string | null;
   from?: EmailAddress[];
@@ -293,6 +297,7 @@ export interface SyncedEmailRef {
   uid: number;
   isRead: boolean;
   isFlagged: boolean;
+  isForwarded: boolean;
 }
 
 /**
@@ -302,11 +307,11 @@ export interface SyncedEmailRef {
  */
 export function listSyncedRefs(db: Database, accountId: number, folder: string): SyncedEmailRef[] {
   const rows = db
-    .query<{ id: number; uid: number; is_read: number; is_flagged: number }, [number, string]>(
-      "SELECT id, uid, is_read, is_flagged FROM emails WHERE account_id = ? AND folder = ? AND uid IS NOT NULL"
+    .query<{ id: number; uid: number; is_read: number; is_flagged: number; is_forwarded: number }, [number, string]>(
+      "SELECT id, uid, is_read, is_flagged, is_forwarded FROM emails WHERE account_id = ? AND folder = ? AND uid IS NOT NULL"
     )
     .all(accountId, folder);
-  return rows.map(row => ({ id: row.id, uid: row.uid, isRead: !!row.is_read, isFlagged: !!row.is_flagged }));
+  return rows.map(row => ({ id: row.id, uid: row.uid, isRead: !!row.is_read, isFlagged: !!row.is_flagged, isForwarded: !!row.is_forwarded }));
 }
 
 export function updateEmail(db: Database, id: number, input: EmailInput): EmailRecord {
@@ -318,6 +323,7 @@ export function updateEmail(db: Database, id: number, input: EmailInput): EmailR
     is_draft: input.isDraft !== undefined ? (input.isDraft ? 1 : 0) : existing.is_draft,
     is_read: input.isRead !== undefined ? (input.isRead ? 1 : 0) : existing.is_read,
     is_flagged: input.isFlagged !== undefined ? (input.isFlagged ? 1 : 0) : existing.is_flagged,
+    is_forwarded: input.isForwarded ? 1 : existing.is_forwarded, // forwarded stays forwarded
     message_id: input.messageId !== undefined ? input.messageId : existing.message_id,
     in_reply_to: input.inReplyTo !== undefined ? input.inReplyTo : existing.in_reply_to,
     from_addr: input.from !== undefined ? JSON.stringify(input.from) : existing.from_addr,
@@ -344,7 +350,7 @@ export function updateEmail(db: Database, id: number, input: EmailInput): EmailR
   const row = db
     .query<EmailRow, SqlBindings>(
       `UPDATE emails SET
-        folder = ?, uid = ?, is_draft = ?, is_read = ?, is_flagged = ?,
+        folder = ?, uid = ?, is_draft = ?, is_read = ?, is_flagged = ?, is_forwarded = ?,
         message_id = ?, in_reply_to = ?, from_addr = ?, to_addr = ?, cc_addr = ?, bcc_addr = ?, reply_to_addr = ?,
         subject = ?, date = ?, return_path = ?, received = ?, mime_version = ?, content_type = ?,
         authentication_results = ?, dkim = ?, spf = ?, plain_text = ?, html_text = ?, headers_raw = ?, size = ?,
@@ -358,6 +364,7 @@ export function updateEmail(db: Database, id: number, input: EmailInput): EmailR
       merged.is_draft,
       merged.is_read,
       merged.is_flagged,
+      merged.is_forwarded ?? 0,
       merged.message_id,
       merged.in_reply_to,
       merged.from_addr,

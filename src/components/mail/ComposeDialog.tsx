@@ -40,6 +40,8 @@ export interface ComposeDraft {
   /** Reply/forward only: the quoted original that `body` ends with — lets the signature be inserted before it (see withSignature). */
   quoted?: string;
   inReplyTo?: string | null;
+  /** A forward only: the message being forwarded — once this is sent, that message is marked as forwarded. */
+  forwardOf?: { accountEmail: string; id: number };
   /** The draft's attachments already on the server, when editing — shown alongside newly-added files, removable individually. */
   attachments?: AttachmentRecord[];
 }

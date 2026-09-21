@@ -1735,7 +1735,7 @@ export function AppShell() {
               onReplyAll={() =>
                 openCompose(replyAllDraft(selectedEmail, messageAccountEmail))
               }
-              onForward={() => openCompose(forwardDraft(selectedEmail))}
+              onForward={() => openCompose({ ...forwardDraft(selectedEmail), forwardOf: { accountEmail: messageAccountEmail, id: selectedEmail.id } })}
               onDelete={requestDelete}
               onMove={handleMove}
               onDownload={() =>
@@ -1785,6 +1785,18 @@ export function AppShell() {
           aiSkills={aiSkills}
           aiLanguage={settings.aiTargetLanguage ?? "English"}
           onSent={(sent) => {
+            // A forward that went out: the message it forwarded shows that from now on (a failed note doesn't undo the sending).
+            const forwarded = sent ? composeInitial?.forwardOf : undefined;
+            if (forwarded && token) {
+              api
+                .updateEmail(token, forwarded.accountEmail, forwarded.id, { isForwarded: true })
+                .then((updated) => {
+                  if (openEmailId.current === updated.id) setSelectedEmailDetail(updated);
+                  refreshEmails();
+                  refreshSearchResults();
+                })
+                .catch(() => {});
+            }
             refreshEmails();
             refreshSearchResults();
             refreshUnifiedInboxUnread();

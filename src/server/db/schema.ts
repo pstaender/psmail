@@ -94,6 +94,8 @@ CREATE TABLE IF NOT EXISTS emails (
   imbox INTEGER,
   -- 1 when the user set the imbox verdict by hand: classification never overwrites it (see models/imbox.ts).
   imbox_manual INTEGER NOT NULL DEFAULT 0,
+  -- The user forwarded this message (or another client did: the IMAP keyword $Forwarded). Only ever turned on.
+  is_forwarded INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   UNIQUE(account_id, folder, uid)
