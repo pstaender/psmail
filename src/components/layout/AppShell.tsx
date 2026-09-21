@@ -1008,14 +1008,16 @@ export function AppShell() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        {sidebarCollapsed ? (
+        {sidebarCollapsed || listCollapsed ? (
           <div className="flex w-9 shrink-0 flex-col items-center border-r bg-muted/20 pt-3">
             <Button
               variant="ghost"
               size="icon"
               className="size-7"
-              onClick={() => setSidebarCollapsed(false)}
-              title="Show accounts"
+              // In reading mode (a message opened with a double-click) the accounts are out of the way too, but only for
+              // now: the button leaves reading mode. The remembered collapsed state is the user's own choice and isn't touched.
+              onClick={() => (listCollapsed ? setListCollapsed(false) : setSidebarCollapsed(false))}
+              title={listCollapsed ? "Show accounts and the message list" : "Show accounts"}
             >
               <PanelLeftOpen className="size-4" />
             </Button>

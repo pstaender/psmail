@@ -125,7 +125,7 @@ export function LoginView() {
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center text-center gap-2">
           <img src={logoUrl} alt="P.S.Mail logo" className="size-20" />
-          <CardTitle className="text-2xl" >P.S.Mail</CardTitle>
+          <CardTitle className="text-2xl" >Mail</CardTitle>
           <CardDescription>Sign in to your profile to continue</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

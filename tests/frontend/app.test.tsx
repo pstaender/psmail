@@ -777,7 +777,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
     // Login screen — clicking the profile logs straight in (an empty password works, so
     // LoginView skips the password prompt entirely), no separate "Sign in" click needed.
-    await waitFor(() => expect(screen.getByText("P.S.Mail")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Mail")).toBeTruthy()); // the title next to the logo
     const userButton = await screen.findByText("default");
     await userEvent.click(userButton);
 
@@ -1254,6 +1254,41 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(screen.queryByTitle("Show the message list")).toBeNull();
   });
 
+  test("reading mode also collapses the accounts/folders bar — without touching the remembered choice — and either strip brings both back", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+    expect(screen.getByText("Accounts")).toBeTruthy(); // the bar is open
+
+    await userEvent.dblClick(await screen.findByText("Hello there"));
+    await screen.findByTitle("Show the message list");
+    expect(screen.queryByText("Accounts")).toBeNull(); // the bar is out of the way too
+    expect(screen.queryByText("me@example.com")).toBeNull();
+    expect(localStorage.getItem("psmail.sidebarCollapsed")).not.toBe("true"); // just for now, not the user's setting
+
+    await userEvent.click(screen.getByTitle("Show accounts and the message list"));
+    expect(await screen.findByText("Accounts")).toBeTruthy();
+    expect(await screen.findByText("Second message")).toBeTruthy();
+
+    await userEvent.dblClick((await screen.findAllByText("Hello there"))[0]!);
+    await screen.findByTitle("Show the message list");
+    await userEvent.click(screen.getByTitle("Show the message list")); // the list's own strip does the same
+    expect(await screen.findByText("Accounts")).toBeTruthy();
+  });
+
+  test("a bar the user collapsed themselves stays collapsed after reading mode", async () => {
+    localStorage.setItem("psmail.sidebarCollapsed", "true");
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await userEvent.dblClick(await screen.findByText("Unified hello")); // the combined Inbox needs no sidebar
+    await screen.findByTitle("Show the message list");
+
+    await userEvent.click(screen.getByTitle("Show the message list"));
+    expect(await screen.findByText("Unified hello")).toBeTruthy(); // the list is back…
+    expect(screen.getByTitle("Show accounts")).toBeTruthy(); // …and the bar is still the way the user left it: collapsed
+    expect(screen.queryByText("Accounts")).toBeNull();
+  });
+
   test("a draft still opens for editing on double-click, and the list stays", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
@@ -1264,18 +1299,19 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(screen.queryByTitle("Show the message list")).toBeNull();
   });
 
-  test("the collapsed list comes back when there is nothing to read, or a folder or search is chosen", async () => {
+  test("the collapsed list comes back when there is nothing to read, or a search is typed", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
     await openAccountInbox();
 
     await userEvent.dblClick(await screen.findByText("Hello there"));
     await screen.findByTitle("Show the message list");
-    await userEvent.click(screen.getAllByText("Inbox")[1]!); // picking a folder in the sidebar
-    expect(await screen.findByText("Second message")).toBeTruthy();
-    expect(screen.queryByTitle("Show the message list")).toBeNull();
+    await userEvent.type(screen.getByPlaceholderText(/search all mail/i), "x"); // typing a search shows its list
+    await waitFor(() => expect(screen.queryByTitle("Show the message list")).toBeNull());
+    expect(await screen.findByText("Accounts")).toBeTruthy(); // and the accounts bar too
+    await userEvent.clear(screen.getByPlaceholderText(/search all mail/i));
 
-    await userEvent.dblClick(screen.getByText("Hello there"));
+    await userEvent.dblClick((await screen.findAllByText("Hello there"))[0]!);
     await screen.findByTitle("Show the message list");
     await userEvent.type(screen.getByPlaceholderText(/search all mail/i), "second"); // a search shows its results list
     await waitFor(() => expect(screen.queryByTitle("Show the message list")).toBeNull());
@@ -2533,7 +2569,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(logo.getAttribute("src")).toContain("psmail_logo.svg");
     expect(document.querySelector(".bg-primary\\/10")).toBeNull();
     // Centered above the title, in the card header.
-    expect(logo.closest('[data-slot="card-header"]')!.textContent).toContain("P.S.Mail");
+    expect(logo.closest('[data-slot="card-header"]')!.textContent).toContain("Mail");
 
     // Room above and below the card, and the screen scrolls when the card is taller than the window.
     const card = logo.closest('[data-slot="card"]')!;
