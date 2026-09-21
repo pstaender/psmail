@@ -7,6 +7,23 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-21 - "imbox classify" is verbose (e3fbbf3)
+-------------------------------------------------
+The CLI used to print one line at the very end (or nothing at all while it worked). Now "bun run cli imbox classify" says what it does:
+  Signed in to http://localhost:3001 as "phil".
+  Classifying 2 account(s): a@x.example, b@x.example - only messages without a verdict (--force for all)
+  a@x.example: 12000 message(s) to classify in INBOX
+  [######--------] a@x.example: 3100 important - 5500/12000        (a progress bar; a line per 2000 messages when not a terminal)
+  a@x.example: done - 12000 classified: 3100 important, 8900 not
+  Finished in 1.4 s: 12000 message(s) classified, 3100 important.
+and with --verbose every message as it is classified: verdict, score, #id, subject, sender, and its three strongest reasons.
+To make that possible the server streams events while it works (POST /api/imbox/classify with stream: true - newline-separated JSON:
+start, account, progress per chunk of 500, message with verbose, account-done, done, error). The classification became a generator that
+pauses after every chunk so the server can send events while it goes; the plain JSON answer of the route and classifyAccounts are unchanged.
+--force / --verbose no longer swallow a following account address. Tests: the output of the real CLI (also verbose), the event stream
+(chunks, order, verbose messages, nothing streamed for an unknown account).
+
+
 2026-09-21 - Imbox: a local classifier for important mail (4f9ef9d)
 -------------------------------------------------------------------
 Every message can now be classified as important or not: emails.imbox (1 / 0 / NULL = not yet), a partial index for the list, and
