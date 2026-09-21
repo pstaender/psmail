@@ -7,6 +7,16 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-21 - Header: the logo instead of the icon and the name (7cb48a2)
+------------------------------------------------------------------------
+The top-left of the app header shows logo/psmail_logo.svg (h-8, alt "P.S.Mail") instead of the round mail icon and the "P.S.Mail" text. The
+login card uses the text variant, logo/psmail_logo_text.svg, and no longer has its own title (the name is in the logo) - both edited by hand
+and committed here together with the tests: the header has the logo and neither icon nor text, the login card has the text logo.
+Note: while doing this the working copy of AppShell.tsx turned out to be an OLDER version (without the category filter; probably a stale editor
+buffer written back). It was restored from the last commit before the logo was applied, so nothing was lost - but worth checking that
+the editor isn't holding an old copy of that file.
+
+
 2026-09-21 - Filter by category (0f561a3)
 ------------------------------------------
 The "More" menu has "Filter by category..." beside "Filter by date...". Its dialog has a combobox (searchable: type to narrow) with the
