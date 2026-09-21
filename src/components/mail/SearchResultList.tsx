@@ -6,6 +6,7 @@ import { formatListDate } from "@/lib/time";
 import type { SearchResult } from "../../server/models/search";
 import { EmptyState } from "./EmptyState";
 import { CategoryChips } from "./CategoryChips";
+import { ConversationMarks } from "./ConversationMarks";
 
 function participantLabel(result: SearchResult, showRecipient: boolean): string {
   const list = showRecipient && result.to ? result.to : result.from;
@@ -125,6 +126,7 @@ export function SearchResultList({
               </div>
               <div className={cn("flex items-center gap-1.5 text-sm", !result.isRead && "font-medium")}>
                 <span className="flex-1 truncate">{result.subject || "(no subject)"}</span>
+                <ConversationMarks conversation={result.conversation} />
                 {result.hasAttachments && <Paperclip aria-label="Has attachments" className="size-3.5 shrink-0 text-muted-foreground" />}
               </div>
               <CategoryChips labels={result.taxonomyList} />

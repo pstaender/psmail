@@ -6,6 +6,7 @@ import { App } from "../../src/App";
 import { MessageHeader } from "../../src/components/mail/MessageHeader";
 import { EventsButton } from "../../src/components/mail/EventsButton";
 import { MessageList } from "../../src/components/mail/MessageList";
+import { ConversationBar } from "../../src/components/mail/ConversationBar";
 import { MessageToolbar } from "../../src/components/mail/MessageToolbar";
 import { installFakeAuthenticator, type FakeAuthenticator } from "../helpers/fakeAuthenticator";
 import type { Account } from "../../src/server/types";
@@ -242,6 +243,8 @@ function installMockFetch(
     otherAccountContacts?: boolean;
     /** Replaces the combined Inbox's rows (default: one starred message). */
     unifiedInboxRows?: Record<string, unknown>[];
+    /** What GET .../emails/10/conversation answers (default: 404, i.e. no conversation). */
+    conversation?: { messages: Record<string, unknown>[]; repliedBy: number | null };
     /** What GET /api/unified/imbox/unread reports (the Imbox entry's badge). */
     imboxUnread?: number;
     /** The imbox verdict the opened message (id 10) has: true / false / null (not classified). */
@@ -536,6 +539,9 @@ function installMockFetch(
       const body = JSON.parse(init!.body as string) as { imbox: boolean | null };
       imboxMarks.push({ id: 10, imbox: body.imbox });
       return jsonResponse({ ...EMAIL, imbox: body.imbox });
+    }
+    if (method === "GET" && /^\/api\/accounts\/me%40example.com\/emails\/\d+\/conversation$/.test(path)) {
+      return opts.conversation ? jsonResponse(opts.conversation) : jsonResponse({ error: "no conversation in this mock" }, 404);
     }
     if (method === "GET" && path === "/api/unified/imbox/unread") {
       imboxUnreadRequests += 1;
@@ -1198,6 +1204,108 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
     expect(screen.queryByText("New message")).toBeNull();
     expect(screen.queryByText("Edit draft", { selector: "[data-slot=dialog-title]" })).toBeNull();
+  });
+
+  describe("conversations", () => {
+    const message = (id: number, over: Record<string, unknown> = {}) => ({
+      id, accountEmail: "me@example.com", folder: "INBOX", subject: "Projekt", from: { name: "Anna", address: "anna@x.example" },
+      date: "2026-06-01T10:00:00.000Z", isRead: true, own: false, snippet: `text of ${id}`, current: false, ...over,
+    });
+    const THREE = {
+      messages: [message(9, { snippet: "Wie weit seid ihr?" }), message(10, { current: true, snippet: "Fast fertig." }), message(11, { own: true, folder: "Sent", from: { address: "me@example.com" }, snippet: "Danke, super." })],
+      repliedBy: 11,
+    };
+    const listProps = { loading: false, hasMore: false, loadingMore: false, onLoadMore: () => {}, selectedId: null, selectedIds: new Set<number>(), folder: "INBOX", onSelect: () => {}, onToggleFlag: () => {}, onEditDraft: () => {} };
+
+    test("list rows: quiet icons for a message in a conversation and one you replied to; nothing for a message on its own", () => {
+      const { container } = render(
+        <MessageList
+          {...listProps}
+          emails={[
+            { ...EMAIL, id: 1, subject: "Beantwortet", conversation: { replied: true, related: 2 } } as never,
+            { ...EMAIL, id: 2, subject: "Nur Teil", conversation: { replied: false, related: 1 } } as never,
+            { ...EMAIL, id: 3, subject: "Allein" } as never,
+          ]}
+        />
+      );
+      const row = (subject: string) => within(screen.getByText(subject).closest("li")!);
+      expect(row("Beantwortet").getByLabelText("Part of a conversation")).toBeTruthy();
+      expect(row("Beantwortet").getByLabelText("You replied")).toBeTruthy();
+      expect(row("Nur Teil").getByLabelText("Part of a conversation")).toBeTruthy();
+      expect(row("Nur Teil").queryByLabelText("You replied")).toBeNull();
+      expect(row("Allein").queryByLabelText("Part of a conversation")).toBeNull();
+      expect(row("Allein").queryByLabelText("You replied")).toBeNull();
+      expect(container.querySelector('[title="Part of a conversation — 2 related messages"]')).toBeTruthy(); // says how many, on hover
+      expect(container.querySelector('[title="Part of a conversation — 1 related message"]')).toBeTruthy();
+    });
+
+    test("the bar is one quiet line with the count; it opens into the messages, oldest first, and the current one can't be clicked", async () => {
+      const opened: number[] = [];
+      render(<ConversationBar conversation={THREE as never} onOpen={m => opened.push(m.id)} />);
+      expect(screen.getByText(/Conversation · 3 messages/)).toBeTruthy();
+      expect(screen.getByText("(this is 2 of 3)")).toBeTruthy();
+      expect(screen.queryByLabelText("Messages in this conversation")).toBeNull(); // folded
+
+      await userEvent.click(screen.getByText(/Conversation · 3 messages/));
+      const list = await screen.findByLabelText("Messages in this conversation");
+      const rows = within(list).getAllByRole("button");
+      expect(rows.map(r => r.textContent)).toEqual([expect.stringContaining("Wie weit seid ihr?"), expect.stringContaining("Fast fertig."), expect.stringContaining("Danke, super.")]);
+      expect(rows[1]!.getAttribute("aria-current")).toBe("true");
+      expect(rows[1]!.hasAttribute("disabled")).toBe(true);
+      expect(within(list).getByText("You")).toBeTruthy(); // my own message says so
+
+      await userEvent.click(rows[0]!);
+      expect(opened).toEqual([9]);
+    });
+
+    test("'See your reply' opens the answer; without one there is no such button; a message alone shows no bar at all", async () => {
+      const opened: number[] = [];
+      const { rerender } = render(<ConversationBar conversation={THREE as never} onOpen={m => opened.push(m.id)} />);
+      await userEvent.click(screen.getByRole("button", { name: /see your reply/i }));
+      expect(opened).toEqual([11]);
+
+      rerender(<ConversationBar conversation={{ ...THREE, repliedBy: null } as never} onOpen={() => {}} />);
+      expect(screen.queryByRole("button", { name: /see your reply/i })).toBeNull();
+      rerender(<ConversationBar conversation={{ messages: [message(10, { current: true })], repliedBy: null } as never} onOpen={() => {}} />);
+      expect(screen.queryByText(/Conversation/)).toBeNull();
+      rerender(<ConversationBar conversation={null} onOpen={() => {}} />);
+      expect(screen.queryByText(/Conversation/)).toBeNull();
+    });
+
+    async function openHello(opts: Parameters<typeof installMockFetch>[0]) {
+      installMockFetch(opts);
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+      await userEvent.click(await screen.findByText("Hello there"));
+      await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+    }
+
+    test("opening a message that is part of a conversation shows the bar, and the header's reply icon opens the answer without moving the list", async () => {
+      await openHello({ conversation: THREE });
+      expect(await screen.findByText(/Conversation · 3 messages/)).toBeTruthy();
+
+      await userEvent.click(screen.getByRole("button", { name: "You replied — see your reply" }));
+      // message 11 is the mock's "Second message": it is the open message now…
+      await waitFor(() => expect(screen.getAllByText("Second message").length).toBeGreaterThan(1));
+      // …while the list you were browsing is the same one, and the address is the message's own place (the Sent folder in real life)
+      expect(screen.getByText("Hello there")).toBeTruthy();
+    });
+
+    test("an earlier message of the conversation opens with one click in the list of the conversation", async () => {
+      await openHello({ conversation: THREE });
+      await userEvent.click(await screen.findByText(/Conversation · 3 messages/));
+      const list = await screen.findByLabelText("Messages in this conversation");
+      await userEvent.click(within(list).getByText("Danke, super."));
+      await waitFor(() => expect(screen.getAllByText("Second message").length).toBeGreaterThan(1));
+    });
+
+    test("no conversation, no bar and no reply icon", async () => {
+      await openHello({});
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(screen.queryByText(/Conversation ·/)).toBeNull();
+      expect(screen.queryByRole("button", { name: /you replied/i })).toBeNull();
+    });
   });
 
   describe("the imbox", () => {

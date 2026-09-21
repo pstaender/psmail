@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { formatListDate } from "@/lib/time";
 import type { EmailRecord } from "../../server/types";
 import { CategoryChips } from "./CategoryChips";
+import { ConversationMarks } from "./ConversationMarks";
 import { EmptyState } from "./EmptyState";
 
 function participantLabel(email: EmailRecord, folder: string): string {
@@ -122,6 +123,7 @@ export function MessageList({
               </div>
               <div className={cn("flex items-center gap-1.5 truncate text-sm", !email.isRead && "font-medium")}>
                 <span className="flex-1 truncate">{email.subject || "(no subject)"}</span>
+                <ConversationMarks conversation={email.conversation} />
                 {((email.attachmentCount ?? email.attachments?.length) ?? 0) > 0 && (
                   <Paperclip aria-label="Has attachments" className="size-3.5 shrink-0 text-muted-foreground" />
                 )}

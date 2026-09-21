@@ -959,6 +959,17 @@ export function AppShell() {
     }
   }
 
+  /**
+   * Opens another message of the open message's conversation (an earlier one, the answer) in the reading pane. It may live in another
+   * folder or account, so — like a search result — it becomes the open message without moving the list, filter or sidebar.
+   */
+  function openConversationMessage(message: { id: number; accountEmail: string; folder: string }) {
+    setOpenedIn({ accountEmail: message.accountEmail, folder: message.folder });
+    setSelectedEmailId(message.id);
+    setSelectedIds(new Set());
+    setSelectionAnchorId(message.id);
+  }
+
   async function handleDelete() {
     if (refuseIfDisabled(messageAccountEmail)) return;
     if (!token || !messageAccountEmail || !selectedEmail) return;
@@ -1717,6 +1728,7 @@ export function AppShell() {
                 downloadMessages(messageAccountEmail, [selectedEmail.id])
               }
               onToggleRead={toggleRead}
+              onOpenConversationMessage={openConversationMessage}
               imboxEnabled={imboxOn}
               onMarkImbox={markImbox}
               onEditDraft={() => openCompose(editDraft(selectedEmail))}

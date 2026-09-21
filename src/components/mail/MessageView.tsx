@@ -2,6 +2,9 @@ import { AttachmentList } from "./AttachmentList";
 import { MessageBody, type BodyView } from "./MessageBody";
 import { MessageHeader } from "./MessageHeader";
 import { MessageToolbar } from "./MessageToolbar";
+import { ConversationBar } from "./ConversationBar";
+import { useConversation } from "@/hooks/useConversation";
+import type { ConversationMessage } from "../../server/models/conversations";
 import type { EmailRecord } from "../../server/types";
 import type { FolderInfo } from "@/lib/api";
 import type { AiSkillRecord } from "../../server/models/ai";
@@ -19,6 +22,7 @@ export function MessageView({
   onMove,
   onDownload,
   onToggleRead,
+  onOpenConversationMessage = () => {},
   imboxEnabled = false,
   onMarkImbox = () => {},
   onEditDraft,
@@ -40,6 +44,8 @@ export function MessageView({
   onMove: (folder: string) => void;
   onDownload: () => void;
   onToggleRead: () => void;
+  /** Opens another message of the conversation (wherever it is) in the reading pane. */
+  onOpenConversationMessage?: (message: ConversationMessage) => void;
   /** The imbox is on: the message header offers to mark it important / not important. */
   imboxEnabled?: boolean;
   onMarkImbox?: (important: boolean) => void;
@@ -52,6 +58,7 @@ export function MessageView({
   onSummarize?: (skillId: number) => void;
   onTranslate?: (skillId: number) => void;
 }) {
+  const conversation = useConversation(accountEmail, email.id);
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <MessageToolbar
@@ -71,7 +78,16 @@ export function MessageView({
         onSummarize={onSummarize}
         onTranslate={onTranslate}
       />
-      <MessageHeader email={email} summarizing={aiBusy === "summarize"} imboxEnabled={imboxEnabled} imboxDisabled={accountDisabled} onMarkImbox={onMarkImbox} />
+      <MessageHeader
+        email={email}
+        summarizing={aiBusy === "summarize"}
+        imboxEnabled={imboxEnabled}
+        imboxDisabled={accountDisabled}
+        onMarkImbox={onMarkImbox}
+        replyMessage={conversation?.messages.find(message => message.id === conversation.repliedBy) ?? null}
+        onOpenReply={onOpenConversationMessage}
+      />
+      <ConversationBar conversation={conversation} onOpen={onOpenConversationMessage} />
       <AttachmentList accountEmail={accountEmail} emailId={email.id} attachments={email.attachments ?? []} />
       <div className="flex-1 overflow-y-auto">
         <MessageBody

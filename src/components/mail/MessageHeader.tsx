@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, MailCheck, Sparkles, Star } from "lucide-react";
+import { ChevronDown, MailCheck, Reply, Sparkles, Star } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import type { ConversationMessage } from "../../server/models/conversations";
 import { formatFullDate } from "@/lib/time";
 import type { EmailAddress, EmailRecord } from "../../server/types";
 
@@ -33,6 +34,8 @@ export function MessageHeader({
   imboxEnabled = false,
   imboxDisabled = false,
   onMarkImbox = () => {},
+  replyMessage = null,
+  onOpenReply = () => {},
 }: {
   email: EmailRecord;
   /** A summary is being generated for this message (started from the Summary tab). */
@@ -41,6 +44,9 @@ export function MessageHeader({
   imboxEnabled?: boolean;
   imboxDisabled?: boolean;
   onMarkImbox?: (important: boolean) => void;
+  /** The user's answer to this message, when there is one: a small "replied" icon beside the subject opens it. */
+  replyMessage?: ConversationMessage | null;
+  onOpenReply?: (message: ConversationMessage) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   // "Expand all details": Cc/Bcc (and To) unclamped, plus the message id, which is hidden otherwise.
@@ -73,6 +79,17 @@ export function MessageHeader({
               )}
             >
               <MailCheck className="size-4" />
+            </button>
+          )}
+          {replyMessage && (
+            <button
+              type="button"
+              aria-label="You replied — see your reply"
+              title="You replied to this message. Click to see your reply."
+              onClick={() => onOpenReply(replyMessage)}
+              className="mt-0.5 rounded p-0.5 text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Reply className="size-4" />
             </button>
           )}
           {email.isFlagged && <Star aria-label="Starred" className="mt-1 size-4 shrink-0 fill-yellow-400 text-yellow-500" />}

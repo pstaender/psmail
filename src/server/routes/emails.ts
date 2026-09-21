@@ -18,6 +18,7 @@ import {
   type EmailRow,
 } from "../models/emails";
 import { json, noContent, parseIntParam, readJsonBody, requireAuth, requiredParam, withErrorHandling } from "../http";
+import { getConversation, conversationInfoFor } from "../models/conversations";
 import { readListFilter } from "../models/dateBounds";
 import { getEmailAttachmentsDir, sanitizeSegment } from "../config/paths";
 import { sendDraftEmail, type AttachmentWithData } from "../services/smtp";
@@ -283,14 +284,15 @@ export function emailsRoutes(db: Database) {
         const limit = url.searchParams.get("limit");
         const offset = url.searchParams.get("offset");
 
-        return json(
-          listEmails(db, account.id, {
-            ...readListFilter(url.searchParams),
-            folder,
-            limit: limit ? Number(limit) : undefined,
-            offset: offset ? Number(offset) : undefined,
-          })
-        );
+        const rows = listEmails(db, account.id, {
+          ...readListFilter(url.searchParams),
+          folder,
+          limit: limit ? Number(limit) : undefined,
+          offset: offset ? Number(offset) : undefined,
+        });
+        // Rows that are part of a conversation, or that the user answered, say so (two lookups by index for the whole page).
+        const conversations = conversationInfoFor(db, session.userId, rows.map(row => row.id));
+        return json(rows.map(row => (conversations.has(row.id) ? { ...row, conversation: conversations.get(row.id) } : row)));
       }),
       POST: withErrorHandling(async req => {
         const { session } = requireAuth(req, db);
@@ -363,6 +365,16 @@ export function emailsRoutes(db: Database) {
           performMove(db, account, existing, folderName, client)
         );
         return json(results.map(({ value, ...rest }) => rest));
+      }),
+    },
+    /** The conversation of a message (what it answers, what answers it, over all of the user's accounts) and the user's latest answer to it. */
+    "/api/accounts/:email/emails/:emailId/conversation": {
+      GET: withErrorHandling(async req => {
+        const { session } = requireAuth(req, db);
+        const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        const emailId = parseIntParam(req.params.emailId, "emailId");
+        getOwnedEmail(db, emailId, account.id);
+        return json(getConversation(db, session.userId, emailId));
       }),
     },
     "/api/accounts/:email/emails/:emailId": {

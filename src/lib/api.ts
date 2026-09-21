@@ -5,6 +5,7 @@ import type { Account, DownloadJob, EmailRecord, User } from "../server/types";
 import type { CreateAccountInput, UpdateAccountInput } from "../server/models/accounts";
 import type { EmailInput } from "../server/models/emails";
 import type { SearchResult } from "../server/models/search";
+import type { Conversation } from "../server/models/conversations";
 import type { ImapFolder } from "../server/services/imap";
 
 export class ApiError extends Error {
@@ -297,6 +298,9 @@ export const api = {
   newMail: (token: string, afterId?: number) =>
     request<NewMailResult>("GET", `/api/unified/inbox/new${afterId === undefined ? "" : `?afterId=${afterId}`}`, { token }),
   /** Unread messages across all accounts' Inboxes — the combined Inbox's badge. */
+  /** The conversation the message is part of (oldest first) and the user's latest answer to it. */
+  getConversation: (token: string, accountEmail: string, emailId: number) =>
+    request<Conversation>("GET", `/api/accounts/${enc(accountEmail)}/emails/${emailId}/conversation`, { token }),
   /** Unread messages in the imbox (the important part of the Inboxes) — the Imbox entry's badge. */
   unifiedImboxUnread: (token: string) => request<{ count: number }>("GET", "/api/unified/imbox/unread", { token }),
   /** Marks a message important (true) or not (false) by hand — the imbox learns from it for that sender — or takes the mark back (null). */

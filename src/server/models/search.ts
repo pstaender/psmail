@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import type { EmailAddress } from "../types";
 import { emailIdsWithAttachments, taxonomyListsFor } from "./emails";
+import { conversationInfoFor } from "./conversations";
 import { listFilterSql, type ListFilter } from "./dateBounds";
 
 export interface SearchResult {
@@ -15,6 +16,8 @@ export interface SearchResult {
   /** Recipients — only filled by the unified Sent list, which shows who a message went to rather than who sent it. */
   to?: EmailAddress[];
   hasAttachments?: boolean;
+  /** Part of a conversation, or answered by the user (absent when neither). */
+  conversation?: { replied: boolean; related: number };
   /** Set when the message was found by its text (the fallback when subject and sender matched nothing), not by subject or sender. */
   matchedInBody?: boolean;
   /** The message's categories (AI labels), when it has any. */
@@ -288,5 +291,11 @@ export function searchEmails(db: Database, userId: number, query: string, option
   const page = results.slice(offset, offset + limit);
   const withAttachments = emailIdsWithAttachments(db, page.map(r => r.id));
   const categories = taxonomyListsFor(db, page.map(r => r.id));
-  return page.map(r => ({ ...r, hasAttachments: withAttachments.has(r.id), ...(categories.has(r.id) ? { taxonomyList: categories.get(r.id) } : {}) }));
+  const conversations = conversationInfoFor(db, userId, page.map(r => r.id));
+  return page.map(r => ({
+    ...r,
+    hasAttachments: withAttachments.has(r.id),
+    ...(categories.has(r.id) ? { taxonomyList: categories.get(r.id) } : {}),
+    ...(conversations.has(r.id) ? { conversation: conversations.get(r.id) } : {}),
+  }));
 }

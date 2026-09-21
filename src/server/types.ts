@@ -86,6 +86,8 @@ export interface EmailRecord {
   attachments?: AttachmentRecord[];
   /** Number of real (non-inline) attachments — set on message-list rows, where `attachments` itself isn't loaded. */
   attachmentCount?: number;
+  /** On message-list rows that are part of a conversation or were answered: see models/conversations.ts. Absent otherwise. */
+  conversation?: { replied: boolean; related: number };
 }
 
 export interface AttachmentRecord {

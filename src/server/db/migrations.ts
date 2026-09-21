@@ -35,6 +35,8 @@ const MIGRATIONS = [
 /** Indexes on columns the migrations above add, so they can only be created afterwards. */
 const INDEXES = [
   // The imbox list walks a folder in date order and only visits messages classified as important.
+  // Conversations: who answers a message (In-Reply-To), looked up for every message on a page of a list.
+  "CREATE INDEX IF NOT EXISTS idx_emails_in_reply_to ON emails(in_reply_to)",
   "CREATE INDEX IF NOT EXISTS idx_emails_imbox ON emails(account_id, folder, date DESC, id DESC) WHERE imbox = 1",
 ];
 
