@@ -7,6 +7,32 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-21 - Conversations, "replied", and the earlier messages of a conversation (453ba7b)
+-----------------------------------------------------------------------------------------
+How messages are connected: by what they say about each other - Message-ID, In-Reply-To, References - over all of the user's accounts. Nothing new is
+stored (no thread column, no backfill of old mail, nothing to keep in step as mail arrives). New index emails(in_reply_to); with the existing
+emails(message_id) it answers, for a page of a list, in two lookups: has the user answered this message (a message from one of their own addresses has it
+as In-Reply-To - drafts and copies in other folders don't count) and how many messages are directly related to it. The whole conversation of one message is
+walked when it is opened: to what it refers (In-Reply-To and References, so a missing message doesn't cut the chain) and to what answers it, level by level,
+at most 60 messages, copies counted once, drafts left out. 100 000 messages: a page of 100 in a few milliseconds.
+What the user sees (subtle on purpose):
+- In the lists (folder, combined Inbox/Sent/Imbox, search): two small quiet icons at the end of the subject line - a speech-bubble pair for "part of a
+  conversation" (tooltip: how many related messages) and a reply arrow for "you replied". Messages that are neither show nothing.
+- In the reading pane, only for a message that has relatives: one muted line under the header, "Conversation - 3 messages (this is 2 of 3)", that unfolds into the
+  messages before and after it, oldest first: who (yours are "You"), when, how it starts, an unread dot; the current one is marked. A click opens that message in
+  the reading pane wherever it lives (Inbox, Sent, another account) - like a search result it becomes the open message without moving the list, the filter or the
+  sidebar. So the earlier messages of a conversation are one click away.
+- When the message was answered: a small reply icon beside its subject, and "See your reply" in the conversation line, open the answer.
+API: GET /api/accounts/:email/emails/:id/conversation -> { messages: [{ id, accountEmail, folder, subject, from, date, isRead, own, snippet, current }], repliedBy };
+list rows get conversation: { replied, related } only when there is something to say (so nothing changes for messages without relatives).
+Not covered, on purpose: no matching by subject (a "Re:" without headers stays alone rather than joining strangers); a reply that has only References and no
+In-Reply-To finds its parent but is not found from it; the IMAP \Answered flag isn't used (an answer is recognised by the reply being in the mailbox); the icons
+don't refresh the moment a reply is sent, only with the next list refresh.
+Tests: the model (chains from any message, References with gaps, out-of-order arrival, across accounts, repliedBy, copies, drafts, the 60 cap and loops, other
+users, the indexes and the timing on 100 000 rows), the HTTP routes, and the UI (list icons, the bar folded/unfolded, opening another message, See your reply,
+the header icon, nothing without a conversation). Not looked at in a browser.
+
+
 2026-09-21 - Imbox: learning from the user, domain knowledge, calendar invitations, unread count (4367eec)
 -------------------------------------------------------------------------------------------------------
 Learning from the user
