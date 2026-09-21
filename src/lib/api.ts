@@ -1,6 +1,6 @@
 import type { NewMailResult } from "./notifications";
 import type { AiApiInput, AiApiRecord, AiSkillInput, AiSkillRecord } from "../server/models/ai";
-import type { AiCategory } from "../ai/categories";
+import type { AiCategory, AiVendor } from "../ai/categories";
 import type { Account, DownloadJob, EmailRecord, User } from "../server/types";
 import type { CreateAccountInput, UpdateAccountInput } from "../server/models/accounts";
 import type { EmailInput } from "../server/models/emails";
@@ -272,6 +272,9 @@ export const api = {
   updateAiApi: (token: string, id: number, input: AiApiInput) => request<AiApiRecord>("PATCH", `/api/ai/apis/${id}`, { token, body: input }),
   deleteAiApi: (token: string, id: number) => request<void>("DELETE", `/api/ai/apis/${id}`, { token }),
   testAiApi: (token: string, id: number) => request<{ ok: true; answer: string }>("POST", `/api/ai/apis/${id}/test`, { token }),
+  /** The models a local server (OpenAI-compatible, Ollama) offers; `apiId` lets a saved provider's key be used. */
+  listAiModels: (token: string, input: { vendor: AiVendor; baseUrl?: string | null; apiKey?: string; apiId?: number | null }) =>
+    request<{ models: string[] }>("POST", "/api/ai/models", { token, body: input }),
   listAiSkills: (token: string) => request<AiSkillRecord[]>("GET", "/api/ai/skills", { token }),
   createAiSkill: (token: string, input: AiSkillInput) => request<AiSkillRecord>("POST", "/api/ai/skills", { token, body: input }),
   updateAiSkill: (token: string, id: number, input: AiSkillInput) => request<AiSkillRecord>("PATCH", `/api/ai/skills/${id}`, { token, body: input }),

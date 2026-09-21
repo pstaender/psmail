@@ -293,7 +293,7 @@ function installMockFetch(
     inputTokens: 0,
     outputTokens: 0,
     ...record,
-    label: record.name || `${({ anthropic: "Anthropic", openai: "OpenAI", google: "Google", ollama: "Ollama" } as Record<string, string>)[record.vendor]}.${record.model}`,
+    label: record.name || `${({ anthropic: "Anthropic", openai: "OpenAI", "openai-compatible": "OpenAI-compatible", google: "Google", ollama: "Ollama" } as Record<string, string>)[record.vendor]}.${record.model}`,
   });
   contactRequests.length = 0;
   folderRequests = 0;
@@ -442,6 +442,7 @@ function installMockFetch(
         currentAiApis = [...currentAiApis, record];
         return jsonResponse(withLabel(record), 201);
       }
+      if (path === "/api/ai/models" && method === "POST") return jsonResponse({ models: ["qwen/qwen3-8b", "llama-3"] });
       const apiById = /^\/api\/ai\/apis\/(\d+)$/.exec(path);
       if (apiById && method === "DELETE") {
         currentAiApis = currentAiApis.filter(a => a.id !== Number(apiById[1]));
@@ -3854,6 +3855,24 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await userEvent.click(screen.getByRole("button", { name: /add skill/i }));
       const providers = Array.from((screen.getByLabelText("AI provider") as HTMLSelectElement).options).map(o => o.textContent);
       expect(providers).toEqual(["OpenAI.gpt-5", "Work Claude"]);
+    });
+
+    test("an OpenAI-compatible provider needs no key, suggests the LM Studio address and can look up the server's models", async () => {
+      installMockFetch();
+      await login();
+      await openAiTab();
+      await userEvent.click(await screen.findByRole("button", { name: /add provider/i }));
+      await userEvent.selectOptions(screen.getByLabelText("Vendor"), "openai-compatible");
+      expect(screen.getByLabelText("API key (optional)")).toBeTruthy();
+      expect((screen.getByLabelText(/Address/) as HTMLInputElement).placeholder).toBe("http://localhost:1234/v1");
+
+      await userEvent.click(screen.getByRole("button", { name: "Find models" }));
+      await waitFor(() => expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe("qwen/qwen3-8b")); // the first one is filled in
+      expect(calls("POST", "/api/ai/models")).toEqual([{ vendor: "openai-compatible", baseUrl: null, apiId: null }]);
+
+      await userEvent.click(screen.getByRole("button", { name: "Save provider" }));
+      await waitFor(() => expect(calls("POST", "/api/ai/apis")).toEqual([expect.objectContaining({ vendor: "openai-compatible", model: "qwen/qwen3-8b" })]));
+      expect(await screen.findByText("OpenAI-compatible.qwen/qwen3-8b")).toBeTruthy();
     });
 
     test("editing a provider keeps its key unless a new one is typed; Test reports the result", async () => {

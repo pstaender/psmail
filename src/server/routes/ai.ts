@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { isAiCategory, type AiCategory } from "../../ai/categories";
+import { isAiCategory, isAiVendor, type AiCategory } from "../../ai/categories";
 import { json, parseIntParam, readJsonBody, requireAuth, withErrorHandling } from "../http";
 import {
   createAiApi,
@@ -21,7 +21,7 @@ import {
 import { assertAccountEnabled } from "../models/accounts";
 import { getEmail, getEmailRow, setEmailAiFields } from "../models/emails";
 import { getUserSettings } from "../models/userSettings";
-import { complete, emailTextForAi, parseTaxonomy, runSkill } from "../services/ai";
+import { complete, emailTextForAi, listModels, parseTaxonomy, runSkill } from "../services/ai";
 import { icsFromAnswer } from "../services/ics";
 import { ApiError, NotFoundError } from "../types";
 import { getOwnedAccountByEmailParam } from "./accounts";
@@ -113,6 +113,21 @@ export function aiRoutes(db: Database) {
         const result = await complete(api, "You are a connection test. Answer with the single word: OK", "Ping");
         recordAiUsage(db, api.id, result.usage);
         return json({ ok: true, answer: result.text.slice(0, 80) });
+      }),
+    },
+    /**
+     * The models a local server offers (OpenAI-compatible: GET <address>/models; Ollama: /api/tags), for the model field. Body:
+     * `{ vendor, baseUrl?, apiKey?, apiId? }` — with `apiId` an already saved provider's key is used when none is typed.
+     */
+    "/api/ai/models": {
+      POST: withErrorHandling(async req => {
+        const { session, encryptionKey } = requireAuth(req, db);
+        const body = await readJsonBody<{ vendor?: unknown; baseUrl?: unknown; apiKey?: unknown; apiId?: unknown }>(req);
+        if (!isAiVendor(body.vendor)) throw new ApiError(400, "Unknown vendor");
+        let apiKey = typeof body.apiKey === "string" && body.apiKey.trim() ? body.apiKey.trim() : null;
+        if (!apiKey && typeof body.apiId === "number") apiKey = getAiApiConfig(db, session.userId, body.apiId, encryptionKey).apiKey ?? null;
+        const baseUrl = typeof body.baseUrl === "string" && body.baseUrl.trim() ? body.baseUrl.trim() : null;
+        return json({ models: await listModels(body.vendor, baseUrl, apiKey) });
       }),
     },
     "/api/ai/skills": {

@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { AI_VENDORS, VENDOR_LABELS, defaultApiLabel, isAiCategory, isAiVendor, type AiCategory, type AiVendor } from "../../ai/categories";
+import { AI_VENDORS, KEYLESS_VENDORS, VENDOR_LABELS, defaultApiLabel, isAiCategory, isAiVendor, type AiCategory, type AiVendor } from "../../ai/categories";
 import { decryptSecret, encryptSecret } from "../crypto/secrets";
 import { ApiError, NotFoundError } from "../types";
 
@@ -97,7 +97,7 @@ export function createAiApi(db: Database, userId: number, input: AiApiInput, enc
   const model = input.model?.trim();
   if (!model) throw new ApiError(400, "model is required");
   const apiKey = input.apiKey?.trim() || null;
-  if (vendor !== "ollama" && !apiKey) throw new ApiError(400, `${VENDOR_LABELS[vendor]} needs an API key`);
+  if (!KEYLESS_VENDORS.includes(vendor) && !apiKey) throw new ApiError(400, `${VENDOR_LABELS[vendor]} needs an API key`);
   const name = input.name?.trim() ?? "";
 
   const row = db
@@ -117,7 +117,7 @@ export function updateAiApi(db: Database, userId: number, id: number, input: AiA
   let keyEncrypted = existing.api_key_encrypted;
   if (input.apiKey === null) keyEncrypted = null;
   else if (typeof input.apiKey === "string" && input.apiKey.trim()) keyEncrypted = encryptSecret(input.apiKey.trim(), encryptionKey);
-  if (vendor !== "ollama" && keyEncrypted === null) throw new ApiError(400, `${VENDOR_LABELS[vendor]} needs an API key`);
+  if (!KEYLESS_VENDORS.includes(vendor) && keyEncrypted === null) throw new ApiError(400, `${VENDOR_LABELS[vendor]} needs an API key`);
 
   const row = db
     .query<AiApiRow, [string, string, string, string | null, string | null, number]>(

@@ -7,13 +7,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { api, type UserSettings } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { AI_CATEGORIES, AI_VENDORS, SKILL_DEFAULTS, VENDOR_LABELS, defaultApiLabel, type AiCategory, type AiVendor } from "../../ai/categories";
+import { AI_CATEGORIES, AI_VENDORS, DEFAULT_ADDRESSES, KEYLESS_VENDORS, SKILL_DEFAULTS, VENDOR_LABELS, defaultApiLabel, type AiCategory, type AiVendor } from "../../ai/categories";
 import type { AiApiRecord, AiSkillRecord } from "../../server/models/ai";
 
 const MODEL_EXAMPLES: Record<AiVendor, string> = {
   anthropic: "e.g. claude-opus-5",
   openai: "e.g. gpt-5",
   google: "e.g. gemini-2.5-pro",
+  "openai-compatible": "e.g. qwen/qwen3-8b — the name the server uses",
   ollama: "e.g. llama3.1",
 };
 
@@ -65,6 +66,7 @@ export function AiSettings({
   const [skillForm, setSkillForm] = useState<SkillForm | null>(null);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState<number | null>(null);
+  const [models, setModels] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [language, setLanguage] = useState(settings.aiTargetLanguage ?? "");
 
@@ -84,6 +86,21 @@ export function AiSettings({
   }, [load]);
 
   const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+  /** Ask the server at the typed address which models it has, to offer them in the model field. */
+  async function findModels() {
+    if (!token || !apiForm) return;
+    setError(null);
+    try {
+      const found = await api.listAiModels(token, { vendor: apiForm.vendor, baseUrl: apiForm.baseUrl.trim() || null, apiKey: apiForm.apiKey.trim() || undefined, apiId: apiForm.id });
+      setModels(found.models);
+      if (found.models.length === 0) toast.info("The server doesn't list any model — load one first.");
+      else if (!apiForm.model.trim()) setApiForm({ ...apiForm, model: found.models[0]! });
+    } catch (err) {
+      setModels([]);
+      setError(message(err));
+    }
+  }
 
   async function saveApi(e: React.FormEvent) {
     e.preventDefault();
@@ -261,11 +278,16 @@ export function AiSettings({
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="ai-api-model">Model</Label>
-                <Input id="ai-api-model" placeholder={MODEL_EXAMPLES[apiForm.vendor]} value={apiForm.model} onChange={e => setApiForm({ ...apiForm, model: e.target.value })} />
+                <Input id="ai-api-model" list="ai-api-models" placeholder={MODEL_EXAMPLES[apiForm.vendor]} value={apiForm.model} onChange={e => setApiForm({ ...apiForm, model: e.target.value })} />
+                <datalist id="ai-api-models">
+                  {models.map(name => (
+                    <option key={name} value={name} />
+                  ))}
+                </datalist>
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="ai-api-key">API key{apiForm.vendor === "ollama" ? " (optional)" : ""}</Label>
+              <Label htmlFor="ai-api-key">API key{KEYLESS_VENDORS.includes(apiForm.vendor) ? " (optional)" : ""}</Label>
               <Input
                 id="ai-api-key"
                 type="password"
@@ -275,15 +297,20 @@ export function AiSettings({
                 onChange={e => setApiForm({ ...apiForm, apiKey: e.target.value })}
               />
             </div>
-            {(apiForm.vendor === "ollama" || apiForm.vendor === "openai") && (
+            {(apiForm.vendor === "ollama" || apiForm.vendor === "openai" || apiForm.vendor === "openai-compatible") && (
               <div className="space-y-1.5">
                 <Label htmlFor="ai-api-url">Address (optional)</Label>
                 <Input
                   id="ai-api-url"
-                  placeholder={apiForm.vendor === "ollama" ? "http://localhost:11434" : "https://api.openai.com/v1 — or another OpenAI-compatible service"}
+                  placeholder={DEFAULT_ADDRESSES[apiForm.vendor] ?? "https://api.openai.com/v1 — or another OpenAI-compatible service"}
                   value={apiForm.baseUrl}
                   onChange={e => setApiForm({ ...apiForm, baseUrl: e.target.value })}
                 />
+                {(apiForm.vendor === "ollama" || apiForm.vendor === "openai-compatible") && (
+                  <Button type="button" variant="outline" size="sm" onClick={findModels}>
+                    Find models
+                  </Button>
+                )}
               </div>
             )}
             <div className="space-y-1.5">

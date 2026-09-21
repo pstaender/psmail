@@ -20,7 +20,7 @@ import {
 } from "../../src/server/models/ai";
 import { parseJsonArray } from "../../src/server/services/jsonAnswer";
 import { parseEventsAnswer } from "../../src/server/services/ics";
-import { aiHttp, aiLog, complete, emailTextForAi, parseTaxonomy, renderPrompt } from "../../src/server/services/ai";
+import { aiHttp, aiLog, complete, emailTextForAi, listModels, parseTaxonomy, renderPrompt } from "../../src/server/services/ai";
 import { SKILL_DEFAULTS, AI_CATEGORIES, defaultApiLabel } from "../../src/ai/categories";
 
 const key = deriveEncryptionKey("pw", generateSalt());
@@ -65,6 +65,8 @@ describe("AI APIs", () => {
 
     const ollama = createAiApi(db, user.id, { vendor: "ollama", model: "llama3", baseUrl: "http://localhost:11434/" }, key);
     expect(ollama).toMatchObject({ hasKey: false, baseUrl: "http://localhost:11434" });
+    const lmStudio = createAiApi(db, user.id, { vendor: "openai-compatible", model: "qwen", baseUrl: "http://localhost:1234/v1/" }, key);
+    expect(lmStudio).toMatchObject({ vendor: "openai-compatible", hasKey: false, baseUrl: "http://localhost:1234/v1" });
   });
 
   test("updating keeps the stored key unless a new one is given", async () => {
@@ -222,6 +224,47 @@ describe("talking to the vendors", () => {
     expect(calls[0]!.url).toBe("https://llm.example.com/v1/chat/completions");
     expect((calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer sk-o");
     expect(calls[0]!.body.messages).toEqual([{ role: "system", content: "SYS" }, { role: "user", content: "USER" }]);
+  });
+
+  test("OpenAI-compatible: local server, no key, /v1 added to a bare address, thinking removed, usage counted", async () => {
+    const calls = stub({ choices: [{ message: { content: "<think>hmm</think>\n\nThe answer" } }], usage: { prompt_tokens: 9, completion_tokens: 4 } });
+    const result = await complete({ id: 1, vendor: "openai-compatible", model: "qwen", baseUrl: null, apiKey: null }, "SYS", "USER");
+    expect(result.text).toBe("The answer");
+    expect(result.usage).toEqual({ inputTokens: 9, outputTokens: 4 });
+    expect(calls[0]!.url).toBe("http://localhost:1234/v1/chat/completions");
+    expect((calls[0]!.init.headers as Record<string, string>).authorization).toBeUndefined();
+    expect(calls[0]!.body.messages).toEqual([{ role: "system", content: "SYS" }, { role: "user", content: "USER" }]);
+
+    await complete({ id: 1, vendor: "openai-compatible", model: "m", baseUrl: "http://gpu-box:8000", apiKey: "k" }, "s", "u");
+    expect(calls[1]!.url).toBe("http://gpu-box:8000/v1/chat/completions");
+    expect((calls[1]!.init.headers as Record<string, string>).authorization).toBe("Bearer k");
+    await complete({ id: 1, vendor: "openai-compatible", model: "m", baseUrl: "https://openrouter.ai/api/v1/", apiKey: null }, "s", "u");
+    expect(calls[2]!.url).toBe("https://openrouter.ai/api/v1/chat/completions");
+
+    aiHttp.fetch = async () => {
+      throw new TypeError("fetch failed");
+    };
+    await expect(complete({ id: 1, vendor: "openai-compatible", model: "m", baseUrl: null, apiKey: null }, "s", "u")).rejects.toThrow(/is the server running at http:\/\/localhost:1234\/v1/);
+  });
+
+  test("model lists: OpenAI-compatible /models and Ollama /api/tags", async () => {
+    const urls: string[] = [];
+    aiHttp.fetch = async url => {
+      urls.push(String(url));
+      return new Response(JSON.stringify(String(url).endsWith("/api/tags") ? { models: [{ name: "llama3" }] } : { data: [{ id: "a/b" }, { id: "c" }, {}] }));
+    };
+    expect(await listModels("openai-compatible", null, null)).toEqual(["a/b", "c"]);
+    expect(await listModels("ollama", null, null)).toEqual(["llama3"]);
+    expect(urls).toEqual(["http://localhost:1234/v1/models", "http://localhost:11434/api/tags"]);
+    await expect(listModels("anthropic", null, null)).rejects.toThrow(/can be listed/);
+  });
+
+  test("OpenAI-compatible: works live against a local LM Studio, when there is one", async () => {
+    aiHttp.fetch = original;
+    const listed = await fetch("http://localhost:1234/v1/models", { signal: AbortSignal.timeout(1500) }).then(r => r.json() as Promise<{ data: { id: string }[] }>).catch(() => null);
+    const model = listed?.data.find(m => !/embed/i.test(m.id))?.id;
+    if (!model) return; // nothing running here
+    expect(await listModels("openai-compatible", "http://localhost:1234", null)).toContain(model);
   });
 
   test("Google: generateContent with the model in the path and the key in a header", async () => {

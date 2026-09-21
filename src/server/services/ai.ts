@@ -1,4 +1,4 @@
-import { VENDOR_LABELS, type AiCategory } from "../../ai/categories";
+import { DEFAULT_ADDRESSES, VENDOR_LABELS, type AiCategory, type AiVendor } from "../../ai/categories";
 import type { AiApiConfig, AiSkillRecord, AiUsage } from "../models/ai";
 import { peekSettings } from "../config/settings";
 import { ANY_QUOTES_AT_ENDS, parseJsonArray } from "./jsonAnswer";
@@ -30,6 +30,51 @@ function block(label: string, text: string): string {
 
 const TIMEOUT_MS = 90_000;
 const MAX_INPUT_CHARS = 60_000;
+
+/**
+ * The base URL of an OpenAI-compatible server, as the API paths are appended to it: the address as given without a trailing slash,
+ * and `/v1` added when only a host was given (people type http://localhost:1234 and mean LM Studio's http://localhost:1234/v1).
+ */
+export function compatibleBase(address: string | null | undefined): string {
+  const given = (address?.trim() || DEFAULT_ADDRESSES["openai-compatible"]!).replace(/\/+$/, "");
+  try {
+    return new URL(given).pathname.replace(/\/+$/, "") === "" ? `${given}/v1` : given;
+  } catch {
+    return given;
+  }
+}
+
+/** Reasoning models that put their thinking in the answer itself (<think>…</think>) — the reasoning is not part of the answer. */
+export function withoutThinking(content: unknown): unknown {
+  return typeof content === "string" ? content.replace(/^\s*<think>[\s\S]*?<\/think>\s*/i, "") : content;
+}
+
+/** "(is Ollama running at …?)" — what to check when a server on this machine doesn't answer. */
+function localServerHint(vendor: AiVendor, address: string | null): string {
+  if (vendor === "ollama") return ` (is Ollama running at ${address ?? DEFAULT_ADDRESSES.ollama}?)`;
+  if (vendor === "openai-compatible") return ` (is the server running at ${compatibleBase(address)}, with a model loaded?)`;
+  return "";
+}
+
+/**
+ * The models a server offers, for the model field: an OpenAI-compatible server lists them at `<address>/models`, Ollama at
+ * `/api/tags`. Other vendors have no such list here. Never throws for an unreachable server's sake — the caller decides what to say.
+ */
+export async function listModels(vendor: AiVendor, address: string | null, apiKey: string | null): Promise<string[]> {
+  if (vendor !== "openai-compatible" && vendor !== "ollama") throw new ApiError(400, `Models can be listed for ${VENDOR_LABELS.ollama} and ${VENDOR_LABELS["openai-compatible"]}`);
+  const url = vendor === "ollama" ? `${(address ?? DEFAULT_ADDRESSES.ollama!).replace(/\/+$/, "")}/api/tags` : `${compatibleBase(address)}/models`;
+  const headers: Record<string, string> = apiKey ? { authorization: `Bearer ${apiKey}` } : {};
+  let response: Response;
+  try {
+    response = await aiHttp.fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
+  } catch {
+    throw new ApiError(502, `${VENDOR_LABELS[vendor]}: it couldn't be reached at ${url}.`);
+  }
+  if (!response.ok) throw new ApiError(502, `${VENDOR_LABELS[vendor]} answered with an error (${response.status}) for its model list.`);
+  const data = (await response.json().catch(() => null)) as { data?: { id?: unknown }[]; models?: { name?: unknown }[] } | null;
+  const names = vendor === "ollama" ? (data?.models ?? []).map(m => m.name) : (data?.data ?? []).map(m => m.id);
+  return names.filter((name): name is string => typeof name === "string" && name !== "");
+}
 
 /** How much of the API's complaint to pass on to the user. */
 function describeFailure(vendor: string, status: number, body: string): string {
@@ -82,6 +127,14 @@ export async function complete(api: AiApiConfig, system: string, user: string): 
       extract = data => data?.choices?.[0]?.message?.content;
       usageOf = data => ({ input: data?.usage?.prompt_tokens, output: data?.usage?.completion_tokens });
       break;
+    case "openai-compatible":
+      // Any server that speaks the OpenAI chat-completions API. It needs no key unless it wants one; the address decides where.
+      url = `${compatibleBase(api.baseUrl)}/chat/completions`;
+      if (api.apiKey) headers = { ...headers, authorization: `Bearer ${api.apiKey}` };
+      body = { model: api.model, messages: [{ role: "system", content: system }, { role: "user", content: input }] };
+      extract = data => withoutThinking(data?.choices?.[0]?.message?.content);
+      usageOf = data => ({ input: data?.usage?.prompt_tokens, output: data?.usage?.completion_tokens });
+      break;
     case "google":
       url = `${api.baseUrl ?? "https://generativelanguage.googleapis.com"}/v1beta/models/${encodeURIComponent(api.model)}:generateContent`;
       headers = { ...headers, "x-goog-api-key": api.apiKey ?? "" };
@@ -112,7 +165,7 @@ export async function complete(api: AiApiConfig, system: string, user: string): 
   } catch (error) {
     if (log) aiLog.write(`[ai] ✗ ${callId}  no answer after ${Date.now() - started} ms: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`);
     const reason = error instanceof Error && error.name === "TimeoutError" ? "it didn't answer in time" : "it couldn't be reached";
-    throw new ApiError(502, `${vendorLabel}: ${reason}${api.vendor === "ollama" ? ` (is Ollama running at ${api.baseUrl ?? "http://localhost:11434"}?)` : ""}.`);
+    throw new ApiError(502, `${vendorLabel}: ${reason}${localServerHint(api.vendor, api.baseUrl)}.`);
   }
 
   const text = await response.text();
