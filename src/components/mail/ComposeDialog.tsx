@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { Languages, Loader2, Paperclip, Send as SendIcon, Sparkles, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -76,6 +85,25 @@ export function ComposeDialog({
 
   const isEditing = initial?.id !== undefined;
 
+  // Changes that are not saved: what the fields hold now against what the dialog was opened with. (An attachment removed from
+  // an existing draft is already gone on the server, so it isn't a pending change; a file added is.) Line endings and trailing
+  // blank lines are ignored, so an editor that tidies the text on load doesn't make an untouched draft look edited.
+  const same = (a: string, b: string) => a.replace(/\r\n?/g, "\n").trimEnd() === b.replace(/\r\n?/g, "\n").trimEnd();
+  const dirty =
+    !same(to, initial?.to ?? "") ||
+    !same(cc, initial?.cc ?? "") ||
+    !same(bcc, initial?.bcc ?? "") ||
+    !same(subject, initial?.subject ?? "") ||
+    !same(body, initial?.body ?? "") ||
+    files.length > 0;
+  const [askingToClose, setAskingToClose] = useState(false);
+  const discardRef = useRef<HTMLButtonElement>(null);
+
+  /** Every way of closing the window (Esc, the x, a click outside) comes through here: with unsaved changes it asks first. */
+  function requestClose(next: boolean) {
+    if (!next && dirty && busy === null) setAskingToClose(true);
+    else onOpenChange(next);
+  }
   // "Refine" (AI): rewrites the part of the draft you wrote — not the signature or the quoted original — and keeps the
   // text from before so it can be undone.
   const [refining, setRefining] = useState<AiCategory | null>(null);
@@ -128,6 +156,7 @@ export function ComposeDialog({
       setError(null);
       setBeforeRefine(null);
       setTranslateTo(null);
+      setAskingToClose(false);
     }
   }, [open, initial]);
 
@@ -182,7 +211,7 @@ export function ComposeDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={requestClose}>
       <DialogContent
         className="flex max-h-[85vh] flex-col sm:max-w-xl lg:max-w-[50rem]"
         // A reply arrives with the recipient already filled in, so the cursor belongs in the message,
@@ -361,6 +390,42 @@ export function ComposeDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      <AlertDialog open={askingToClose} onOpenChange={setAskingToClose}>
+        <AlertDialogContent
+          // Discarding is the default: it is what closing a window usually means, and Enter does it.
+          onOpenAutoFocus={e => {
+            e.preventDefault();
+            discardRef.current?.focus();
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>{isEditing ? "Save the changes to this draft?" : "Save this message as a draft?"}</AlertDialogTitle>
+            <AlertDialogDescription>You have made changes that are not saved yet.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setAskingToClose(false);
+                saveAndMaybeSend(false); // closes the window when it worked; on an error it stays open and says why
+              }}
+            >
+              Save draft
+            </Button>
+            <Button
+              ref={discardRef}
+              onClick={() => {
+                setAskingToClose(false);
+                onOpenChange(false);
+              }}
+            >
+              Discard changes
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

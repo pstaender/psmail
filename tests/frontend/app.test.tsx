@@ -920,6 +920,125 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(capturedCreateDraftBody?.folder).toBe("Entwürfe");
   });
 
+  describe("closing a compose window with unsaved changes", () => {
+    afterEach(() => {
+      toast.dismiss(); // sonner's toast store is global: the "E-Mail sent" toast must not show up in the next test
+    });
+    async function openNew() {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+      await userEvent.click(screen.getByRole("button", { name: /^new$/i }));
+      expect(await screen.findByText("New message")).toBeTruthy();
+    }
+    const question = () => screen.findByRole("alertdialog");
+
+    test("an untouched window closes without asking", async () => {
+      await openNew();
+      await userEvent.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByText("New message")).toBeNull());
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+    });
+
+    test("with changes, closing asks; Discard is the default, so Enter throws the changes away", async () => {
+      await openNew();
+      await userEvent.type(screen.getByLabelText("Subject"), "Half written");
+      await userEvent.keyboard("{Escape}"); // focus is in the subject field; Esc closes the window…
+
+      const ask = within(await question());
+      expect(ask.getByText("Save this message as a draft?")).toBeTruthy(); // …but not before asking
+      expect(screen.getByText("New message")).toBeTruthy(); // the window is still there behind the question
+      expect(document.activeElement).toBe(ask.getByRole("button", { name: "Discard changes" })); // the default
+
+      await userEvent.keyboard("{Enter}");
+      await waitFor(() => expect(screen.queryByText("New message")).toBeNull());
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(capturedCreateDraftBody).toBeNull(); // nothing was saved
+    });
+
+    test("Save draft in the question saves what was typed, and closes", async () => {
+      await openNew();
+      await userEvent.type(screen.getByLabelText("Subject"), "Keep me");
+      await userEvent.keyboard("{Escape}");
+
+      await userEvent.click(within(await question()).getByRole("button", { name: "Save draft" }));
+      await waitFor(() => expect(screen.queryByText("New message")).toBeNull());
+      expect(capturedCreateDraftBody?.subject).toBe("Keep me");
+      expect(capturedCreateDraftBody?.folder).toBe("Entwürfe");
+    });
+
+    test("Keep editing goes back to the window with everything still in it", async () => {
+      await openNew();
+      await userEvent.type(screen.getByLabelText("Subject"), "Not done");
+      await userEvent.keyboard("{Escape}");
+
+      await userEvent.click(within(await question()).getByRole("button", { name: "Keep editing" }));
+      await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+      expect((screen.getByLabelText("Subject") as HTMLInputElement).value).toBe("Not done");
+      expect(capturedCreateDraftBody).toBeNull();
+    });
+
+    test("the x and a click outside ask too", async () => {
+      await openNew();
+      await userEvent.type(screen.getByLabelText("Subject"), "Via the x");
+      const dialog = screen.getByText("New message").closest('[role="dialog"]') as HTMLElement;
+      await userEvent.click(within(dialog).getByRole("button", { name: /close/i }));
+      expect(await question()).toBeTruthy();
+    });
+
+    test("typing in To, adding a file, or changing the body counts as a change; sending doesn't ask", async () => {
+      await openNew();
+      await userEvent.type(screen.getByLabelText("To"), "bob@example.com");
+      await userEvent.keyboard("{Escape}");
+      await userEvent.click(within(await question()).getByRole("button", { name: "Discard changes" }));
+      await waitFor(() => expect(screen.queryByText("New message")).toBeNull());
+
+      await userEvent.click(screen.getByRole("button", { name: /^new$/i }));
+      await screen.findByText("New message");
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+      await userEvent.upload(input, new File(["hello"], "note.txt", { type: "text/plain" }));
+      await userEvent.keyboard("{Escape}");
+      await userEvent.click(within(await question()).getByRole("button", { name: "Discard changes" }));
+      await waitFor(() => expect(screen.queryByText("New message")).toBeNull());
+
+      await userEvent.click(screen.getByRole("button", { name: /^new$/i }));
+      await screen.findByText("New message");
+      await userEvent.type(screen.getByLabelText("To"), "bob@example.com");
+      await userEvent.type(screen.getByLabelText("Subject"), "Sent it");
+      await userEvent.click(screen.getByRole("button", { name: /^send$/i }));
+      await waitFor(() => expect(screen.queryByText("New message")).toBeNull());
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+    });
+
+    test("a reply that wasn't touched closes quietly; editing an existing draft asks about the changes to it and saves them in place", async () => {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+
+      await userEvent.click(await screen.findByText("Hello there"));
+      await userEvent.click(await screen.findByRole("button", { name: /^reply$/i }));
+      await screen.findByText("New message");
+      await userEvent.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByText("New message")).toBeNull());
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+
+      await userEvent.click(await screen.findByText("Unfinished draft"));
+      await userEvent.click(await screen.findByRole("button", { name: /edit draft/i }));
+      await screen.findByText("Edit draft", { selector: "[data-slot=dialog-title]" });
+      await userEvent.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByText("Edit draft", { selector: "[data-slot=dialog-title]" })).toBeNull()); // unchanged: no question
+
+      await userEvent.click(screen.getByRole("button", { name: /edit draft/i }));
+      await screen.findByText("Edit draft", { selector: "[data-slot=dialog-title]" });
+      await userEvent.type(screen.getByLabelText("Subject"), " v2");
+      await userEvent.keyboard("{Escape}");
+      const ask = within(await question());
+      expect(ask.getByText("Save the changes to this draft?")).toBeTruthy();
+      await userEvent.click(ask.getByRole("button", { name: "Save draft" }));
+      await waitFor(() => expect(capturedUpdateDraftBody?.subject).toBe("Unfinished draft v2")); // the same draft, updated
+    });
+  });
+
   test("composing a new message appends the account's signature to the body", async () => {
     installMockFetch({ accountOverrides: { signature: "Cheers,\nAlice" } });
     render(<App />);
