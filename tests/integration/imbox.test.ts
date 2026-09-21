@@ -203,4 +203,36 @@ describe("the imbox over HTTP", () => {
     const skipped = await read({ accounts: ["nobody@example.com"], stream: true }).catch(() => null);
     expect(skipped).toBeNull(); // an unknown account is refused before anything is streamed (404, not ndjson)
   });
+
+  test("marking by hand over HTTP: the message, its sender's later mail, the explanation, and the unread count of the imbox", async () => {
+    db.exec("UPDATE emails SET imbox = NULL, imbox_manual = 0");
+    db.exec("DELETE FROM imbox_feedback");
+    const account = ids["philipp@example.com"]!;
+    const shop = (subject: string) => createEmail(db, account, { folder: "INBOX", isDraft: false, from: [{ address: "deals@promo.example" }], to: [{ address: "philipp@example.com" }], subject, plainText: "Nur heute 40% Rabatt! Abbestellen.", headersRaw: "List-Unsubscribe: <x>", date: "2026-06-01T00:00:00Z" }).id;
+    const first = shop("Deal 1");
+    await call("POST", "/api/imbox/classify", { token, body: {} });
+    expect(getEmail(db, first).imbox).toBe(false);
+
+    const marked = await call("PUT", path("philipp@example.com", first), { token, body: { imbox: true } });
+    expect(marked.json.imbox).toBe(true);
+    const later = shop("Deal 2"); // arrives afterwards: classified like the sync does
+    await call("POST", "/api/imbox/classify", { token, body: {} });
+    expect(getEmail(db, later).imbox).toBe(true);
+
+    const explained = await call("GET", path("philipp@example.com", first), { token });
+    expect(explained.json).toMatchObject({ stored: true, manual: true, important: true });
+    const explainedLater = await call("GET", path("philipp@example.com", later), { token });
+    expect(explainedLater.json.decidedBy).toBe("your mark on this sender");
+    expect(explainedLater.json.manual).toBe(false); // classified, not marked: the sender was
+
+    // The unread count of the imbox: both deals are unread and important now (plus the earlier ones that are unread and in it).
+    const unreadBefore = (await call("GET", "/api/unified/imbox/unread", { token })).json.count;
+    expect(unreadBefore).toBeGreaterThanOrEqual(2);
+    await call("PATCH", `/api/accounts/philipp%40example.com/emails/${later}`, { token, body: { isRead: true } });
+    expect((await call("GET", "/api/unified/imbox/unread", { token })).json.count).toBe(unreadBefore - 1);
+    expect((await call("GET", "/api/unified/imbox/unread")).status).toBe(401);
+
+    await call("PUT", path("philipp@example.com", first), { token, body: { imbox: null } }); // taken back
+    expect(getEmail(db, first).imbox).toBeNull();
+  });
 });

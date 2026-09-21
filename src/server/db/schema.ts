@@ -92,6 +92,8 @@ CREATE TABLE IF NOT EXISTS emails (
   calendar_events TEXT,
   -- Imbox: 1 = important (a person's mail you want to see), 0 = not important, NULL = not classified yet (see services/imbox).
   imbox INTEGER,
+  -- 1 when the user set the imbox verdict by hand: classification never overwrites it (see models/imbox.ts).
+  imbox_manual INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   UNIQUE(account_id, folder, uid)
@@ -131,6 +133,18 @@ CREATE TABLE IF NOT EXISTS contacts (
   sent_count INTEGER NOT NULL DEFAULT 0,
   last_used TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (account_id, address)
+) WITHOUT ROWID;
+
+-- What the user said by hand about a sender ("important" / "not important" marks on their messages): one row per (user, address), with
+-- how many messages were marked each way and the latest opinion. The imbox classifier weighs it above everything else.
+CREATE TABLE IF NOT EXISTS imbox_feedback (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  address TEXT NOT NULL,
+  important INTEGER NOT NULL DEFAULT 0,
+  not_important INTEGER NOT NULL DEFAULT 0,
+  last_verdict INTEGER,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  PRIMARY KEY (user_id, address)
 ) WITHOUT ROWID;
 
 -- Tombstones for messages deleted (or moved away) locally only — a read-only account never tells the

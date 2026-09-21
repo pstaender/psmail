@@ -447,13 +447,24 @@ export function AppShell() {
   // server (which knows all accounts, not just the selected one) and then nudged optimistically
   // alongside the per-folder counts below; re-read whenever something else could have changed it.
   const [unifiedInboxUnread, setUnifiedInboxUnread] = useState(0);
+  // The same for the Imbox entry: the unread messages among the important ones (only asked for when the imbox is on).
+  const [imboxUnread, setImboxUnread] = useState(0);
+  const imboxOn = settings.imboxEnabled === true;
+  const refreshImboxUnread = useCallback(() => {
+    if (!token || !imboxOn) return;
+    api
+      .unifiedImboxUnread(token)
+      .then((r) => setImboxUnread(r.count))
+      .catch(() => {});
+  }, [token, imboxOn]);
   const refreshUnifiedInboxUnread = useCallback(() => {
     if (!token) return;
     api
       .unifiedInboxUnread(token)
       .then((r) => setUnifiedInboxUnread(r.count))
       .catch(() => {});
-  }, [token]);
+    refreshImboxUnread();
+  }, [token, refreshImboxUnread]);
   useEffect(() => {
     refreshUnifiedInboxUnread();
   }, [refreshUnifiedInboxUnread]);
@@ -461,8 +472,10 @@ export function AppShell() {
   function patchFolderCounts(
     folder: string,
     deltas: { total?: number; unread?: number },
+    imbox?: boolean | null,
   ) {
     patchRawFolderCounts(folder, deltas);
+    if (imbox && deltas.unread) setImboxUnread((count) => Math.max(0, count + deltas.unread!));
     if (folder.toLowerCase() === "inbox" && deltas.unread)
       setUnifiedInboxUnread((count) => Math.max(0, count + deltas.unread!));
   }
@@ -585,7 +598,7 @@ export function AppShell() {
         });
       patchLocal(selectedEmail.id, { isRead: true });
       patchSearchResult(selectedEmail.id, { isRead: true });
-      patchFolderCounts(selectedEmail.folder, { unread: -1 });
+      patchFolderCounts(selectedEmail.folder, { unread: -1 }, selectedEmail.imbox);
       setSelectedEmailDetail({ ...selectedEmail, isRead: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -908,7 +921,7 @@ export function AppShell() {
     const isRead = !previousIsRead;
     patchLocal(selectedEmail.id, { isRead });
     patchSearchResult(selectedEmail.id, { isRead });
-    patchFolderCounts(selectedEmail.folder, { unread: isRead ? -1 : 1 });
+    patchFolderCounts(selectedEmail.folder, { unread: isRead ? -1 : 1 }, selectedEmail.imbox);
     setSelectedEmailDetail({ ...selectedEmail, isRead });
     try {
       await api.updateEmail(token, messageAccountEmail, selectedEmail.id, {
@@ -917,9 +930,32 @@ export function AppShell() {
     } catch (err) {
       patchLocal(selectedEmail.id, { isRead: previousIsRead });
       patchSearchResult(selectedEmail.id, { isRead: previousIsRead });
-      patchFolderCounts(selectedEmail.folder, { unread: isRead ? 1 : -1 });
+      patchFolderCounts(selectedEmail.folder, { unread: isRead ? 1 : -1 }, selectedEmail.imbox);
       setSelectedEmailDetail({ ...selectedEmail, isRead: previousIsRead });
       toast.error(errorMessage(err, "Failed to update read status"));
+    }
+  }
+
+  /**
+   * The user's own verdict on the open message, from the small mark in its header: the imbox learns from it for this sender
+   * (see setImboxByHand on the server), so what arrives from them later follows.
+   */
+  async function markImbox(important: boolean) {
+    if (refuseIfDisabled(messageAccountEmail)) return;
+    if (!token || !messageAccountEmail || !selectedEmail) return;
+    const sender = selectedEmail.from[0]?.address;
+    try {
+      const updated = await api.setImbox(token, messageAccountEmail, selectedEmail.id, important);
+      if (openEmailId.current === updated.id) setSelectedEmailDetail(updated);
+      if (unifiedView === "imbox") refreshSearchResults();
+      refreshImboxUnread();
+      toast.success(
+        important
+          ? `Marked as important — it is in the Imbox${sender ? `, and so is mail from ${sender} from now on` : ""}.`
+          : `Marked as not important — it leaves the Imbox${sender ? `, and so does mail from ${sender} from now on` : ""}.`
+      );
+    } catch (err) {
+      toast.error(errorMessage(err, "Couldn't save that"));
     }
   }
 
@@ -950,6 +986,7 @@ export function AppShell() {
       });
     }
     setSelectedEmailId(null);
+    refreshImboxUnread();
     toast.success(result.softDeleted ? "Moved to Trash" : "Message deleted");
   }
 
@@ -978,6 +1015,7 @@ export function AppShell() {
       unread: selectedEmail.isRead ? 0 : 1,
     });
     setSelectedEmailId(null);
+    refreshImboxUnread();
     toast.success(`Moved to ${folder}`);
   }
 
@@ -1432,6 +1470,7 @@ export function AppShell() {
                 unifiedView={unifiedView}
                 onSelectUnified={selectUnified}
                 showImbox={settings.imboxEnabled === true}
+                imboxUnread={imboxUnread}
                 onSyncAllInboxes={syncAllInboxes}
                 syncingAccounts={
                   Object.values(syncJobs).filter(
@@ -1678,6 +1717,8 @@ export function AppShell() {
                 downloadMessages(messageAccountEmail, [selectedEmail.id])
               }
               onToggleRead={toggleRead}
+              imboxEnabled={imboxOn}
+              onMarkImbox={markImbox}
               onEditDraft={() => openCompose(editDraft(selectedEmail))}
               accountDisabled={isDisabledAccount(messageAccountEmail)}
               aiSkills={aiSkills}

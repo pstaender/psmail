@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { assertAccountEnabled, listAccounts } from "../models/accounts";
 import { json, parseIntParam, readJsonBody, requireAuth, withErrorHandling } from "../http";
-import { classifyAccounts, classifySteps, explainEmail, setImbox, type ClassifyResult } from "../models/imbox";
+import { classifyAccounts, classifySteps, explainEmail, setImboxByHand, type ClassifyResult } from "../models/imbox";
 import { getEmail, getEmailRow } from "../models/emails";
 import { ApiError, NotFoundError } from "../types";
 import { getOwnedAccountByEmailParam } from "./accounts";
@@ -116,9 +116,13 @@ export function imboxRoutes(db: Database) {
         const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
         const emailId = parseIntParam(req.params.emailId, "emailId");
         if (getEmailRow(db, emailId).account_id !== account.id) throw new NotFoundError(`Email ${emailId} not found`);
-        return json({ stored: getEmail(db, emailId).imbox, ...explainEmail(db, session.userId, emailId) });
+        const row = getEmailRow(db, emailId);
+        return json({ stored: getEmail(db, emailId).imbox, manual: !!row.imbox_manual, ...explainEmail(db, session.userId, emailId) });
       }),
-      /** Overrides the verdict by hand: `{ imbox: true | false }`, or null to have it classified again next time. */
+      /**
+       * The user's own verdict: `{ imbox: true | false }`, or null to take it back. It is kept (classification never overwrites it) and
+       * counts as a vote about the sender: mail that arrives later from the same address follows it.
+       */
       PUT: withErrorHandling(async req => {
         const { session } = requireAuth(req, db);
         const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
@@ -127,7 +131,7 @@ export function imboxRoutes(db: Database) {
         if (getEmailRow(db, emailId).account_id !== account.id) throw new NotFoundError(`Email ${emailId} not found`);
         const body = await readJsonBody<{ imbox?: unknown }>(req);
         if (body.imbox !== null && typeof body.imbox !== "boolean") throw new ApiError(400, "imbox must be true, false or null");
-        setImbox(db, emailId, body.imbox);
+        setImboxByHand(db, session.userId, emailId, body.imbox);
         return json(getEmail(db, emailId));
       }),
     },

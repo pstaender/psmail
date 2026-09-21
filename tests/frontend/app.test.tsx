@@ -174,6 +174,9 @@ const downloadAccounts: string[] = []; // the account of each of those POSTs
 const capturedResultPatches: Record<string, unknown>[] = [];
 // Bodies of POST /api/auth/change-password.
 const passwordChanges: Record<string, unknown>[] = [];
+// Bodies of PUT .../emails/:id/imbox (the marks by hand), and how many times the imbox unread count was asked for.
+let imboxMarks: { id: number; imbox: boolean | null }[] = [];
+let imboxUnreadRequests = 0;
 // Bodies of POST /api/auth/change-username.
 const usernameChanges: { username: string }[] = [];
 // Every bulk PATCH/DELETE/move request, with the account it went to.
@@ -239,6 +242,10 @@ function installMockFetch(
     otherAccountContacts?: boolean;
     /** Replaces the combined Inbox's rows (default: one starred message). */
     unifiedInboxRows?: Record<string, unknown>[];
+    /** What GET /api/unified/imbox/unread reports (the Imbox entry's badge). */
+    imboxUnread?: number;
+    /** The imbox verdict the opened message (id 10) has: true / false / null (not classified). */
+    emailImbox?: boolean | null;
     /** Makes POST /api/auth/change-username answer with this error (status 409) instead of succeeding. */
     changeUsernameError?: string;
     /** Makes POST /api/auth/change-password answer with this error (status 401) instead of succeeding. */
@@ -264,6 +271,8 @@ function installMockFetch(
   downloadAccounts.length = 0;
   capturedResultPatches.length = 0;
   passwordChanges.length = 0;
+  imboxMarks = [];
+  imboxUnreadRequests = 0;
   usernameChanges.length = 0;
   bulkRequests.length = 0;
   loginPosts.length = 0;
@@ -523,7 +532,16 @@ function installMockFetch(
     if (method === "POST" && /^\/api\/accounts\/me%40example\.com\/emails\/\d+\/send$/.test(path)) {
       return jsonResponse({ ...EMAIL, id: 999, isDraft: false, folder: "Sent" });
     }
-    if (method === "GET" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse(EMAIL);
+    if (method === "PUT" && /^\/api\/accounts\/me%40example.com\/emails\/\d+\/imbox$/.test(path)) {
+      const body = JSON.parse(init!.body as string) as { imbox: boolean | null };
+      imboxMarks.push({ id: 10, imbox: body.imbox });
+      return jsonResponse({ ...EMAIL, imbox: body.imbox });
+    }
+    if (method === "GET" && path === "/api/unified/imbox/unread") {
+      imboxUnreadRequests += 1;
+      return jsonResponse({ count: opts.imboxUnread ?? 0 });
+    }
+    if (method === "GET" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse({ ...EMAIL, imbox: opts.emailImbox ?? null });
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse(SECOND_EMAIL);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/12") return jsonResponse(THIRD_EMAIL);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/13") return jsonResponse(DRAFT_EMAIL);
@@ -1191,6 +1209,85 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     const entries = () =>
       Array.from(document.querySelectorAll("[title]")).map(el => el.getAttribute("title")!).filter(title => /^(Inbox|Imbox|Sent) of all accounts$/.test(title));
     const last = (list: "imbox") => listRequests.filter(r => r.list === list).at(-1)!.params;
+
+    describe("the unread count and the mark by hand", () => {
+      const imboxRow = () => screen.getByTitle("Imbox of all accounts");
+
+      test("the Imbox entry shows the number of unread important messages, and no badge at zero", async () => {
+        installMockFetch({ settings: { imboxEnabled: true }, imboxUnread: 4 });
+        await openApp();
+        await waitFor(() => expect(imboxRow().textContent).toContain("4"));
+        expect(screen.getByTitle("Inbox of all accounts").textContent).not.toContain("4"); // the Inbox has its own count
+      });
+
+      test("no badge at zero", async () => {
+        installMockFetch({ settings: { imboxEnabled: true }, imboxUnread: 0 });
+        await openApp();
+        await waitFor(() => expect(imboxUnreadRequests).toBeGreaterThan(0));
+        expect(imboxRow().querySelector('[data-slot="badge"]')).toBeNull();
+      });
+
+      test("without the imbox the count is never asked for", async () => {
+        await openApp();
+        await new Promise(resolve => setTimeout(resolve, 50));
+        expect(imboxUnreadRequests).toBe(0);
+      });
+
+      async function openMessage(opts: Parameters<typeof installMockFetch>[0]) {
+        installMockFetch(opts);
+        render(<App />);
+        await userEvent.click(await screen.findByText("default"));
+        await openAccountInbox();
+        await userEvent.click(await screen.findByText("Hello there"));
+        await waitFor(() => expect(screen.getAllByText("Hello there").length).toBeGreaterThan(1));
+      }
+
+      test("the message header has a quiet mark while the imbox is on; it says where the message is and flips it", async () => {
+        await openMessage({ settings: { imboxEnabled: true }, emailImbox: false });
+        const mark = await screen.findByRole("button", { name: /Not in the Imbox — mark as important/ });
+        expect(mark.getAttribute("aria-pressed")).toBe("false");
+        expect(mark.className).toContain("text-muted-foreground/40"); // quiet while it isn't
+
+        await userEvent.click(mark);
+        await waitFor(() => expect(imboxMarks).toEqual([{ id: 10, imbox: true }]));
+        const lit = await screen.findByRole("button", { name: /In the Imbox — mark as not important/ });
+        expect(lit.getAttribute("aria-pressed")).toBe("true");
+        expect(lit.className).toContain("text-primary");
+        expect((await screen.findAllByText(/Marked as important — it is in the Imbox, and so is mail from alice@example.com from now on/)).length).toBeGreaterThan(0);
+
+        await userEvent.click(lit); // and back
+        await waitFor(() => expect(imboxMarks.at(-1)).toEqual({ id: 10, imbox: false }));
+        expect((await screen.findAllByText(/Marked as not important — it leaves the Imbox/)).length).toBeGreaterThan(0);
+      });
+
+      test("a message that is in the imbox shows the mark lit from the start", async () => {
+        await openMessage({ settings: { imboxEnabled: true }, emailImbox: true });
+        expect((await screen.findByRole("button", { name: /In the Imbox/ })).getAttribute("aria-pressed")).toBe("true");
+      });
+
+      test("an unclassified message counts as not in the imbox", async () => {
+        await openMessage({ settings: { imboxEnabled: true }, emailImbox: null });
+        expect((await screen.findByRole("button", { name: /Not in the Imbox/ })).getAttribute("aria-pressed")).toBe("false");
+      });
+
+      test("no mark without the imbox", async () => {
+        await openMessage({});
+        expect(screen.queryByRole("button", { name: /Imbox/ })).toBeNull();
+      });
+
+      test("on a disabled account's mail the mark can't be clicked (the account is frozen)", async () => {
+        await openMessage({ settings: { imboxEnabled: true }, accountOverrides: { disabled: true } });
+        expect((await screen.findByRole("button", { name: /Not in the Imbox/ })).hasAttribute("disabled")).toBe(true);
+      });
+
+      test("reading an important message lowers the badge at once; marking asks for the count again", async () => {
+        await openMessage({ settings: { imboxEnabled: true }, imboxUnread: 3, emailImbox: true });
+        await waitFor(() => expect(imboxRow().textContent).toContain("2")); // it was unread and is in the imbox: 3 → 2
+        const before = imboxUnreadRequests;
+        await userEvent.click(await screen.findByRole("button", { name: /In the Imbox/ }));
+        await waitFor(() => expect(imboxUnreadRequests).toBeGreaterThan(before));
+      });
+    });
 
     test("off by default: the sidebar has just Inbox and Sent", async () => {
       await openApp();

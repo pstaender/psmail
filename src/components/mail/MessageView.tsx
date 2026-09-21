@@ -19,6 +19,8 @@ export function MessageView({
   onMove,
   onDownload,
   onToggleRead,
+  imboxEnabled = false,
+  onMarkImbox = () => {},
   onEditDraft,
   accountDisabled,
   aiSkills = [],
@@ -38,6 +40,9 @@ export function MessageView({
   onMove: (folder: string) => void;
   onDownload: () => void;
   onToggleRead: () => void;
+  /** The imbox is on: the message header offers to mark it important / not important. */
+  imboxEnabled?: boolean;
+  onMarkImbox?: (important: boolean) => void;
   onEditDraft: () => void;
   /** The message's account is disabled: read-only for good — every button that would change something is off. */
   accountDisabled: boolean;
@@ -66,7 +71,7 @@ export function MessageView({
         onSummarize={onSummarize}
         onTranslate={onTranslate}
       />
-      <MessageHeader email={email} summarizing={aiBusy === "summarize"} />
+      <MessageHeader email={email} summarizing={aiBusy === "summarize"} imboxEnabled={imboxEnabled} imboxDisabled={accountDisabled} onMarkImbox={onMarkImbox} />
       <AttachmentList accountEmail={accountEmail} emailId={email.id} attachments={email.attachments ?? []} />
       <div className="flex-1 overflow-y-auto">
         <MessageBody

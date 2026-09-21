@@ -44,6 +44,7 @@ interface EmailRow {
   translated_language?: string | null;
   calendar_events?: string | null;
   imbox?: number | null;
+  imbox_manual?: number;
 }
 
 interface AttachmentRow {

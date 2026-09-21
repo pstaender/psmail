@@ -28,6 +28,11 @@ export interface ImboxMessage {
   spf: string | null;
   /** File names of the real (non-inline) attachments. */
   attachmentNames: string[];
+  /**
+   * The message carries a calendar file (.ics / text/calendar): undefined or null when it doesn't, otherwise the iCalendar METHOD
+   * (REQUEST = an invitation, CANCEL, REPLY, PUBLISH, ...) or "" when the file couldn't be read.
+   */
+  calendarMethod?: string | null;
 }
 
 export interface SenderHistory {
@@ -37,6 +42,15 @@ export interface SenderHistory {
   receivedGood: number;
   /** Earlier messages from this exact address that ended up in Junk/Spam. */
   receivedJunk: number;
+  /** Of the `receivedGood`: how many the user has read, and how many they starred. */
+  readEarlier?: number;
+  flaggedEarlier?: number;
+  /** Earlier messages from this exact address the user moved to Trash. */
+  trashedEarlier?: number;
+  /** What the user said by hand about mail from this address (the "important / not important" mark): how often, and the latest opinion. */
+  feedback?: { important: number; notImportant: number; last: boolean | null };
+  /** How many of the sender's messages (this one included) have a subject of the same shape as this one, out of how many the sender has sent. */
+  lookAlike?: { same: number; total: number };
 }
 
 export interface ImboxFacts {
@@ -49,6 +63,8 @@ export interface ImboxFacts {
   threadReply: boolean;
   /** The message lives in a Junk/Spam folder. */
   inJunkFolder: boolean;
+  /** Organisation domains of the user's own addresses (not free-mail providers): mail from the same domain is from a colleague. */
+  ownDomains?: Set<string>;
 }
 
 export interface Reason {
@@ -62,6 +78,8 @@ export interface Classification {
   score: number;
   /** Set when a rule decided regardless of the score ("junk folder", "one-time code"). */
   ruledOut?: string;
+  /** Set when the user's own mark on this sender decided, whatever the score. */
+  decidedBy?: string;
   reasons: Reason[];
 }
 
@@ -200,7 +218,19 @@ export function classify(message: ImboxMessage, facts: ImboxFacts): Classificati
     if (facts.sender.sentTo === 0) rule("temporary link", "sign-in / password-reset / confirmation mail");
   }
 
+  // A calendar invitation from a person is a request to do something: worth seeing, even when it comes through a calendar system's
+  // notification address. Event announcements sent as a newsletter are not.
+  const calendarMethod = message.calendarMethod ?? null;
+  const massMail = hasHeader(headers, "list-unsubscribe") || hasHeader(headers, "list-id") || /^precedence:[ \t]*(bulk|list|junk)/im.test(headers);
+  const invite = calendarMethod !== null && ["REQUEST", "CANCEL", "REPLY", ""].includes(calendarMethod.toUpperCase()) && !massMail && !MARKETING_PHRASES.test(subject);
+
   // --- who is it from ------------------------------------------------------------------------------------------------------
+  const feedback = facts.sender.feedback;
+  if (feedback && feedback.last !== null) {
+    // What the user said by hand is the strongest signal there is: it outweighs everything but the rules above.
+    const votes = feedback.last ? feedback.important : feedback.notImportant;
+    add(feedback.last ? "you marked mail from this address as important" : "you marked mail from this address as not important", (feedback.last ? 6 : -6) + (votes >= 2 ? (feedback.last ? 1 : -1) : 0), `${votes} time(s)`);
+  }
   if (facts.sender.sentTo > 0) {
     add("you have written to this address", facts.sender.sentTo >= 5 ? 5 : 4, `${facts.sender.sentTo} message(s) sent`);
   }
@@ -226,14 +256,14 @@ export function classify(message: ImboxMessage, facts: ImboxFacts): Classificati
   const images = (html.match(/<img\b/gi) ?? []).length;
   if (links >= 8 || images >= 5) add("designed like a newsletter", -1, `${links} links, ${images} images`);
 
-  if (NOREPLY_LOCAL.test(fromLocal)) add("no-reply sender", facts.sender.sentTo > 0 ? -1 : -3, fromAddress);
+  if (NOREPLY_LOCAL.test(fromLocal) && !invite) add("no-reply sender", facts.sender.sentTo > 0 ? -1 : -3, fromAddress);
   else if (BULK_LOCAL.test(fromLocal)) add("newsletter / notification sender", -3, fromAddress);
   else if (GENERIC_LOCAL.test(fromLocal) && facts.sender.sentTo === 0) add("generic company address", -1, fromAddress);
 
   // --- notifications about activity elsewhere ----------------------------------------------------------------------------
   const platform = PLATFORM_DOMAINS.has(registrableDomain(fromDomain)) || PLATFORM_DOMAINS.has(fromDomain);
-  if (ACTIVITY_SUBJECT.test(subject) && facts.sender.sentTo === 0) add("activity / status notification", -3, subject.slice(0, 50));
-  if (platform && facts.sender.sentTo === 0) add("sent by a platform, not a person", -3, fromDomain);
+  if (ACTIVITY_SUBJECT.test(subject) && facts.sender.sentTo === 0 && !invite) add("activity / status notification", -3, subject.slice(0, 50));
+  if (platform && facts.sender.sentTo === 0 && !invite) add("sent by a platform, not a person", -3, fromDomain);
 
   // --- suspicious: spam and phishing ----------------------------------------------------------------------------------------
   const auth = lower(`${message.authenticationResults ?? ""} ${headerValue(headers, "authentication-results") ?? ""} ${message.spf ?? ""} ${headerValue(headers, "received-spf") ?? ""}`);
@@ -294,10 +324,40 @@ export function classify(message: ImboxMessage, facts: ImboxFacts): Classificati
   if (!seen && !greeted && !facts.threadReply) add("unknown sender and nothing personal in it", -1.5);
   if (humanLooking && message.attachmentNames.length > 0 && !message.attachmentNames.some(n => RISKY_ATTACHMENT.test(n))) add("a person sent you a file", 0.5);
 
+  // --- what the user did with this sender's earlier mail -------------------------------------------------------------------
+  const good = facts.sender.receivedGood;
+  const flagged = facts.sender.flaggedEarlier ?? 0;
+  const read = facts.sender.readEarlier ?? 0;
+  const trashed = facts.sender.trashedEarlier ?? 0;
+  if (flagged >= 1) add("you starred earlier mail from this address", flagged >= 3 ? 3 : 2, `${flagged} starred`);
+  if (good >= 3 && read / good >= 0.7 && !bulkish) add("you usually read mail from this address", 1.5, `${read} of ${good} read`);
+  else if (good >= 5 && read / good <= 0.1 && facts.sender.sentTo === 0) add("you hardly ever read mail from this address", -2, `${read} of ${good} read`);
+  if (trashed >= 2 && trashed >= 0.5 * (good + trashed) && facts.sender.sentTo === 0) add("you deleted earlier mail from this address", -2.5, `${trashed} in Trash`);
+
+  // --- domain knowledge ----------------------------------------------------------------------------------------------------------
+  if (fromDomain && facts.ownDomains?.has(registrableDomain(fromDomain)) && !facts.ownAddresses.has(fromAddress) && !bulkish && !platform) {
+    add("from your own organisation", 2, registrableDomain(fromDomain));
+  }
+  const alike = facts.sender.lookAlike;
+  if (alike && alike.total >= 4 && alike.same / alike.total >= 0.5 && facts.sender.sentTo === 0 && !facts.threadReply) {
+    add("this sender's mails all look alike", -2.5, `${alike.same} of ${alike.total} have the same subject pattern`);
+  }
+
+  if (invite) {
+    const method = calendarMethod!.toUpperCase();
+    add("a calendar invitation", method === "REQUEST" ? 3.5 : method === "CANCEL" ? 3 : method === "REPLY" ? 2 : 2, method || "calendar file");
+  } else if (calendarMethod !== null) {
+    add("an event announcement (calendar file)", 0.5);
+  }
+
   if (seen && !bulkish && facts.sender.receivedGood >= 1) add("you have received normal mail from this address before", facts.sender.receivedGood >= 5 ? 2 : 1, `${facts.sender.receivedGood} earlier`);
 
   if ((toMe || greeted) && !bulkish && !platform && BUSINESS_WORDS.test(`${subject}\n${text.slice(0, 3000)}`)) add("work-related and meant for you", 1.5);
 
   const total = Math.round(score * 100) / 100;
-  return { important: ruledOut === undefined && total >= IMPORTANT_THRESHOLD, score: total, ...(ruledOut ? { ruledOut } : {}), reasons };
+  // What the user said about this sender decides — the score only explains what the classifier would have thought. The rules that keep
+  // Junk and one-time codes out come first: a mark doesn't turn a login code into mail worth reading.
+  const marked = feedback && feedback.last !== null ? feedback.last : undefined;
+  const important = ruledOut !== undefined ? false : marked !== undefined ? marked : total >= IMPORTANT_THRESHOLD;
+  return { important, score: total, ...(ruledOut ? { ruledOut } : {}), ...(ruledOut === undefined && marked !== undefined ? { decidedBy: "your mark on this sender" } : {}), reasons };
 }

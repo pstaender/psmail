@@ -25,6 +25,13 @@ export function settingsRoutes(db: Database) {
         return json({ count: countUnifiedInboxUnread(db, session.userId, { includeFolders }) });
       }),
     },
+    "/api/unified/imbox/unread": {
+      GET: withErrorHandling(async req => {
+        const { session } = requireAuth(req, db);
+        const includeFolders = getUserSettings(db, session.userId).combinedInboxIncludesFolders === true;
+        return json({ count: countUnifiedInboxUnread(db, session.userId, { includeFolders, imbox: true }) });
+      }),
+    },
     /** New unread mail in the combined Inbox since `afterId`; without it, just the current `latestId` to start from. */
     "/api/unified/inbox/new": {
       GET: withErrorHandling(async req => {

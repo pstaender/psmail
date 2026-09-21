@@ -146,13 +146,14 @@ export function listUnifiedEmails(
   }));
 }
 
-/** Unread messages across every account's Inbox (or, opt-in, its other incoming folders too) — the combined Inbox's badge. */
-export function countUnifiedInboxUnread(db: Database, userId: number, options: { includeFolders?: boolean } = {}): number {
+/** Unread messages across every account's Inbox (or, opt-in, its other incoming folders too) — the combined Inbox's badge; with `imbox` the important ones — the Imbox's. */
+export function countUnifiedInboxUnread(db: Database, userId: number, options: { includeFolders?: boolean; imbox?: boolean } = {}): number {
   const accounts = db
     .query<AccountFolders, [number]>("SELECT id, sent_folder, special_folders FROM accounts WHERE user_id = ?")
     .all(userId);
   const unread = db.query<{ folder: string; count: number }, [number]>(
-    "SELECT folder, COUNT(*) AS count FROM emails WHERE account_id = ? AND is_read = 0 GROUP BY folder"
+    // With `imbox` only the messages classified as important count: the Imbox entry's badge.
+    `SELECT folder, COUNT(*) AS count FROM emails WHERE account_id = ? AND is_read = 0${options.imbox ? " AND imbox = 1" : ""} GROUP BY folder`
   );
 
   let total = 0;

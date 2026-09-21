@@ -21,6 +21,7 @@ export function AccountTree({
   unifiedView,
   onSelectUnified,
   showImbox = false,
+  imboxUnread = 0,
   unifiedInboxUnread,
   onSyncAllInboxes,
   syncingAccounts,
@@ -47,6 +48,8 @@ export function AccountTree({
   onSelectUnified: (kind: UnifiedKind) => void;
   /** Show the Imbox entry (the user turned it on in Settings). */
   showImbox?: boolean;
+  /** Unread messages in the imbox: the badge on its entry. */
+  imboxUnread?: number;
   /** Unread messages across all Inboxes, shown as a badge on the combined Inbox. */
   unifiedInboxUnread: number;
   /** Syncs the Inbox of every account (the combined Inbox's refresh button). */
@@ -111,6 +114,11 @@ export function AccountTree({
             {kind === "inbox" && unifiedInboxUnread > 0 && (
               <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
                 {unifiedInboxUnread}
+              </Badge>
+            )}
+            {kind === "imbox" && imboxUnread > 0 && (
+              <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                {imboxUnread}
               </Badge>
             )}
           </div>

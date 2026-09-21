@@ -5,11 +5,14 @@ import { deriveEncryptionKey, generateSalt } from "../../src/server/crypto/secre
 import { createAccount, learnSpecialFolders } from "../../src/server/models/accounts";
 import { createEmail, getEmail } from "../../src/server/models/emails";
 import { addAttachment } from "../../src/server/models/emails";
-import { classifyAccounts, classifyAndStore, createImboxContext, explainEmail, isImboxFolder, isJunkFolder, setImbox } from "../../src/server/models/imbox";
-import { listUnifiedEmails } from "../../src/server/models/unified";
+import { classifyAccounts, classifyAndStore, createImboxContext, explainEmail, isImboxFolder, isJunkFolder, isTrashFolder, setImbox, setImboxByHand, subjectShape } from "../../src/server/models/imbox";
+import { countUnifiedInboxUnread, listUnifiedEmails } from "../../src/server/models/unified";
 import { getUserSettings, updateUserSettings } from "../../src/server/models/userSettings";
 import { runMigrations } from "../../src/server/db/migrations";
 import { ApiError } from "../../src/server/types";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const key = deriveEncryptionKey("pw", generateSalt());
 const input = (email: string, extra = {}) => ({
@@ -248,5 +251,218 @@ describe("the setting and the migration", () => {
   test("running the migrations again is harmless (the column and index exist)", async () => {
     const { db } = await setup();
     expect(() => runMigrations(db)).not.toThrow();
+  });
+});
+
+
+const signalsOf = (db: ReturnType<typeof createTestDb>, userId: number, emailId: number) => explainEmail(db, userId, emailId).reasons.map(r => r.signal);
+const feedbackOf = (db: ReturnType<typeof createTestDb>, address: string) =>
+  db.query<{ important: number; not_important: number; last_verdict: number | null }, [string]>("SELECT important, not_important, last_verdict FROM imbox_feedback WHERE address = ?").get(address);
+
+describe("marking by hand: the strongest signal, learned per sender", () => {
+  async function newsletterBox() {
+    const s = await setup();
+    const news = (subject: string, over = {}) =>
+      s.mail(s.account.id, {
+        from: [{ name: "Shop", address: "newsletter@shop.example" }], subject, plainText: "Nur heute 40% Rabatt! Newsletter abbestellen.",
+        headersRaw: "List-Unsubscribe: <mailto:u@shop.example>", ...over,
+      });
+    return { ...s, news };
+  }
+
+  test("marking a message stores the verdict as manual and counts as one vote for its sender", async () => {
+    const { db, user, news } = await newsletterBox();
+    const first = news("Angebot 1");
+    expect(explainEmail(db, user.id, first.id).important).toBe(false);
+
+    setImboxByHand(db, user.id, first.id, true);
+    expect(getEmail(db, first.id).imbox).toBe(true);
+    expect(db.query<{ imbox_manual: number }, [number]>("SELECT imbox_manual FROM emails WHERE id = ?").get(first.id)!.imbox_manual).toBe(1);
+    expect(feedbackOf(db, "newsletter@shop.example")).toEqual({ important: 1, not_important: 0, last_verdict: 1 });
+  });
+
+  test("mail that arrives later from that sender follows the mark — in the imbox, in the explanation, and after syncing", async () => {
+    const { db, user, news } = await newsletterBox();
+    setImboxByHand(db, user.id, news("Erste").id, true);
+
+    const later = news("Zweite");
+    const verdict = explainEmail(db, user.id, later.id);
+    expect(verdict.important).toBe(true);
+    expect(verdict.decidedBy).toBe("your mark on this sender");
+    expect(verdict.reasons.some(r => r.signal.includes("marked mail from this address as important"))).toBe(true);
+    expect(classifyAndStore(db, createImboxContext(db, user.id), later.id)?.important).toBe(true);
+    expect(getEmail(db, later.id).imbox).toBe(true);
+  });
+
+  test("the other way: marking a friend's mail as not important makes the next one not important", async () => {
+    const { db, user, account, mail } = await setup();
+    mail(account.id, { folder: "Sent", from: [ME], to: PERSON("anna@friend.example"), subject: "Hi", plainText: "x" });
+    const first = mail(account.id, { from: PERSON("anna@friend.example"), subject: "Kettenbrief", plainText: "Hey Philipp, leite das weiter!" });
+    expect(explainEmail(db, user.id, first.id).important).toBe(true);
+    setImboxByHand(db, user.id, first.id, false);
+
+    const next = mail(account.id, { from: PERSON("anna@friend.example"), subject: "Noch einer", plainText: "Hey Philipp, hier noch einer." });
+    expect(explainEmail(db, user.id, next.id).important).toBe(false);
+  });
+
+  test("a message carries one vote: marking it the other way replaces it, marking it again doesn't count twice, and taking it back removes it", async () => {
+    const { db, user, news } = await newsletterBox();
+    const message = news("Eine");
+    setImboxByHand(db, user.id, message.id, true);
+    setImboxByHand(db, user.id, message.id, true);
+    expect(feedbackOf(db, "newsletter@shop.example")).toEqual({ important: 1, not_important: 0, last_verdict: 1 });
+
+    setImboxByHand(db, user.id, message.id, false);
+    expect(feedbackOf(db, "newsletter@shop.example")).toEqual({ important: 0, not_important: 1, last_verdict: 0 });
+
+    setImboxByHand(db, user.id, message.id, null);
+    expect(feedbackOf(db, "newsletter@shop.example")).toBeNull(); // nobody has an opinion on this sender any more
+    const row = db.query<{ imbox: number | null; imbox_manual: number }, [number]>("SELECT imbox, imbox_manual FROM emails WHERE id = ?").get(message.id)!;
+    expect(row).toEqual({ imbox: null, imbox_manual: 0 });
+  });
+
+  test("several messages, several votes: the latest opinion counts, and taking the latest back falls back to the one before", async () => {
+    const { db, user, news } = await newsletterBox();
+    const [a, b] = [news("A"), news("B")];
+    setImboxByHand(db, user.id, a.id, true);
+    setImboxByHand(db, user.id, b.id, false);
+    expect(feedbackOf(db, "newsletter@shop.example")).toEqual({ important: 1, not_important: 1, last_verdict: 0 });
+    setImboxByHand(db, user.id, b.id, null);
+    expect(feedbackOf(db, "newsletter@shop.example")).toEqual({ important: 1, not_important: 0, last_verdict: 1 });
+  });
+
+  test("classifying (even --force) never overwrites a verdict set by hand", async () => {
+    const { db, user, news } = await newsletterBox();
+    const message = news("Wichtig fuer mich");
+    setImboxByHand(db, user.id, message.id, true);
+    expect(classifyAccounts(db, user.id, { force: true }).examined).toBe(0);
+    expect(getEmail(db, message.id).imbox).toBe(true);
+    setImboxByHand(db, user.id, message.id, null); // taken back: it is the classifier's again
+    expect(classifyAccounts(db, user.id).examined).toBe(1);
+  });
+
+  test("only that sender is affected, and each user has their own opinions", async () => {
+    const { db, user, account, news, mail } = await newsletterBox();
+    setImboxByHand(db, user.id, news("Eins").id, true);
+    const other = mail(account.id, { from: [{ name: "Other Shop", address: "newsletter@other-shop.example" }], subject: "Rabatt", plainText: "Nur heute 40% Rabatt! Abbestellen.", headersRaw: "List-Unsubscribe: <x>" });
+    expect(explainEmail(db, user.id, other.id).important).toBe(false);
+
+    const bob = await createUser(db, "bob", "pw");
+    expect(createImboxContext(db, bob.id).classifyRow(explainRow(db, other.id)).decidedBy).toBeUndefined();
+    expect(() => setImboxByHand(db, user.id, 9999, true)).toThrow();
+  });
+});
+
+describe("what the user did with a sender's earlier mail, and what the sender's mail looks like", () => {
+  test("starred and read earlier mail count for the sender; the message being classified is not its own history", async () => {
+    const { db, user, account, mail } = await setup();
+    const from = PERSON("kim@lee.example", "Kim Lee");
+    for (let i = 0; i < 4; i++) mail(account.id, { from, subject: `Frage ${i}`, plainText: "Hi Philipp, kurze Frage.", isRead: true, isFlagged: i === 0 });
+    const newest = mail(account.id, { from, subject: "Noch eine", plainText: "Hi Philipp, noch eine." });
+
+    const signals = signalsOf(db, user.id, newest.id);
+    expect(signals).toContain("you starred earlier mail from this address");
+    expect(signals).toContain("you usually read mail from this address");
+    const detail = explainEmail(db, user.id, newest.id).reasons.find(r => r.signal.startsWith("you usually read"))!.detail;
+    expect(detail).toBe("4 of 4 read"); // the unread message itself isn't in the 4
+  });
+
+  test("mail from an address that was mostly moved to Trash counts against it", async () => {
+    const { db, user, account, mail } = await setup();
+    learnSpecialFolders(db, account.id, [{ path: "Trash", specialUse: "\\Trash" }]);
+    const from = PERSON("pest@ads.example", "Pest");
+    for (let i = 0; i < 3; i++) mail(account.id, { folder: "Trash", from, subject: `Anzeige ${i}`, plainText: "Hi Philipp, kaufen!" });
+    const newest = mail(account.id, { from, subject: "Anzeige neu", plainText: "Hi Philipp, kaufen!" });
+    expect(explainEmail(db, user.id, newest.id).reasons.find(r => r.signal.startsWith("you deleted"))?.detail).toBe("3 in Trash");
+    expect(isTrashFolder("Trash", { special_folders: null })).toBe(true);
+    expect(isTrashFolder("Papierkorb", { special_folders: null })).toBe(true);
+    expect(isTrashFolder("INBOX", { special_folders: null })).toBe(false);
+  });
+
+  test("subject shapes: numbers, quoted parts and codes are ignored, so machine-made subjects match", () => {
+    expect(subjectShape("Your order 4711 has shipped")).toBe(subjectShape("Your order 4712 has shipped"));
+    expect(subjectShape("Re: Rechnung 2026-05")).toBe(subjectShape("Rechnung 2026-06"));
+    expect(subjectShape('"Anna" commented on your post')).toBe(subjectShape('"Ben" commented on your post'));
+    expect(subjectShape("Ticket [ABC-123] updated")).toBe(subjectShape("Ticket [XYZ-9] updated"));
+    expect(subjectShape("Lunch tomorrow?")).not.toBe(subjectShape("Invoice for May"));
+    expect(subjectShape(null)).toBe("");
+  });
+
+  test("a sender whose mails all have the same shape looks like a machine", async () => {
+    const { db, user, account, mail } = await setup();
+    const from = PERSON("robot@service.example", "Service");
+    for (let i = 1; i <= 6; i++) mail(account.id, { from, subject: `Ihr Kontoauszug Nr. ${i}`, plainText: "Hi Philipp, Ihr Kontoauszug." });
+    const newest = mail(account.id, { from, subject: "Ihr Kontoauszug Nr. 7", plainText: "Hi Philipp, Ihr Kontoauszug." });
+    expect(explainEmail(db, user.id, newest.id).reasons.some(r => r.signal.startsWith("this sender's mails all look alike"))).toBe(true);
+
+    const varied = PERSON("kim@lee.example", "Kim");
+    for (const subject of ["Mittagessen", "Rechnung", "Urlaub", "Frage zum Code", "Danke"]) mail(account.id, { from: varied, subject, plainText: "Hi Philipp." });
+    const last = mail(account.id, { from: varied, subject: "Noch was", plainText: "Hi Philipp." });
+    expect(signalsOf(db, user.id, last.id)).not.toContain("this sender's mails all look alike");
+  });
+
+  test("your own organisation: mail from another address at a domain of one of your accounts (not a free-mail domain)", async () => {
+    const db = createTestDb();
+    const user = await createUser(db, "philipp", "pw");
+    const work = createAccount(db, user.id, input("philipp@firma.example"), key);
+    const private_ = createAccount(db, user.id, input("philipp@gmail.com"), key);
+    const colleague = createEmail(db, work.id, { folder: "INBOX", isDraft: false, from: PERSON("julia@firma.example", "Julia"), to: [{ address: "philipp@firma.example" }], subject: "Frage", plainText: "Hi Philipp, kurze Frage." });
+    const other = createEmail(db, private_.id, { folder: "INBOX", isDraft: false, from: PERSON("dave@gmail.com", "Dave"), to: [{ address: "philipp@gmail.com" }], subject: "Frage", plainText: "Hi Philipp, kurze Frage." });
+    expect(signalsOf(db, user.id, colleague.id)).toContain("from your own organisation");
+    expect(signalsOf(db, user.id, other.id)).not.toContain("from your own organisation");
+  });
+});
+
+describe("calendar invitations", () => {
+  let dir = "";
+  const icsFile = (name: string, method: string) => {
+    dir ||= mkdtempSync(join(tmpdir(), "psmail-ics-"));
+    const path = join(dir, name);
+    writeFileSync(path, `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:${method}\r\nBEGIN:VEVENT\r\nUID:1\r\nSUMMARY:Sync\r\nDTSTART:20260930T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`);
+    return path;
+  };
+
+  test("an invitation (METHOD:REQUEST) from a person is important; the method is read from the .ics file", async () => {
+    const { db, user, account, mail } = await setup();
+    const invite = mail(account.id, { from: PERSON("anna@becker.example", "Anna Becker"), subject: "Einladung: Sync", plainText: "Anna lädt dich ein." });
+    addAttachment(db, invite.id, { filename: "invite.ics", contentType: "text/calendar", isInline: true, size: 200, filePath: icsFile("invite.ics", "REQUEST") });
+    const verdict = explainEmail(db, user.id, invite.id);
+    expect(verdict.reasons.find(r => r.signal === "a calendar invitation")?.detail).toBe("REQUEST");
+    expect(verdict.important).toBe(true);
+
+    const cancel = mail(account.id, { from: PERSON("anna@becker.example", "Anna Becker"), subject: "Abgesagt: Sync", plainText: "Fällt aus." });
+    addAttachment(db, cancel.id, { filename: "cancel.ics", contentType: "text/calendar", size: 200, filePath: icsFile("cancel.ics", "CANCEL") });
+    expect(explainEmail(db, user.id, cancel.id).reasons.find(r => r.signal === "a calendar invitation")?.detail).toBe("CANCEL");
+  });
+
+  test("a calendar file that is missing or unreadable still counts as one; a plain mail has none; PUBLISH is only an announcement", async () => {
+    const { db, user, account, mail } = await setup();
+    const gone = mail(account.id, { from: PERSON("anna@becker.example", "Anna"), subject: "Termin", plainText: "Hi Philipp, siehe Anhang." });
+    addAttachment(db, gone.id, { filename: "termin.ics", size: 1, filePath: "/nonexistent/termin.ics" });
+    expect(explainEmail(db, user.id, gone.id).reasons.find(r => r.signal === "a calendar invitation")?.detail).toBe("calendar file");
+
+    const none = mail(account.id, { from: PERSON("anna@becker.example", "Anna"), subject: "Termin", plainText: "Hi Philipp, Freitag?" });
+    expect(signalsOf(db, user.id, none.id).some(sig => sig.includes("calendar"))).toBe(false);
+
+    const publish = mail(account.id, { from: PERSON("events@meetup.example", "Meetup"), subject: "Event", plainText: "Kommt vorbei." });
+    addAttachment(db, publish.id, { filename: "event.ics", contentType: "text/calendar", size: 200, filePath: icsFile("event.ics", "PUBLISH") });
+    expect(signalsOf(db, user.id, publish.id).some(sig => sig.startsWith("an event announcement"))).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("the imbox's unread count", () => {
+  test("counts unread messages that are in the imbox — only those, in incoming folders", async () => {
+    const { db, user, account, other, mail } = await setup();
+    const a = mail(account.id, { from: PERSON("a@x.example"), subject: "A" });
+    const b = mail(other.id, { from: PERSON("b@x.example"), subject: "B" });
+    const read = mail(account.id, { from: PERSON("c@x.example"), subject: "C", isRead: true });
+    const notImportant = mail(account.id, { from: PERSON("d@x.example"), subject: "D" });
+    mail(account.id, { from: PERSON("e@x.example"), subject: "E (unclassified)" });
+    for (const id of [a.id, b.id, read.id]) setImbox(db, id, true);
+    setImbox(db, notImportant.id, false);
+
+    expect(countUnifiedInboxUnread(db, user.id, { imbox: true })).toBe(2);
+    expect(countUnifiedInboxUnread(db, user.id)).toBe(4); // the Inbox's own count is unchanged: everything unread
   });
 });

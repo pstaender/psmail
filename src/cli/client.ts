@@ -147,9 +147,11 @@ export class ApiClient {
   explainImbox(accountEmail: string, emailId: number) {
     return this.request<{
       stored: boolean | null;
+      manual: boolean;
       important: boolean;
       score: number;
       ruledOut?: string;
+      decidedBy?: string;
       reasons: { signal: string; points: number; detail?: string }[];
     }>("GET", `/api/accounts/${encodeURIComponent(accountEmail)}/emails/${emailId}/imbox`);
   }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, Sparkles, Star } from "lucide-react";
+import { ChevronDown, MailCheck, Sparkles, Star } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
@@ -27,7 +27,21 @@ function AddressLine({ label, addresses, full }: { label: string; addresses: Ema
   );
 }
 
-export function MessageHeader({ email, summarizing = false }: { email: EmailRecord; /** A summary is being generated for this message (started from the Summary tab). */ summarizing?: boolean }) {
+export function MessageHeader({
+  email,
+  summarizing = false,
+  imboxEnabled = false,
+  imboxDisabled = false,
+  onMarkImbox = () => {},
+}: {
+  email: EmailRecord;
+  /** A summary is being generated for this message (started from the Summary tab). */
+  summarizing?: boolean;
+  /** The imbox is on: a small mark beside the subject says whether the message counts as important, and flips it. */
+  imboxEnabled?: boolean;
+  imboxDisabled?: boolean;
+  onMarkImbox?: (important: boolean) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   // "Expand all details": Cc/Bcc (and To) unclamped, plus the message id, which is hidden otherwise.
   const [allDetails, setAllDetails] = useState(false);
@@ -38,7 +52,31 @@ export function MessageHeader({ email, summarizing = false }: { email: EmailReco
     <div className="space-y-3 border-b p-4">
       <div className="flex items-start justify-between gap-4">
         <h2 className="text-lg font-semibold leading-tight">{email.subject || "(no subject)"}</h2>
-        {email.isFlagged && <Star aria-label="Starred" className="mt-1 size-4 shrink-0 fill-yellow-400 text-yellow-500" />}
+        <div className="flex shrink-0 items-center gap-1">
+          {/* Subtle on purpose: a quiet icon that is lit while the message is in the Imbox. Clicking it is the user telling the imbox
+              what it got wrong — for this message and, from now on, for this sender. */}
+          {imboxEnabled && !email.isDraft && (
+            <button
+              type="button"
+              disabled={imboxDisabled}
+              aria-pressed={email.imbox === true}
+              aria-label={email.imbox ? "In the Imbox — mark as not important" : "Not in the Imbox — mark as important"}
+              title={
+                email.imbox
+                  ? "Important (in the Imbox). Click to mark it, and mail from this sender, as not important."
+                  : "Not in the Imbox. Click to mark it, and mail from this sender, as important."
+              }
+              onClick={() => onMarkImbox(email.imbox !== true)}
+              className={cn(
+                "mt-0.5 rounded p-0.5 transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-40",
+                email.imbox ? "text-primary" : "text-muted-foreground/40 hover:text-muted-foreground"
+              )}
+            >
+              <MailCheck className="size-4" />
+            </button>
+          )}
+          {email.isFlagged && <Star aria-label="Starred" className="mt-1 size-4 shrink-0 fill-yellow-400 text-yellow-500" />}
+        </div>
       </div>
 
       {summarizing && !email.aiSummary && (

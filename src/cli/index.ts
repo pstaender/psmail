@@ -119,7 +119,9 @@ async function cmdImbox(subcommand: string | undefined, argv: string[]) {
     const [accountEmail, id] = positionals;
     if (!accountEmail || !id || !Number.isInteger(Number(id))) throw new Error("Usage: psmail imbox explain <account-email> <message-id> [--user <username>]");
     const verdict = await client.explainImbox(accountEmail, Number(id));
-    console.log(`${verdict.important ? "IMPORTANT" : "not important"} — score ${verdict.score}${verdict.ruledOut ? ` (ruled out: ${verdict.ruledOut})` : ""}; stored: ${verdict.stored === null ? "not classified" : verdict.stored}`);
+    console.log(
+      `${verdict.important ? "IMPORTANT" : "not important"} — score ${verdict.score}${verdict.ruledOut ? ` (ruled out: ${verdict.ruledOut})` : ""}${verdict.decidedBy ? ` (decided by ${verdict.decidedBy})` : ""}; stored: ${verdict.stored === null ? "not classified" : `${verdict.stored}${verdict.manual ? ", set by hand" : ""}`}`
+    );
     for (const reason of verdict.reasons) {
       const points = reason.points === 0 ? "  ±0" : `${reason.points > 0 ? "+" : ""}${reason.points}`.padStart(4);
       console.log(`  ${points}  ${reason.signal}${reason.detail ? ` — ${reason.detail}` : ""}`);

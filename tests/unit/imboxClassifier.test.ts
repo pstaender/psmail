@@ -156,3 +156,108 @@ describe("domain helpers", () => {
     expect(domainOf("nonsense")).toBe("");
   });
 });
+
+describe("imbox classifier: learning from the user, domain knowledge, calendar invitations", () => {
+  const stranger: { from: EmailAddress[]; plainText: string; subject: string } = {
+    from: [{ name: "Bob Lang", address: "bob@lang.example" }],
+    subject: "Frage",
+    plainText: "Hi Philipp,\n\nhast du kurz Zeit?\n\nBob",
+  };
+  const points = (over: Parameters<typeof baseMessage>[0], facts: Parameters<typeof baseFacts>[0], signal: string) =>
+    classify(baseMessage({ ...stranger, ...over }), baseFacts(facts)).reasons.find(r => r.signal.startsWith(signal))?.points;
+
+  test("a mark by hand is the strongest signal: important lifts an otherwise unremarkable sender over the line, not important sinks a friend", () => {
+    const newsletter = { from: [{ name: "Shop", address: "newsletter@shop.example" }], subject: "40% Rabatt", plainText: "Nur heute! Newsletter abbestellen.", headersRaw: "List-Unsubscribe: <x>" };
+    expect(classify(baseMessage(newsletter), baseFacts()).important).toBe(false);
+    const liked = classify(baseMessage(newsletter), baseFacts({ sender: { feedback: { important: 1, notImportant: 0, last: true } } }));
+    expect(liked.reasons.find(r => r.signal.includes("marked mail from this address as important"))!.points).toBe(6);
+    expect(liked.important).toBe(true); // "this newsletter is important to me": the mark decides, though the score alone is far below the line
+    expect(liked.score).toBeLessThan(0);
+    expect(liked.decidedBy).toBe("your mark on this sender");
+
+    const friend = classify(baseMessage(stranger), baseFacts({ sender: { sentTo: 12, feedback: { important: 0, notImportant: 1, last: false } } }));
+    expect(friend.reasons.find(r => r.signal.includes("marked mail from this address as not important"))!.points).toBe(-6);
+    expect(friend.important).toBe(false);
+  });
+
+  test("the latest opinion counts, and more votes count a little more", () => {
+    expect(points({}, { sender: { feedback: { important: 3, notImportant: 1, last: true } } }, "you marked")).toBe(7);
+    expect(points({}, { sender: { feedback: { important: 1, notImportant: 4, last: false } } }, "you marked")).toBe(-7);
+    expect(points({}, { sender: { feedback: { important: 1, notImportant: 1, last: null } } }, "you marked")).toBeUndefined();
+  });
+
+  test("but the rules still win: Junk and one-time codes stay out whatever was marked", () => {
+    const liked = { feedback: { important: 2, notImportant: 0, last: true } };
+    expect(classify(baseMessage(stranger), baseFacts({ inJunkFolder: true, sender: liked })).important).toBe(false);
+    const code = classify(baseMessage({ ...stranger, subject: "Your verification code", plainText: "Your code is 123456. It expires in 10 minutes." }), baseFacts({ sender: liked }));
+    expect(code.ruledOut).toBe("one-time code");
+    expect(code.important).toBe(false);
+  });
+
+  test("starring earlier mail counts for the sender; more stars count more", () => {
+    expect(points({}, { sender: { receivedGood: 4, flaggedEarlier: 1 } }, "you starred")).toBe(2);
+    expect(points({}, { sender: { receivedGood: 6, flaggedEarlier: 3 } }, "you starred")).toBe(3);
+    expect(points({}, { sender: { receivedGood: 4 } }, "you starred")).toBeUndefined();
+  });
+
+  test("reading habits: mostly read is a plus, hardly ever read a minus — only with enough mail to tell", () => {
+    expect(points({}, { sender: { receivedGood: 10, readEarlier: 9 } }, "you usually read")).toBe(1.5);
+    expect(points({}, { sender: { receivedGood: 2, readEarlier: 2 } }, "you usually read")).toBeUndefined(); // too few
+    expect(points({}, { sender: { receivedGood: 10, readEarlier: 0 } }, "you hardly ever read")).toBe(-2);
+    expect(points({}, { sender: { receivedGood: 3, readEarlier: 0 } }, "you hardly ever read")).toBeUndefined();
+    expect(points({}, { sender: { receivedGood: 10, readEarlier: 0, sentTo: 2 } }, "you hardly ever read")).toBeUndefined(); // someone I write to
+  });
+
+  test("deleting earlier mail from a sender counts against it — unless I write to them", () => {
+    expect(points({}, { sender: { receivedGood: 1, trashedEarlier: 3 } }, "you deleted")).toBe(-2.5);
+    expect(points({}, { sender: { receivedGood: 9, trashedEarlier: 2 } }, "you deleted")).toBeUndefined(); // most of it was kept
+    expect(points({}, { sender: { trashedEarlier: 3, sentTo: 1 } }, "you deleted")).toBeUndefined();
+  });
+
+  test("your own organisation: a colleague's domain, not a free-mail provider's", () => {
+    const own = new Set(["example.org"]); // the registrable domain of philipp@work.example.org
+    const colleague = { from: [{ name: "Julia", address: "julia@mail.work.example.org" }] };
+    expect(points(colleague, { ownDomains: own }, "from your own organisation")).toBe(2);
+    expect(points(colleague, {}, "from your own organisation")).toBeUndefined();
+    expect(points({ from: [{ address: "someone@other.example" }] }, { ownDomains: own }, "from your own organisation")).toBeUndefined();
+    expect(points({ ...colleague, headersRaw: "List-Id: <all.work.example.org>" }, { ownDomains: own }, "from your own organisation")).toBeUndefined(); // the company newsletter
+  });
+
+  test("a sender whose mails all look alike is bulk — not for people I write to or a conversation", () => {
+    const alike = { lookAlike: { same: 7, total: 9 } };
+    expect(points({}, { sender: alike }, "this sender's mails all look alike")).toBe(-2.5);
+    expect(points({}, { sender: { lookAlike: { same: 2, total: 9 } } }, "this sender's mails all look alike")).toBeUndefined();
+    expect(points({}, { sender: { lookAlike: { same: 3, total: 3 } } }, "this sender's mails all look alike")).toBeUndefined(); // too few to say
+    expect(points({}, { sender: { ...alike, sentTo: 2 } }, "this sender's mails all look alike")).toBeUndefined();
+    expect(points({}, { sender: alike, threadReply: true }, "this sender's mails all look alike")).toBeUndefined();
+  });
+
+  test("calendar invitations: a request from a person is important; an event announcement in a newsletter is not", () => {
+    const invite = { subject: "Einladung: Projektbesprechung", plainText: "Anna lädt dich zu einer Besprechung ein.", from: [{ name: "Anna Becker", address: "anna@becker.example" }] };
+    const request = classify(baseMessage({ ...invite, calendarMethod: "REQUEST", attachmentNames: ["invite.ics"] }), baseFacts());
+    expect(request.reasons.find(r => r.signal === "a calendar invitation")!.points).toBe(3.5);
+    expect(request.important).toBe(true);
+
+    expect(points({ ...invite, calendarMethod: "CANCEL" }, {}, "a calendar invitation")).toBe(3);
+    expect(points({ ...invite, calendarMethod: "" }, {}, "a calendar invitation")).toBe(2); // a calendar file we couldn't read
+    expect(points({ ...invite, calendarMethod: "PUBLISH" }, {}, "an event announcement")).toBe(0.5);
+
+    const announcement = classify(
+      baseMessage({ from: [{ address: "events@meetup.example" }], subject: "Neue Events in deiner Nähe", plainText: "Melde dich an! Abbestellen.", headersRaw: "List-Unsubscribe: <x>", calendarMethod: "REQUEST" }),
+      baseFacts()
+    );
+    expect(announcement.reasons.some(r => r.signal === "a calendar invitation")).toBe(false);
+    expect(announcement.important).toBe(false);
+  });
+
+  test("a calendar system's notification address doesn't count against an invitation (no-reply, platform, notification wording)", () => {
+    const google = classify(
+      baseMessage({ from: [{ name: "Anna (via Google Calendar)", address: "calendar-notification@google.com" }], subject: "Invitation: Projekt Sync @ Tue", plainText: "Anna invited you.", calendarMethod: "REQUEST" }),
+      baseFacts()
+    );
+    expect(google.important).toBe(true);
+    expect(google.reasons.some(r => r.signal.startsWith("sent by a platform"))).toBe(false);
+    // the same sender without an invitation is a notification
+    expect(classify(baseMessage({ from: [{ address: "calendar-notification@google.com" }], subject: "Reminder: Projekt Sync", plainText: "Starts soon." }), baseFacts()).important).toBe(false);
+  });
+});

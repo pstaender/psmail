@@ -297,6 +297,11 @@ export const api = {
   newMail: (token: string, afterId?: number) =>
     request<NewMailResult>("GET", `/api/unified/inbox/new${afterId === undefined ? "" : `?afterId=${afterId}`}`, { token }),
   /** Unread messages across all accounts' Inboxes — the combined Inbox's badge. */
+  /** Unread messages in the imbox (the important part of the Inboxes) — the Imbox entry's badge. */
+  unifiedImboxUnread: (token: string) => request<{ count: number }>("GET", "/api/unified/imbox/unread", { token }),
+  /** Marks a message important (true) or not (false) by hand — the imbox learns from it for that sender — or takes the mark back (null). */
+  setImbox: (token: string, accountEmail: string, emailId: number, imbox: boolean | null) =>
+    request<EmailRecord>("PUT", `/api/accounts/${enc(accountEmail)}/emails/${emailId}/imbox`, { token, body: { imbox } }),
   unifiedInboxUnread: (token: string) => request<{ count: number }>("GET", "/api/unified/inbox/unread", { token }),
   /** Newest-first messages across all accounts' Inboxes (`inbox`) or Sent folders (`sent`). */
   listUnified: (token: string, kind: UnifiedKind, opts: { limit?: number; offset?: number; after?: string; before?: string; categories?: string[] } = {}) => {
