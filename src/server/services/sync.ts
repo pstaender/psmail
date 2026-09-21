@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { getEmailAttachmentsDir, sanitizeSegment } from "../config/paths";
+import { classifyAndStore, createImboxContext, isImboxFolder, type ImboxContext } from "../models/imbox";
 import { addAttachment, createEmail, deleteEmail, findEmailByUid, listSyncedRefs, updateEmail } from "../models/emails";
 import { completeDownloadJob, failDownloadJob, startDownloadJob, updateDownloadProgress, updateDownloadTotal } from "../models/downloads";
 import { isAccountDisabled, learnSpecialFolders, type AccountRow } from "../models/accounts";
@@ -165,6 +166,19 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
     jobStarted = true;
   };
 
+  // New mail is classified for the imbox as it is stored. The context (who the user has written to, what each sender sent before) is
+  // read once, on the first new message of the run, and kept up to date as messages are added.
+  let imboxContext: ImboxContext | null = null;
+  function classifyForImbox(emailId: number, folder: string) {
+    try {
+      if (!isImboxFolder(folder, account)) return;
+      imboxContext ??= createImboxContext(db, account.user_id);
+      classifyAndStore(db, imboxContext, emailId);
+    } catch (error) {
+      console.error(`[imbox] ${account.email}: classification skipped:`, error); // never lets a sync fail
+    }
+  }
+
   async function syncFolder(folderPath: string): Promise<number> {
     const tag = `${jobTag}/${folderPath}`;
     if (isAccountDisabled(db, account.id)) throw new Error("The account was disabled during the sync");
@@ -250,6 +264,8 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
             });
           }
         }
+
+        classifyForImbox(email.id, folderPath);
       }
 
       downloaded += 1;

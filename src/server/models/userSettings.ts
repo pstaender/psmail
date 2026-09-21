@@ -20,6 +20,8 @@ export interface UserSettings {
   notifyToast?: boolean;
   /** Sound played with the toast; unset means crystal_clear. */
   notificationSound?: (typeof NOTIFICATION_SOUNDS)[number];
+  /** Opt-in: the imbox — the important part of the combined Inbox, picked by the local classifier — is shown between the combined Inbox and Sent. */
+  imboxEnabled?: boolean;
   /** The language the translate skill translates into (e.g. "German"); unset means English. */
   aiTargetLanguage?: string;
 }
@@ -54,6 +56,10 @@ export function updateUserSettings(db: Database, userId: number, patch: Record<s
       if (value === null) delete next.combinedInboxIncludesFolders;
       else if (typeof value === "boolean") next.combinedInboxIncludesFolders = value;
       else throw new ApiError(400, "combinedInboxIncludesFolders must be true or false");
+    } else if (key === "imboxEnabled") {
+      if (value === null) delete next.imboxEnabled;
+      else if (typeof value === "boolean") next.imboxEnabled = value;
+      else throw new ApiError(400, "imboxEnabled must be true or false");
     } else if (key === "notifyBrowser" || key === "notifyToast") {
       if (value === null) delete next[key];
       else if (typeof value === "boolean") next[key] = value;

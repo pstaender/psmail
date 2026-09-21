@@ -43,6 +43,7 @@ interface EmailRow {
   translated_text?: string | null;
   translated_language?: string | null;
   calendar_events?: string | null;
+  imbox?: number | null;
 }
 
 interface AttachmentRow {
@@ -105,6 +106,7 @@ function toEmail(row: EmailRow, attachments?: AttachmentRow[]): EmailRecord {
     size: row.size,
     taxonomyList: parseStringList(row.taxonomy_list ?? null),
     calendarEvents: parseStringList(row.calendar_events ?? null),
+    imbox: row.imbox === null || row.imbox === undefined ? null : !!row.imbox,
     aiSummary: row.ai_summary ?? null,
     translatedText: row.translated_text ?? null,
     translatedLanguage: row.translated_language ?? null,
@@ -237,7 +239,7 @@ export function getFolderCounts(db: Database, accountId: number): FolderCount[] 
  * first 200 characters of plain_text as the snippet. The full message comes from getEmail().
  */
 const LIST_COLUMNS = `id, account_id, folder, uid, is_draft, is_read, is_flagged, message_id, in_reply_to,
-  from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject, date, size, created_at, updated_at, taxonomy_list,
+  from_addr, to_addr, cc_addr, bcc_addr, reply_to_addr, subject, date, size, created_at, updated_at, taxonomy_list, imbox,
   substr(plain_text, 1, 200) AS plain_text,
   (SELECT COUNT(*) FROM attachments WHERE email_id = emails.id AND is_inline = 0) AS attachment_count`;
 

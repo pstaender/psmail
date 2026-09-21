@@ -95,6 +95,50 @@ async function cmdSync(argv: string[]) {
   }
 }
 
+/**
+ * `psmail imbox classify [account-email ...] [--force]` — classifies the stored mail of the given accounts (default: every account)
+ * for the imbox; only messages without a verdict, or all of them with --force.
+ * `psmail imbox explain <account-email> <message-id>` — why a message is (not) important.
+ */
+async function cmdImbox(subcommand: string | undefined, argv: string[]) {
+  const { positionals, flags } = parseFlags(argv);
+  // `--force a@b.example` would read the address as the flag's value; --force takes none.
+  const force = flags.force !== undefined && flags.force !== false;
+  if (typeof flags.force === "string") positionals.push(flags.force);
+
+  const client = new ApiClient(typeof flags.url === "string" ? flags.url : undefined);
+  await loginFromFlags(client, flags);
+
+  if (subcommand === "classify") {
+    const started = Date.now();
+    const { results } = await client.classifyImbox(positionals.length > 0 ? positionals : undefined, force);
+    let examined = 0;
+    let important = 0;
+    for (const result of results) {
+      examined += result.examined;
+      important += result.important;
+      console.log(
+        result.skipped
+          ? `${result.account}: skipped (${result.skipped})`
+          : `${result.account}: ${result.examined} classified — ${result.important} important, ${result.notImportant} not`
+      );
+    }
+    console.log(`Done in ${((Date.now() - started) / 1000).toFixed(1)} s: ${examined} message(s), ${important} important.`);
+    if (examined === 0 && !force) console.log("Nothing to do — every message has a verdict already (use --force to classify them again).");
+  } else if (subcommand === "explain") {
+    const [accountEmail, id] = positionals;
+    if (!accountEmail || !id || !Number.isInteger(Number(id))) throw new Error("Usage: psmail imbox explain <account-email> <message-id> [--user <username>]");
+    const verdict = await client.explainImbox(accountEmail, Number(id));
+    console.log(`${verdict.important ? "IMPORTANT" : "not important"} — score ${verdict.score}${verdict.ruledOut ? ` (ruled out: ${verdict.ruledOut})` : ""}; stored: ${verdict.stored === null ? "not classified" : verdict.stored}`);
+    for (const reason of verdict.reasons) {
+      const points = reason.points === 0 ? "  ±0" : `${reason.points > 0 ? "+" : ""}${reason.points}`.padStart(4);
+      console.log(`  ${points}  ${reason.signal}${reason.detail ? ` — ${reason.detail}` : ""}`);
+    }
+  } else {
+    throw new Error("Usage: psmail imbox classify [account-email ...] [--force]  |  psmail imbox explain <account-email> <message-id>");
+  }
+}
+
 function printUsage() {
   console.log(`P.S.Mail CLI
 
@@ -106,6 +150,9 @@ Usage:
                --smtp-host <host> --smtp-port <port> [--smtp-secure=true|false] --smtp-username <user> [--smtp-password <pw>]
                [--url <api-url>]
   psmail sync <account-email> [--user <username>] [--password <pw>] [--folder INBOX] [--url <api-url>]
+  psmail imbox classify [account-email ...] [--force] [--user <username>] [--password <pw>] [--url <api-url>]
+               classifies stored mail as important / not important (default: every account; --force redoes messages that have a verdict)
+  psmail imbox explain <account-email> <message-id> [--user <username>] [--password <pw>] [--url <api-url>]
 
 Env vars: PSMAIL_API_URL, PSMAIL_PASSWORD, PSMAIL_IMAP_PASSWORD, PSMAIL_SMTP_PASSWORD
 `);
@@ -119,6 +166,8 @@ async function main() {
       await cmdUserCreate(rest);
     } else if (group === "account" && subcommand === "add") {
       await cmdAccountAdd(rest);
+    } else if (group === "imbox") {
+      await cmdImbox(subcommand, rest);
     } else if (group === "sync") {
       await cmdSync([subcommand, ...rest].filter((x): x is string => x !== undefined));
     } else {

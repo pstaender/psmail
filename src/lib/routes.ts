@@ -38,14 +38,14 @@ export function buildPath(route: Route): string {
     const base = `/a/${encodeSegment(route.accountEmail)}/${encodeSegment(folder)}/`;
     return route.emailId !== null ? `${base}${route.emailId}` : base;
   }
-  return route.unified === "sent" ? "/u/sent" : "/";
+  return route.unified === "sent" ? "/u/sent" : route.unified === "imbox" ? "/u/imbox" : "/";
 }
 
 /** The state a path stands for; anything unrecognized is the combined Inbox (the app's home). */
 export function parsePath(pathname: string): Route {
   const parts = pathname.split("/").filter(part => part !== "");
 
-  if (parts[0] === "u" && parts[1] === "sent" && parts.length === 2) return { ...HOME_ROUTE, unified: "sent" };
+  if (parts[0] === "u" && (parts[1] === "sent" || parts[1] === "imbox") && parts.length === 2) return { ...HOME_ROUTE, unified: parts[1] };
 
   if (parts[0] === "a" && parts.length >= 3 && parts.length <= 4) {
     const accountEmail = decodeSegment(parts[1]!);

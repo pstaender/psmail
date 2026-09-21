@@ -17,6 +17,7 @@ const MAX_INTERVAL_MINUTES = 24 * 60;
 export interface SettingsPatch {
   syncIntervalMinutes: number | null;
   combinedInboxIncludesFolders: boolean;
+  imboxEnabled: boolean;
   notifyBrowser: boolean;
   notifyToast: boolean;
   notificationSound: NonNullable<UserSettings["notificationSound"]>;
@@ -44,6 +45,7 @@ export function SettingsDialog({
 }) {
   const [interval, setInterval] = useState("");
   const [includeFolders, setIncludeFolders] = useState(false);
+  const [imboxEnabled, setImboxEnabled] = useState(false);
   const [notifyBrowser, setNotifyBrowser] = useState(false);
   const [notifyToast, setNotifyToast] = useState(false);
   const [sound, setSound] = useState<SettingsPatch["notificationSound"]>(DEFAULT_NOTIFICATION_SOUND);
@@ -56,6 +58,7 @@ export function SettingsDialog({
     if (open) {
       setInterval(settings.syncIntervalMinutes ? String(settings.syncIntervalMinutes) : "");
       setIncludeFolders(settings.combinedInboxIncludesFolders === true);
+      setImboxEnabled(settings.imboxEnabled === true);
       setNotifyBrowser(settings.notifyBrowser === true);
       setNotifyToast(settings.notifyToast === true);
       setSound(settings.notificationSound ?? DEFAULT_NOTIFICATION_SOUND);
@@ -94,7 +97,7 @@ export function SettingsDialog({
     setBusy(true);
     setError(null);
     try {
-      await onSave({ syncIntervalMinutes: minutes, combinedInboxIncludesFolders: includeFolders, notifyBrowser, notifyToast, notificationSound: sound });
+      await onSave({ syncIntervalMinutes: minutes, combinedInboxIncludesFolders: includeFolders, imboxEnabled, notifyBrowser, notifyToast, notificationSound: sound });
       onOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -161,6 +164,19 @@ export function SettingsDialog({
               <p className="text-xs text-muted-foreground">
                 The combined Inbox then also lists (and counts unread in) each account's other folders, except Sent,
                 Drafts, Trash, Junk and Archive.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-2 rounded-md border p-3">
+            <Switch id="settings-imbox" className="mt-0.5" checked={imboxEnabled} onCheckedChange={setImboxEnabled} />
+            <div className="space-y-0.5">
+              <Label htmlFor="settings-imbox">Enable imbox</Label>
+              <p className="text-xs text-muted-foreground">
+                Adds an <strong>Imbox</strong> between the combined Inbox and Sent: only the important mail — from people you know, replies
+                to you, mail meant for you — without newsletters, one-time codes, activity notifications and suspected spam. It is sorted
+                out on this computer, no AI service is involved. New mail is classified as it arrives; to classify the mail you already
+                have, run <code>bun run cli imbox classify</code> (add an account address to do just that account).
               </p>
             </div>
           </div>

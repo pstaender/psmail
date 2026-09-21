@@ -4,10 +4,11 @@ import { emailIdsWithAttachments, taxonomyListsFor } from "./emails";
 import type { SearchResult } from "./search";
 import { listFilterSql } from "./dateBounds";
 
-export type UnifiedKind = "inbox" | "sent";
+/** `imbox` is the important part of the Inbox: the messages the classifier picked (see models/imbox.ts). */
+export type UnifiedKind = "inbox" | "sent" | "imbox";
 
 export function isUnifiedKind(value: string): value is UnifiedKind {
-  return value === "inbox" || value === "sent";
+  return value === "inbox" || value === "sent" || value === "imbox";
 }
 
 /** Names servers commonly give the Sent folder — the fallback for an account whose real path hasn't been learned yet (see setSentFolder). */
@@ -50,7 +51,7 @@ interface AccountFolders {
 }
 
 /** True for a folder that holds something other than incoming mail (Sent, Drafts, Trash, Junk, Archive), by learned path or by common name. */
-function isNonInboxFolder(folder: string, account: AccountFolders): boolean {
+export function isNonInboxFolder(folder: string, account: AccountFolders): boolean {
   const learned = new Set<string>();
   if (account.sent_folder) learned.add(account.sent_folder);
   try {
@@ -66,7 +67,7 @@ function isNonInboxFolder(folder: string, account: AccountFolders): boolean {
  * The folders of an account that the combined Inbox covers: its Inbox — INBOX, or a folder named "inbox" in any case
  * on servers that spell it differently — or, opt-in, every folder that isn't Sent/Drafts/Trash/Junk/Archive.
  */
-function inboxFolders(db: Database, account: AccountFolders, includeFolders: boolean): string[] {
+export function inboxFolders(db: Database, account: AccountFolders, includeFolders: boolean): string[] {
   const folders = db.query<{ folder: string }, [number]>("SELECT DISTINCT folder FROM emails WHERE account_id = ?").all(account.id).map(f => f.folder);
   const inboxes = folders.filter(folder => folder.toLowerCase() === "inbox");
   const base = inboxes.length > 0 ? inboxes : ["INBOX"];
@@ -106,13 +107,15 @@ export function listUnifiedEmails(
   // With a date window the same per-folder query just gains range conditions on `date`, still served by the index in order.
   const window = listFilterSql(options);
   const query = db.query<Row, (string | number)[]>(
-    `SELECT id, folder, uid, is_read, is_flagged, subject, from_addr, to_addr, date FROM emails
-     WHERE account_id = ? AND folder = ?${window.sql} ORDER BY date DESC, id DESC LIMIT ?`
+    // The imbox reads its own partial index (only the important messages, already in date order); left to itself the planner would
+    // walk the whole folder's date index and filter, which is fine for a busy imbox and slow for a rare one.
+    `SELECT id, folder, uid, is_read, is_flagged, subject, from_addr, to_addr, date FROM emails${kind === "imbox" ? " INDEXED BY idx_emails_imbox" : ""}
+     WHERE account_id = ? AND folder = ?${kind === "imbox" ? " AND imbox = 1" : ""}${window.sql} ORDER BY date DESC, id DESC LIMIT ?`
   );
 
   const merged: (SearchResult & { sortDate: string })[] = [];
   for (const account of accounts) {
-    const folders = kind === "inbox" ? inboxFolders(db, account, options.includeFolders ?? false) : [sentFolderFor(db, account.id, account.sent_folder)];
+    const folders = kind === "sent" ? [sentFolderFor(db, account.id, account.sent_folder)] : inboxFolders(db, account, options.includeFolders ?? false);
     // One index-served query per (account, folder), merged below — see the doc comment above.
     const rows = folders.flatMap(folder => query.all(account.id, folder, ...window.params, offset + limit));
     for (const row of rows) {

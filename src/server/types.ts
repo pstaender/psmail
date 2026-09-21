@@ -74,6 +74,8 @@ export interface EmailRecord {
   taxonomyList: string[];
   /** Events the "find dates and events" skill found, each a complete VCALENDAR (.ics) text; empty until run (or when there were none). */
   calendarEvents: string[];
+  /** Classified as important (shown in the imbox): true / false, or null while it has not been classified. */
+  imbox: boolean | null;
   /** Summary from the summarize skill, kept once computed. */
   aiSummary: string | null;
   /** Translation from the translate skill, and the language it is in. */

@@ -68,6 +68,26 @@ export class ApiClient {
     return this.request<void>("DELETE", `/api/accounts/${encodeURIComponent(accountEmail)}`);
   }
 
+  /** Classifies stored mail for the imbox: the given accounts (addresses), or every account; `force` redoes messages that have a verdict. */
+  classifyImbox(accounts: string[] | undefined, force: boolean) {
+    return this.request<{ results: { account: string; examined: number; important: number; notImportant: number; skipped?: string }[] }>(
+      "POST",
+      "/api/imbox/classify",
+      { accounts, force }
+    );
+  }
+
+  /** Why a message is (not) important: score and reasons, computed now. */
+  explainImbox(accountEmail: string, emailId: number) {
+    return this.request<{
+      stored: boolean | null;
+      important: boolean;
+      score: number;
+      ruledOut?: string;
+      reasons: { signal: string; points: number; detail?: string }[];
+    }>("GET", `/api/accounts/${encodeURIComponent(accountEmail)}/emails/${emailId}/imbox`);
+  }
+
   triggerDownload(accountEmail: string, folder?: string) {
     return this.request<{ id: number; status: string; progressTotal: number }>(
       "POST",

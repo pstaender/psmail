@@ -36,12 +36,12 @@ export function settingsRoutes(db: Database) {
         return json(listNewInboxMail(db, session.userId, afterId, { includeFolders }));
       }),
     },
-    /** Newest-first messages across all of the user's accounts: `inbox` (every Inbox) or `sent` (every Sent folder). */
+    /** Newest-first messages across all of the user's accounts: `inbox` (every Inbox), `imbox` (the important part of it) or `sent` (every Sent folder). */
     "/api/unified/:kind": {
       GET: withErrorHandling(async req => {
         const { session } = requireAuth(req, db);
         const kind = req.params.kind ?? "";
-        if (!isUnifiedKind(kind)) throw new ApiError(404, `Unknown mailbox "${kind}" (expected inbox or sent)`);
+        if (!isUnifiedKind(kind)) throw new ApiError(404, `Unknown mailbox "${kind}" (expected inbox, imbox or sent)`);
 
         const url = new URL(req.url);
         const limit = Number(url.searchParams.get("limit") ?? 50);

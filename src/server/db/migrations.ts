@@ -24,10 +24,17 @@ const MIGRATIONS = [
   "ALTER TABLE emails ADD COLUMN translated_text TEXT",
   "ALTER TABLE emails ADD COLUMN translated_language TEXT",
   "ALTER TABLE emails ADD COLUMN calendar_events TEXT",
+  "ALTER TABLE emails ADD COLUMN imbox INTEGER",
   "ALTER TABLE ai_apis ADD COLUMN calls INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE ai_apis ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE ai_apis ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE users ADD COLUMN settings TEXT NOT NULL DEFAULT '{}'",
+];
+
+/** Indexes on columns the migrations above add, so they can only be created afterwards. */
+const INDEXES = [
+  // The imbox list walks a folder in date order and only visits messages classified as important.
+  "CREATE INDEX IF NOT EXISTS idx_emails_imbox ON emails(account_id, folder, date DESC, id DESC) WHERE imbox = 1",
 ];
 
 export function runMigrations(db: Database): void {
@@ -36,6 +43,14 @@ export function runMigrations(db: Database): void {
       db.exec(statement);
     } catch (error) {
       if (!(error instanceof Error) || !/duplicate column/i.test(error.message)) throw error;
+    }
+  }
+  for (const statement of INDEXES) {
+    try {
+      db.exec(statement);
+    } catch (error) {
+      // A real database always has the columns; only the bare tables the migration tests start from may not.
+      if (!(error instanceof Error) || !/no such (column|table)/i.test(error.message)) throw error;
     }
   }
 }

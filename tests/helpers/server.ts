@@ -8,6 +8,7 @@ import { foldersRoutes } from "../../src/server/routes/folders";
 import { searchRoutes } from "../../src/server/routes/search";
 import { settingsRoutes } from "../../src/server/routes/settings";
 import { aiRoutes } from "../../src/server/routes/ai";
+import { imboxRoutes } from "../../src/server/routes/imbox";
 
 /** Boots the real route handlers (same wiring as src/server/main.ts) against a test db on an ephemeral port. */
 export function startTestServer(db: Database) {
@@ -21,6 +22,7 @@ export function startTestServer(db: Database) {
     ...searchRoutes(db),
     ...settingsRoutes(db),
     ...aiRoutes(db),
+    ...imboxRoutes(db),
   };
 
   return Bun.serve({ port: 0, routes });

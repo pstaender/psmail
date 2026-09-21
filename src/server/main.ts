@@ -13,6 +13,7 @@ import { searchRoutes } from "./routes/search";
 import { contactsRoutes } from "./routes/contacts";
 import { settingsRoutes } from "./routes/settings";
 import { aiRoutes } from "./routes/ai";
+import { imboxRoutes } from "./routes/imbox";
 
 export async function startServer() {
   const settings = await loadSettings();
@@ -31,6 +32,7 @@ export async function startServer() {
     ...contactsRoutes(db),
     ...settingsRoutes(db),
     ...aiRoutes(db),
+    ...imboxRoutes(db),
 
     "/api/health": {
       GET: () => Response.json({ ok: true }),

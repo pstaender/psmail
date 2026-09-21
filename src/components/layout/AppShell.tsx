@@ -1,6 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, LogOut, MoreHorizontal, PanelLeftOpen, PenSquare, Search, Settings, Tags, X } from "lucide-react";
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  CalendarDays,
+  LogOut,
+  MoreHorizontal,
+  PanelLeftOpen,
+  PenSquare,
+  Search,
+  Settings,
+  Tags,
+  X,
+} from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { DateFilterDialog } from "@/components/mail/DateFilterDialog";
 import { boundsOf, describeFilter, type DateFilter } from "@/lib/dateFilter";
@@ -22,12 +38,20 @@ import { Input } from "@/components/ui/input";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { AccountTree } from "@/components/sidebar/AccountTree";
-import { SettingsDialog, type SettingsPatch } from "@/components/layout/SettingsDialog";
+import {
+  SettingsDialog,
+  type SettingsPatch,
+} from "@/components/layout/SettingsDialog";
 import { showNewMailToast } from "@/components/mail/newMailToast";
 import { hasFinePointer } from "@/lib/pointer";
 import { buildPath, parsePath } from "@/lib/routes";
 import type { AiSkillRecord } from "../../server/models/ai";
-import { DEFAULT_NOTIFICATION_SOUND, playNotificationSound, showBrowserNotification, type NewMailPreview } from "@/lib/notifications";
+import {
+  DEFAULT_NOTIFICATION_SOUND,
+  playNotificationSound,
+  showBrowserNotification,
+  type NewMailPreview,
+} from "@/lib/notifications";
 import { EditAccountDialog } from "@/components/sidebar/EditAccountDialog";
 import { ResizeHandle } from "@/components/layout/ResizeHandle";
 import { EmptyState } from "@/components/mail/EmptyState";
@@ -36,7 +60,10 @@ import { BulkActionBar } from "@/components/mail/BulkActionBar";
 import { SearchResultList } from "@/components/mail/SearchResultList";
 import { MessageView } from "@/components/mail/MessageView";
 import type { BodyView } from "@/components/mail/MessageBody";
-import { ComposeDialog, type ComposeDraft } from "@/components/mail/ComposeDialog";
+import {
+  ComposeDialog,
+  type ComposeDraft,
+} from "@/components/mail/ComposeDialog";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useEmails } from "@/hooks/useEmails";
 import { useFolders } from "@/hooks/useFolders";
@@ -46,8 +73,20 @@ import { useSearchResults } from "@/hooks/useSearchResults";
 import { useResizableWidth } from "@/hooks/useResizableWidth";
 import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import { useAuth } from "@/contexts/AuthContext";
-import { api, type BulkResult, type FolderInfo, type UnifiedKind, type UserSettings } from "@/lib/api";
-import { editDraft, forwardDraft, replyAllDraft, replyDraft, withSignature } from "@/lib/compose";
+import {
+  api,
+  type BulkResult,
+  type FolderInfo,
+  type UnifiedKind,
+  type UserSettings,
+} from "@/lib/api";
+import {
+  editDraft,
+  forwardDraft,
+  replyAllDraft,
+  replyDraft,
+  withSignature,
+} from "@/lib/compose";
 import { resolveSpecialFolder } from "@/lib/folders";
 import type { Account, EmailRecord } from "../../server/types";
 import type { SearchResult } from "../../server/models/search";
@@ -61,7 +100,11 @@ import type { SearchResult } from "../../server/models/search";
  * the server doesn't always call it literally "Trash" — so this stays in sync with what the
  * backend will actually decide.
  */
-function willSoftDelete(account: Account | null, email: { uid: number | null; folder: string }, folders: FolderInfo[]): boolean {
+function willSoftDelete(
+  account: Account | null,
+  email: { uid: number | null; folder: string },
+  folders: FolderInfo[],
+): boolean {
   return (
     !!account &&
     !account.readOnly &&
@@ -82,52 +125,84 @@ interface SelectionItem {
 
 export function AppShell() {
   const { token, username, logout } = useAuth();
-  const { accounts, loading: accountsLoading, refresh: refreshAccounts } = useAccounts();
+  const {
+    accounts,
+    loading: accountsLoading,
+    refresh: refreshAccounts,
+  } = useAccounts();
 
   // Deep link: the URL the app was opened on decides where it starts (see lib/routes.ts).
   const [initialRoute] = useState(() => parsePath(window.location.pathname));
-  const [selectedAccountEmail, setSelectedAccountEmail] = useState<string | null>(initialRoute.accountEmail);
+  const [selectedAccountEmail, setSelectedAccountEmail] = useState<
+    string | null
+  >(initialRoute.accountEmail);
   // Where the message that is open lives, when that isn't the list being browsed: a message opened from a search or a
   // combined list belongs to its own account and folder, but opening it must not move the list, the filter or the sidebar.
-  const [openedIn, setOpenedIn] = useState<{ accountEmail: string; folder: string | null } | null>(null);
+  const [openedIn, setOpenedIn] = useState<{
+    accountEmail: string;
+    folder: string | null;
+  } | null>(null);
   const messageAccountEmail = openedIn?.accountEmail ?? selectedAccountEmail;
-  const selectedAccount = accounts.find(a => a.email === messageAccountEmail) ?? null;
+  const selectedAccount =
+    accounts.find((a) => a.email === messageAccountEmail) ?? null;
   // A disabled account is frozen (the server refuses every change): the UI doesn't even try.
-  const isDisabledAccount = (email: string | null) => !!accounts.find(a => a.email === email)?.disabled;
+  const isDisabledAccount = (email: string | null) =>
+    !!accounts.find((a) => a.email === email)?.disabled;
   function refuseIfDisabled(email: string | null): boolean {
     if (!isDisabledAccount(email)) return false;
-    toast.error(`Account "${email}" is disabled — enable it in its account settings to change it.`);
+    toast.error(
+      `Account "${email}" is disabled — enable it in its account settings to change it.`,
+    );
     return true;
   }
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(initialRoute.folder);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(
+    initialRoute.folder,
+  );
   const messageFolder = openedIn ? openedIn.folder : selectedFolder;
-  const [selectedEmailId, setSelectedEmailId] = useState<number | null>(initialRoute.emailId);
+  const [selectedEmailId, setSelectedEmailId] = useState<number | null>(
+    initialRoute.emailId,
+  );
   // Checked via Cmd/Ctrl+click, for bulk actions — independent of selectedEmailId (the reading pane).
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   // The reference point a Shift+click range is measured from — the last plain- or Cmd/Ctrl-clicked message.
-  const [selectionAnchorId, setSelectionAnchorId] = useState<number | null>(null);
+  const [selectionAnchorId, setSelectionAnchorId] = useState<number | null>(
+    null,
+  );
   // Where the keyboard is in the list (arrow keys move it; with Shift it's the moving end of the selection range).
   const [cursorId, setCursorId] = useState<number | null>(null);
-  const [pendingDeleteAccount, setPendingDeleteAccount] = useState<string | null>(null);
+  const [pendingDeleteAccount, setPendingDeleteAccount] = useState<
+    string | null
+  >(null);
   // Set only when the pending delete is NOT a soft-delete (i.e. it would be permanent) — see
   // requestDelete/willSoftDelete. `count` is just for the confirmation dialog's copy.
-  const [confirmDelete, setConfirmDelete] = useState<{ mode: "single" | "bulk"; count: number } | null>(null);
-  const [editingAccountEmail, setEditingAccountEmail] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{
+    mode: "single" | "bulk";
+    count: number;
+  } | null>(null);
+  const [editingAccountEmail, setEditingAccountEmail] = useState<string | null>(
+    null,
+  );
   const [composeOpen, setComposeOpen] = useState(false);
-  const [composeInitial, setComposeInitial] = useState<ComposeDraft | null>(null);
+  const [composeInitial, setComposeInitial] = useState<ComposeDraft | null>(
+    null,
+  );
   // Remembered across messages (and folder/account switches) so the next message
   // opened reuses whatever body view the user was last reading with.
-  const [preferredBodyView, setPreferredBodyView] = useState<BodyView | null>(null);
+  const [preferredBodyView, setPreferredBodyView] = useState<BodyView | null>(
+    null,
+  );
   // Server-side user settings (GET/PATCH /api/settings): the reading tab, the auto-sync interval, and
   // the combined-Inbox option. Loaded once; edits merge the server's answer back in.
   const [settings, setSettings] = useState<UserSettings>({});
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   useEffect(() => {
     if (!token) return;
     api
       .getSettings(token)
-      .then(loaded => {
+      .then((loaded) => {
         setSettings(loaded);
+        setSettingsLoaded(true);
         if (loaded.bodyView) setPreferredBodyView(loaded.bodyView);
       })
       .catch(() => {});
@@ -137,14 +212,20 @@ export function AppShell() {
   const refreshAiSkills = useCallback(() => {
     if (!token) return;
     // Whatever comes back, a list: AI is optional and a missing/odd answer just means "no skills".
-    api.listAiSkills(token).then(list => setAiSkills(Array.isArray(list) ? list : [])).catch(() => {});
+    api
+      .listAiSkills(token)
+      .then((list) => setAiSkills(Array.isArray(list) ? list : []))
+      .catch(() => {});
   }, [token]);
   useEffect(() => {
     refreshAiSkills();
   }, [refreshAiSkills]);
 
   async function saveAiLanguage(language: string | null) {
-    if (token) setSettings(await api.updateSettings(token, { aiTargetLanguage: language }));
+    if (token)
+      setSettings(
+        await api.updateSettings(token, { aiTargetLanguage: language }),
+      );
   }
 
   // The AI buttons of the reading pane: summarize (+ categorize when that skill exists) and translate. The result is
@@ -153,9 +234,15 @@ export function AppShell() {
   const [aiBusyEmailId, setAiBusyEmailId] = useState<number | null>(null); // which message the running AI call is for
   const openEmailId = useRef<number | null>(null);
   // Summarizing/translating again replaces a stored result (and costs another AI call), so it asks first.
-  const [confirmAi, setConfirmAi] = useState<{ kind: "summarize" | "translate"; skillId: number } | null>(null);
+  const [confirmAi, setConfirmAi] = useState<{
+    kind: "summarize" | "translate";
+    skillId: number;
+  } | null>(null);
   function requestAi(kind: "summarize" | "translate", skillId: number) {
-    const alreadyDone = kind === "summarize" ? !!selectedEmail?.aiSummary : !!selectedEmail?.translatedText;
+    const alreadyDone =
+      kind === "summarize"
+        ? !!selectedEmail?.aiSummary
+        : !!selectedEmail?.translatedText;
     if (alreadyDone) setConfirmAi({ kind, skillId });
     else runAi(kind, skillId);
   }
@@ -169,10 +256,20 @@ export function AppShell() {
       const result =
         kind === "summarize"
           ? await api.aiSummarize(token, messageAccountEmail, id, skillId)
-          : await api.aiTranslate(token, messageAccountEmail, id, undefined, skillId);
+          : await api.aiTranslate(
+              token,
+              messageAccountEmail,
+              id,
+              undefined,
+              skillId,
+            );
       if (openEmailId.current === id) setSelectedEmailDetail(result.email);
-      if ("taxonomyError" in result && result.taxonomyError) toast.error(`Categorizing failed: ${result.taxonomyError}`);
-      if ("eventsError" in result && result.eventsError) toast.error(`Looking for dates and events failed: ${result.eventsError}`);
+      if ("taxonomyError" in result && result.taxonomyError)
+        toast.error(`Categorizing failed: ${result.taxonomyError}`);
+      if ("eventsError" in result && result.eventsError)
+        toast.error(
+          `Looking for dates and events failed: ${result.eventsError}`,
+        );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
@@ -184,15 +281,24 @@ export function AppShell() {
   // without changing (or storing) the preference.
   function pickBodyView(view: BodyView) {
     setPreferredBodyView(view);
-    if (token) api.updateSettings(token, { bodyView: view }).then(setSettings).catch(() => {});
+    if (token)
+      api
+        .updateSettings(token, { bodyView: view })
+        .then(setSettings)
+        .catch(() => {});
   }
   // A cross-account mailbox (all Inboxes / all Sents) shown instead of one account's folder. The app
   // opens on the combined Inbox; picking a real folder in the sidebar leaves it, and a running search
   // takes precedence over it.
-  const [unifiedView, setUnifiedView] = useState<UnifiedKind | null>(initialRoute.unified);
+  const [unifiedView, setUnifiedView] = useState<UnifiedKind | null>(
+    initialRoute.unified,
+  );
   const [searchQuery, setSearchQuery] = useState("");
   // Full text search: the message text is always searched too (otherwise only when subject and sender found nothing). Remembered.
-  const [fullTextSearch, setFullTextSearch] = useLocalStorageState("psmail.fullTextSearch", false);
+  const [fullTextSearch, setFullTextSearch] = useLocalStorageState(
+    "psmail.fullTextSearch",
+    false,
+  );
   const [searchFocused, setSearchFocused] = useState(false);
   const [searchMenuOpen, setSearchMenuOpen] = useState(false);
   // Show only the messages of a day or period. It belongs to the list it was set on: another folder or mailbox starts without.
@@ -202,13 +308,23 @@ export function AppShell() {
   const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
   const [categoryFilterOpen, setCategoryFilterOpen] = useState(false);
   const dateBounds = useMemo(() => boundsOf(dateFilter), [dateFilter]);
-  const listFilter = useMemo(() => ({ ...dateBounds, categories: categoryFilter }), [dateBounds, categoryFilter]);
+  const listFilter = useMemo(
+    () => ({ ...dateBounds, categories: categoryFilter }),
+    [dateBounds, categoryFilter],
+  );
   const filtering = dateFilter !== null || categoryFilter.length > 0;
-  const listKey = unifiedView ? `unified:${unifiedView}` : `${selectedAccountEmail}/${selectedFolder}`;
+  const listKey = unifiedView
+    ? `unified:${unifiedView}`
+    : `${selectedAccountEmail}/${selectedFolder}`;
   useEffect(() => {
     setDateFilter(null);
     setCategoryFilter([]);
   }, [listKey]);
+  // The imbox is opt-in: a link to it (/u/imbox) or a setting turned off again while it is open falls back to the Inbox — once the
+  // settings are known (they load a moment after the app does).
+  useEffect(() => {
+    if (settingsLoaded && unifiedView === "imbox" && settings.imboxEnabled !== true) setUnifiedView("inbox");
+  }, [settingsLoaded, unifiedView, settings.imboxEnabled]);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const {
     results: searchResults,
@@ -224,7 +340,10 @@ export function AppShell() {
   // The cross-account result list (search hits or a unified mailbox) replaces the folder's message list.
   const showingResults = isSearching || unifiedView !== null;
 
-  const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorageState("psmail.sidebarCollapsed", false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorageState(
+    "psmail.sidebarCollapsed",
+    false,
+  );
   // Double-clicking a message in a list reads it with the list out of the way (a thin strip brings it back). Only for the
   // moment, so it isn't remembered: a new page load shows the list.
   const [listCollapsed, setListCollapsed] = useState(false);
@@ -235,22 +354,31 @@ export function AppShell() {
     }
   }, [selectedEmailId]);
   useEffect(() => setListCollapsed(false), [searchQuery]);
-  const { width: sidebarWidth, startResize: startSidebarResize } = useResizableWidth("psmail.sidebarWidth", 240, 160, 480);
-  const { width: messageListWidth, startResize: startMessageListResize } = useResizableWidth(
-    "psmail.messageListWidth",
-    320,
-    240,
-    640
-  );
+  const { width: sidebarWidth, startResize: startSidebarResize } =
+    useResizableWidth("psmail.sidebarWidth", 240, 160, 480);
+  const { width: messageListWidth, startResize: startMessageListResize } =
+    useResizableWidth("psmail.messageListWidth", 320, 240, 640);
 
   // The address bar follows the view: a folder, or a message in it, gets its own URL (a message opened from the
   // combined lists or a search counts as being in its folder). Moving pushes a history entry; the first sync only
   // normalizes the URL the app was opened on, and Back/Forward apply the URL they land on to the state again.
   const urlSynced = useRef(false);
   useEffect(() => {
-    const desired = buildPath({ unified: unifiedView, accountEmail: messageAccountEmail, folder: messageFolder, emailId: selectedEmailId });
+    const desired = buildPath({
+      unified: unifiedView,
+      accountEmail: messageAccountEmail,
+      folder: messageFolder,
+      emailId: selectedEmailId,
+    });
     const openInFolder = selectedEmailId !== null || unifiedView === null;
-    const path = openInFolder ? desired : buildPath({ unified: unifiedView, accountEmail: null, folder: null, emailId: null });
+    const path = openInFolder
+      ? desired
+      : buildPath({
+          unified: unifiedView,
+          accountEmail: null,
+          folder: null,
+          emailId: null,
+        });
     if (path !== window.location.pathname) {
       if (urlSynced.current) window.history.pushState(null, "", path);
       else window.history.replaceState(null, "", path);
@@ -279,8 +407,9 @@ export function AppShell() {
 
   // A link to an account that isn't (or is no longer) yours falls back to the combined Inbox.
   useEffect(() => {
-    if (accountsLoading || unifiedView !== null || !selectedAccountEmail) return;
-    if (accounts.some(a => a.email === selectedAccountEmail)) return;
+    if (accountsLoading || unifiedView !== null || !selectedAccountEmail)
+      return;
+    if (accounts.some((a) => a.email === selectedAccountEmail)) return;
     toast.error(`Account "${selectedAccountEmail}" was not found.`);
     setUnifiedView("inbox");
     setSelectedAccountEmail(null);
@@ -295,13 +424,24 @@ export function AppShell() {
     }
   }, [accounts, selectedAccountEmail]);
 
-  const { emails, loading: emailsLoading, loadingMore, hasMore, loadMore, refresh: refreshEmails, patchLocal, removeLocal } = useEmails(
-    selectedAccountEmail,
-    selectedFolder,
-    listFilter
-  );
-  const { folders, loading: foldersLoading, error: foldersError, warning: foldersWarning, refresh: refreshFolders, patchCounts: patchRawFolderCounts } =
-    useFolders(messageAccountEmail);
+  const {
+    emails,
+    loading: emailsLoading,
+    loadingMore,
+    hasMore,
+    loadMore,
+    refresh: refreshEmails,
+    patchLocal,
+    removeLocal,
+  } = useEmails(selectedAccountEmail, selectedFolder, listFilter);
+  const {
+    folders,
+    loading: foldersLoading,
+    error: foldersError,
+    warning: foldersWarning,
+    refresh: refreshFolders,
+    patchCounts: patchRawFolderCounts,
+  } = useFolders(messageAccountEmail);
 
   // Unread messages across every account's Inbox, for the combined Inbox's badge. Loaded from the
   // server (which knows all accounts, not just the selected one) and then nudged optimistically
@@ -309,15 +449,22 @@ export function AppShell() {
   const [unifiedInboxUnread, setUnifiedInboxUnread] = useState(0);
   const refreshUnifiedInboxUnread = useCallback(() => {
     if (!token) return;
-    api.unifiedInboxUnread(token).then(r => setUnifiedInboxUnread(r.count)).catch(() => {});
+    api
+      .unifiedInboxUnread(token)
+      .then((r) => setUnifiedInboxUnread(r.count))
+      .catch(() => {});
   }, [token]);
   useEffect(() => {
     refreshUnifiedInboxUnread();
   }, [refreshUnifiedInboxUnread]);
 
-  function patchFolderCounts(folder: string, deltas: { total?: number; unread?: number }) {
+  function patchFolderCounts(
+    folder: string,
+    deltas: { total?: number; unread?: number },
+  ) {
     patchRawFolderCounts(folder, deltas);
-    if (folder.toLowerCase() === "inbox" && deltas.unread) setUnifiedInboxUnread(count => Math.max(0, count + deltas.unread!));
+    if (folder.toLowerCase() === "inbox" && deltas.unread)
+      setUnifiedInboxUnread((count) => Math.max(0, count + deltas.unread!));
   }
 
   // A sync finished for some account: pick up its new mail without disturbing anything else
@@ -336,7 +483,10 @@ export function AppShell() {
   const newMailBaseline = useRef<number | null>(null);
   useEffect(() => {
     if (!token) return;
-    api.newMail(token).then(r => (newMailBaseline.current = r.latestId)).catch(() => {});
+    api
+      .newMail(token)
+      .then((r) => (newMailBaseline.current = r.latestId))
+      .catch(() => {});
   }, [token]);
 
   const openNewMail = (mail: NewMailPreview) => {
@@ -346,20 +496,30 @@ export function AppShell() {
 
   async function announceNewMail() {
     if (!token || newMailBaseline.current === null) return;
-    const result = await api.newMail(token, newMailBaseline.current).catch(() => null);
+    const result = await api
+      .newMail(token, newMailBaseline.current)
+      .catch(() => null);
     if (!result) return;
     newMailBaseline.current = result.latestId;
     if (result.total === 0) return;
 
-    const handlers = { openMail: openNewMail, openInbox: () => selectUnified("inbox") };
+    const handlers = {
+      openMail: openNewMail,
+      openInbox: () => selectUnified("inbox"),
+    };
     if (settings.notifyBrowser) showBrowserNotification(result, handlers);
     if (settings.notifyToast) {
       showNewMailToast(result, handlers);
-      playNotificationSound(settings.notificationSound ?? DEFAULT_NOTIFICATION_SOUND);
+      playNotificationSound(
+        settings.notificationSound ?? DEFAULT_NOTIFICATION_SOUND,
+      );
     }
   }
 
-  const { jobs: syncJobs, start: startSync } = useSyncJobs(accounts, handleSyncComplete);
+  const { jobs: syncJobs, start: startSync } = useSyncJobs(
+    accounts,
+    handleSyncComplete,
+  );
 
   // Automatic sync: while the app is open, every `syncIntervalMinutes` each account's Inbox is synced
   // (an account that's still busy with the previous run is skipped by startSync). Only the Inbox, to
@@ -370,7 +530,9 @@ export function AppShell() {
   useEffect(() => {
     if (!syncIntervalMinutes) return;
     const timer = setInterval(() => {
-      for (const account of accountsRef.current) if (!account.disabled && !account.excludeFromAutoSync) startSync(account.email, { folder: "INBOX", silent: true });
+      for (const account of accountsRef.current)
+        if (!account.disabled && !account.excludeFromAutoSync)
+          startSync(account.email, { folder: "INBOX", silent: true });
     }, syncIntervalMinutes * 60_000);
     return () => clearInterval(timer);
   }, [syncIntervalMinutes, startSync]);
@@ -378,12 +540,16 @@ export function AppShell() {
   // The combined Inbox's refresh button: sync the Inbox of every account at once (disabled accounts can't be synced; an
   // account that is already syncing is left alone by startSync). Only the Inboxes — "Sync now" on an account does all its folders.
   function syncAllInboxes() {
-    for (const account of accounts) if (!account.disabled && !account.excludeFromAutoSync) startSync(account.email, { folder: "INBOX" });
+    for (const account of accounts)
+      if (!account.disabled && !account.excludeFromAutoSync)
+        startSync(account.email, { folder: "INBOX" });
   }
 
   async function saveSettings(patch: SettingsPatch) {
     if (!token) return;
-    const includeChanged = (settings.combinedInboxIncludesFolders === true) !== patch.combinedInboxIncludesFolders;
+    const includeChanged =
+      (settings.combinedInboxIncludesFolders === true) !==
+      patch.combinedInboxIncludesFolders;
     setSettings(await api.updateSettings(token, patch));
     // The combined Inbox's contents and badge depend on the option, and the server applies it per request.
     if (includeChanged) {
@@ -391,7 +557,8 @@ export function AppShell() {
       refreshUnifiedInboxUnread();
     }
   }
-  const { email: selectedEmail, setEmail: setSelectedEmailDetail } = useEmailDetail(messageAccountEmail, selectedEmailId);
+  const { email: selectedEmail, setEmail: setSelectedEmailDetail } =
+    useEmailDetail(messageAccountEmail, selectedEmailId);
   openEmailId.current = selectedEmail?.id ?? null;
 
   // Mark-as-read on open, like every other mail client. Patches both the folder-scoped list
@@ -400,10 +567,22 @@ export function AppShell() {
   // failed IMAP push — flipping the message back to unread right after the user just opened
   // and read it would be a confusing flicker. It does still surface the failure via toast.
   useEffect(() => {
-    if (selectedEmail && !selectedEmail.isRead && messageAccountEmail && token && !isDisabledAccount(messageAccountEmail)) {
-      api.updateEmail(token, messageAccountEmail, selectedEmail.id, { isRead: true }).catch(err => {
-        toast.error(errorMessage(err, "Failed to sync read status to the mail server"));
-      });
+    if (
+      selectedEmail &&
+      !selectedEmail.isRead &&
+      messageAccountEmail &&
+      token &&
+      !isDisabledAccount(messageAccountEmail)
+    ) {
+      api
+        .updateEmail(token, messageAccountEmail, selectedEmail.id, {
+          isRead: true,
+        })
+        .catch((err) => {
+          toast.error(
+            errorMessage(err, "Failed to sync read status to the mail server"),
+          );
+        });
       patchLocal(selectedEmail.id, { isRead: true });
       patchSearchResult(selectedEmail.id, { isRead: true });
       patchFolderCounts(selectedEmail.folder, { unread: -1 });
@@ -425,11 +604,20 @@ export function AppShell() {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const dialogOpen =
-        composeOpen || settingsOpen || editingAccountEmail !== null || pendingDeleteAccount !== null || confirmDelete !== null || confirmAi !== null;
+        composeOpen ||
+        settingsOpen ||
+        editingAccountEmail !== null ||
+        pendingDeleteAccount !== null ||
+        confirmDelete !== null ||
+        confirmAi !== null;
       if (dialogOpen) return;
 
       const target = e.target as HTMLElement | null;
-      const typing = !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      const typing =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
       const mod = (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey;
       const key = e.key.toLowerCase();
 
@@ -463,10 +651,21 @@ export function AppShell() {
         return;
       }
 
-      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (
+        (e.key === "ArrowDown" || e.key === "ArrowUp") &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey
+      ) {
         // Only with a mouse-type pointer, outside text fields and open menus/lists (which use the arrows themselves).
-        if (typing || !hasFinePointer() || target?.closest('[role="menu"], [role="listbox"], [role="combobox"]')) return;
-        if (moveListCursor(e.key === "ArrowDown" ? 1 : -1, e.shiftKey)) e.preventDefault();
+        if (
+          typing ||
+          !hasFinePointer() ||
+          target?.closest('[role="menu"], [role="listbox"], [role="combobox"]')
+        )
+          return;
+        if (moveListCursor(e.key === "ArrowDown" ? 1 : -1, e.shiftKey))
+          e.preventDefault();
         return;
       }
 
@@ -487,14 +686,17 @@ export function AppShell() {
   function activeList(): { ids: number[]; open: (id: number) => void } {
     if (showingResults) {
       return {
-        ids: searchResults.map(r => r.id),
-        open: id => {
-          const result = searchResults.find(r => r.id === id);
+        ids: searchResults.map((r) => r.id),
+        open: (id) => {
+          const result = searchResults.find((r) => r.id === id);
           if (result) selectSearchResult(result);
         },
       };
     }
-    return { ids: emails.map(e => e.id), open: id => setSelectedEmailId(id) };
+    return {
+      ids: emails.map((e) => e.id),
+      open: (id) => setSelectedEmailId(id),
+    };
   }
 
   /**
@@ -506,8 +708,15 @@ export function AppShell() {
     const { ids, open } = activeList();
     if (ids.length === 0) return false;
 
-    const from = ids.indexOf(cursorId ?? selectionAnchorId ?? selectedEmailId ?? -1);
-    const next = from === -1 ? (direction > 0 ? 0 : ids.length - 1) : Math.min(Math.max(from + direction, 0), ids.length - 1);
+    const from = ids.indexOf(
+      cursorId ?? selectionAnchorId ?? selectedEmailId ?? -1,
+    );
+    const next =
+      from === -1
+        ? direction > 0
+          ? 0
+          : ids.length - 1
+        : Math.min(Math.max(from + direction, 0), ids.length - 1);
     const nextId = ids[next]!;
 
     if (extend) {
@@ -528,7 +737,10 @@ export function AppShell() {
   // Keep the keyboard cursor's row in view as it moves.
   useEffect(() => {
     const id = cursorId ?? selectedEmailId;
-    if (id !== null) document.querySelector(`[data-row-id="${id}"]`)?.scrollIntoView?.({ block: "nearest" });
+    if (id !== null)
+      document
+        .querySelector(`[data-row-id="${id}"]`)
+        ?.scrollIntoView?.({ block: "nearest" });
   }, [cursorId, selectedEmailId]);
 
   function selectUnified(kind: UnifiedKind) {
@@ -559,15 +771,23 @@ export function AppShell() {
    * itself doesn't move, so repeated Shift+clicks grow/shrink the range from the same starting point.
    * Shared by the folder list and the search/combined lists. Returns false for a plain click.
    */
-  function handleSelectionClick(ids: number[], id: number, event: React.MouseEvent): boolean {
+  function handleSelectionClick(
+    ids: number[],
+    id: number,
+    event: React.MouseEvent,
+  ): boolean {
     if (event.shiftKey) {
-      const anchorIndex = selectionAnchorId !== null ? ids.indexOf(selectionAnchorId) : -1;
+      const anchorIndex =
+        selectionAnchorId !== null ? ids.indexOf(selectionAnchorId) : -1;
       const targetIndex = ids.indexOf(id);
 
       if (anchorIndex === -1 || targetIndex === -1) {
         setSelectedIds(new Set([id]));
       } else {
-        const [start, end] = anchorIndex <= targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+        const [start, end] =
+          anchorIndex <= targetIndex
+            ? [anchorIndex, targetIndex]
+            : [targetIndex, anchorIndex];
         setSelectedIds(new Set(ids.slice(start, end + 1)));
       }
 
@@ -577,7 +797,7 @@ export function AppShell() {
     }
 
     if (event.metaKey || event.ctrlKey) {
-      setSelectedIds(prev => {
+      setSelectedIds((prev) => {
         const next = new Set(prev);
         if (next.has(id)) next.delete(id);
         else next.add(id);
@@ -593,7 +813,14 @@ export function AppShell() {
 
   // A plain click reads the message as usual (and drops any bulk selection, like every other mail client).
   function selectEmail(email: EmailRecord, event: React.MouseEvent) {
-    if (handleSelectionClick(emails.map(e => e.id), email.id, event)) return;
+    if (
+      handleSelectionClick(
+        emails.map((e) => e.id),
+        email.id,
+        event,
+      )
+    )
+      return;
 
     setOpenedIn(null); // it is in the list being browsed
     setSelectedIds(new Set());
@@ -613,7 +840,14 @@ export function AppShell() {
   }
 
   function selectResult(result: SearchResult, event: React.MouseEvent) {
-    if (handleSelectionClick(searchResults.map(r => r.id), result.id, event)) return;
+    if (
+      handleSelectionClick(
+        searchResults.map((r) => r.id),
+        result.id,
+        event,
+      )
+    )
+      return;
 
     selectSearchResult(result);
     setSelectionAnchorId(result.id);
@@ -634,7 +868,9 @@ export function AppShell() {
     const isFlagged = !email.isFlagged;
     patchLocal(email.id, { isFlagged });
     try {
-      await api.updateEmail(token, messageAccountEmail, email.id, { isFlagged });
+      await api.updateEmail(token, messageAccountEmail, email.id, {
+        isFlagged,
+      });
     } catch (err) {
       patchLocal(email.id, { isFlagged: email.isFlagged });
       toast.error(errorMessage(err, "Failed to update flag"));
@@ -651,11 +887,14 @@ export function AppShell() {
     const apply = (value: boolean) => {
       patchSearchResult(result.id, { isFlagged: value });
       patchLocal(result.id, { isFlagged: value });
-      if (selectedEmail?.id === result.id) setSelectedEmailDetail({ ...selectedEmail, isFlagged: value });
+      if (selectedEmail?.id === result.id)
+        setSelectedEmailDetail({ ...selectedEmail, isFlagged: value });
     };
     apply(isFlagged);
     try {
-      await api.updateEmail(token, result.accountEmail, result.id, { isFlagged });
+      await api.updateEmail(token, result.accountEmail, result.id, {
+        isFlagged,
+      });
     } catch (err) {
       apply(result.isFlagged);
       toast.error(errorMessage(err, "Failed to update flag"));
@@ -672,7 +911,9 @@ export function AppShell() {
     patchFolderCounts(selectedEmail.folder, { unread: isRead ? -1 : 1 });
     setSelectedEmailDetail({ ...selectedEmail, isRead });
     try {
-      await api.updateEmail(token, messageAccountEmail, selectedEmail.id, { isRead });
+      await api.updateEmail(token, messageAccountEmail, selectedEmail.id, {
+        isRead,
+      });
     } catch (err) {
       patchLocal(selectedEmail.id, { isRead: previousIsRead });
       patchSearchResult(selectedEmail.id, { isRead: previousIsRead });
@@ -687,14 +928,21 @@ export function AppShell() {
     if (!token || !messageAccountEmail || !selectedEmail) return;
     let result: { softDeleted: boolean };
     try {
-      result = await api.deleteEmail(token, messageAccountEmail, selectedEmail.id);
+      result = await api.deleteEmail(
+        token,
+        messageAccountEmail,
+        selectedEmail.id,
+      );
     } catch (err) {
       toast.error(errorMessage(err, "Failed to delete message"));
       return;
     }
     removeLocal(selectedEmail.id);
     removeSearchResult(selectedEmail.id);
-    patchFolderCounts(selectedEmail.folder, { total: -1, unread: selectedEmail.isRead ? 0 : -1 });
+    patchFolderCounts(selectedEmail.folder, {
+      total: -1,
+      unread: selectedEmail.isRead ? 0 : -1,
+    });
     if (result.softDeleted) {
       patchFolderCounts(resolveSpecialFolder(folders, "\\Trash", "Trash"), {
         total: 1,
@@ -718,10 +966,17 @@ export function AppShell() {
     // Unlike the folder-scoped list, a moved message still matches a search — just with a new
     // folder — so it's patched in place. A unified Inbox/Sent only lists that one folder, though,
     // so a moved message leaves it.
-    if (unifiedView !== null && !isSearching) removeSearchResult(selectedEmail.id);
+    if (unifiedView !== null && !isSearching)
+      removeSearchResult(selectedEmail.id);
     else patchSearchResult(selectedEmail.id, { folder });
-    patchFolderCounts(selectedEmail.folder, { total: -1, unread: selectedEmail.isRead ? 0 : -1 });
-    patchFolderCounts(folder, { total: 1, unread: selectedEmail.isRead ? 0 : 1 });
+    patchFolderCounts(selectedEmail.folder, {
+      total: -1,
+      unread: selectedEmail.isRead ? 0 : -1,
+    });
+    patchFolderCounts(folder, {
+      total: 1,
+      unread: selectedEmail.isRead ? 0 : 1,
+    });
     setSelectedEmailId(null);
     toast.success(`Moved to ${folder}`);
   }
@@ -732,21 +987,48 @@ export function AppShell() {
     if (selectedIds.size === 0) return [];
     if (showingResults) {
       return searchResults
-        .filter(r => selectedIds.has(r.id))
-        .map(r => ({ id: r.id, accountEmail: r.accountEmail, folder: r.folder, uid: r.uid, isRead: r.isRead }));
+        .filter((r) => selectedIds.has(r.id))
+        .map((r) => ({
+          id: r.id,
+          accountEmail: r.accountEmail,
+          folder: r.folder,
+          uid: r.uid,
+          isRead: r.isRead,
+        }));
     }
     return emails
-      .filter(e => selectedIds.has(e.id))
-      .map(e => ({ id: e.id, accountEmail: selectedAccountEmail ?? "", folder: e.folder, uid: e.uid, isRead: e.isRead }));
-  }, [selectedIds, showingResults, searchResults, emails, selectedAccountEmail]);
+      .filter((e) => selectedIds.has(e.id))
+      .map((e) => ({
+        id: e.id,
+        accountEmail: selectedAccountEmail ?? "",
+        folder: e.folder,
+        uid: e.uid,
+        isRead: e.isRead,
+      }));
+  }, [
+    selectedIds,
+    showingResults,
+    searchResults,
+    emails,
+    selectedAccountEmail,
+  ]);
 
   // The one account every selected message belongs to, if there is exactly one — Move needs that (folders
   // are per account), so the sidebar's account follows it and its folder list is what Move offers.
-  const selectionAccount = selectionItems.length > 0 && selectionItems.every(i => i.accountEmail === selectionItems[0]!.accountEmail)
-    ? selectionItems[0]!.accountEmail
-    : null;
+  const selectionAccount =
+    selectionItems.length > 0 &&
+    selectionItems.every(
+      (i) => i.accountEmail === selectionItems[0]!.accountEmail,
+    )
+      ? selectionItems[0]!.accountEmail
+      : null;
   useEffect(() => {
-    if (showingResults && selectionAccount && selectionAccount !== messageAccountEmail) setOpenedIn({ accountEmail: selectionAccount, folder: null });
+    if (
+      showingResults &&
+      selectionAccount &&
+      selectionAccount !== messageAccountEmail
+    )
+      setOpenedIn({ accountEmail: selectionAccount, folder: null });
   }, [showingResults, selectionAccount, messageAccountEmail]);
 
   // A different result list (new search, another combined mailbox) starts with a clean selection.
@@ -763,37 +1045,55 @@ export function AppShell() {
    */
   async function runBulkAction(
     perAccount: (accountEmail: string, ids: number[]) => Promise<BulkResult[]>,
-    verb: string
+    verb: string,
   ): Promise<{ result: BulkResult; item: SelectionItem }[]> {
     if (!token) return [];
-    const disabledItems = selectionItems.filter(item => isDisabledAccount(item.accountEmail));
-    const items = selectionItems.filter(item => !isDisabledAccount(item.accountEmail));
+    const disabledItems = selectionItems.filter((item) =>
+      isDisabledAccount(item.accountEmail),
+    );
+    const items = selectionItems.filter(
+      (item) => !isDisabledAccount(item.accountEmail),
+    );
     setSelectedIds(new Set());
     if (disabledItems.length > 0) {
-      toast.error(`${disabledItems.length} message${disabledItems.length === 1 ? "" : "s"} skipped: the account is disabled and can't be changed.`);
+      toast.error(
+        `${disabledItems.length} message${disabledItems.length === 1 ? "" : "s"} skipped: the account is disabled and can't be changed.`,
+      );
     }
     if (items.length === 0) return [];
 
     const byAccount = new Map<string, SelectionItem[]>();
-    for (const item of items) byAccount.set(item.accountEmail, [...(byAccount.get(item.accountEmail) ?? []), item]);
+    for (const item of items)
+      byAccount.set(item.accountEmail, [
+        ...(byAccount.get(item.accountEmail) ?? []),
+        item,
+      ]);
 
     const succeeded: { result: BulkResult; item: SelectionItem }[] = [];
     let failed = 0;
     for (const [accountEmail, group] of byAccount) {
       try {
-        const results = await perAccount(accountEmail, group.map(i => i.id));
+        const results = await perAccount(
+          accountEmail,
+          group.map((i) => i.id),
+        );
         for (const result of results) {
-          const item = group.find(i => i.id === result.id);
+          const item = group.find((i) => i.id === result.id);
           if (result.ok && item) succeeded.push({ result, item });
           else failed += 1;
         }
       } catch (err) {
         failed += group.length;
-        toast.error(errorMessage(err, `Failed to ${verb.toLowerCase()} message(s)`));
+        toast.error(
+          errorMessage(err, `Failed to ${verb.toLowerCase()} message(s)`),
+        );
       }
     }
 
-    if (failed > 0) toast.error(`${verb} ${succeeded.length}/${items.length} message(s) — ${failed} failed`);
+    if (failed > 0)
+      toast.error(
+        `${verb} ${succeeded.length}/${items.length} message(s) — ${failed} failed`,
+      );
     else toast.success(`${verb} ${items.length} message(s)`);
     return succeeded;
   }
@@ -804,22 +1104,36 @@ export function AppShell() {
    */
   async function bulkDownload() {
     const byAccount = new Map<string, number[]>();
-    for (const item of selectionItems) byAccount.set(item.accountEmail, [...(byAccount.get(item.accountEmail) ?? []), item.id]);
-    for (const [accountEmail, ids] of byAccount) await downloadMessages(accountEmail, ids);
+    for (const item of selectionItems)
+      byAccount.set(item.accountEmail, [
+        ...(byAccount.get(item.accountEmail) ?? []),
+        item.id,
+      ]);
+    for (const [accountEmail, ids] of byAccount)
+      await downloadMessages(accountEmail, ids);
   }
 
   /** One request, one file (the .eml itself for one message, a zip for several); says what was saved, or why not. */
   async function downloadMessages(accountEmail: string, ids: number[]) {
     if (!token) return;
     try {
-      toast.success(`Downloaded ${await api.downloadMessages(token, accountEmail, ids)}`);
+      toast.success(
+        `Downloaded ${await api.downloadMessages(token, accountEmail, ids)}`,
+      );
     } catch (err) {
       toast.error(errorMessage(err, "Couldn't download the message(s)"));
     }
   }
 
   /** Applies count changes to the sidebar's folder badges (only the selected account's are known here) and re-reads the combined Inbox's badge. */
-  function applyCountChanges(changes: { item: SelectionItem; folder: string; total?: number; unread?: number }[]) {
+  function applyCountChanges(
+    changes: {
+      item: SelectionItem;
+      folder: string;
+      total?: number;
+      unread?: number;
+    }[],
+  ) {
     const perFolder = new Map<string, { total: number; unread: number }>();
     for (const change of changes) {
       if (change.item.accountEmail !== messageAccountEmail) continue;
@@ -828,34 +1142,58 @@ export function AppShell() {
       entry.unread += change.unread ?? 0;
       perFolder.set(change.folder, entry);
     }
-    for (const [folder, deltas] of perFolder) if (deltas.total !== 0 || deltas.unread !== 0) patchFolderCounts(folder, deltas);
+    for (const [folder, deltas] of perFolder)
+      if (deltas.total !== 0 || deltas.unread !== 0)
+        patchFolderCounts(folder, deltas);
     if (showingResults) refreshUnifiedInboxUnread();
   }
 
   async function bulkMarkRead(isRead: boolean) {
     if (!token) return;
     const succeeded = await runBulkAction(
-      (accountEmail, ids) => api.bulkUpdateEmails(token, accountEmail, ids, { isRead }),
-      isRead ? "Marked as read" : "Marked as unread"
+      (accountEmail, ids) =>
+        api.bulkUpdateEmails(token, accountEmail, ids, { isRead }),
+      isRead ? "Marked as read" : "Marked as unread",
     );
     succeeded.forEach(({ result, item }) => {
       patchLocal(result.id, { isRead });
       patchSearchResult(result.id, { isRead });
-      if (selectedEmail?.id === result.id) setSelectedEmailDetail({ ...selectedEmail, isRead });
+      if (selectedEmail?.id === result.id)
+        setSelectedEmailDetail({ ...selectedEmail, isRead });
     });
     applyCountChanges(
-      succeeded.filter(({ item }) => item.isRead !== isRead).map(({ item }) => ({ item, folder: item.folder, unread: isRead ? -1 : 1 }))
+      succeeded
+        .filter(({ item }) => item.isRead !== isRead)
+        .map(({ item }) => ({
+          item,
+          folder: item.folder,
+          unread: isRead ? -1 : 1,
+        })),
     );
   }
 
   async function bulkDelete() {
     if (!token) return;
     const trash = resolveSpecialFolder(folders, "\\Trash", "Trash");
-    const succeeded = await runBulkAction((accountEmail, ids) => api.bulkDeleteEmails(token, accountEmail, ids), "Deleted");
+    const succeeded = await runBulkAction(
+      (accountEmail, ids) => api.bulkDeleteEmails(token, accountEmail, ids),
+      "Deleted",
+    );
     const changes: Parameters<typeof applyCountChanges>[0] = [];
     succeeded.forEach(({ result, item }) => {
-      changes.push({ item, folder: item.folder, total: -1, unread: item.isRead ? 0 : -1 });
-      if (result.softDeleted) changes.push({ item, folder: trash, total: 1, unread: item.isRead ? 0 : 1 });
+      changes.push({
+        item,
+        folder: item.folder,
+        total: -1,
+        unread: item.isRead ? 0 : -1,
+      });
+      if (result.softDeleted)
+        changes.push({
+          item,
+          folder: trash,
+          total: 1,
+          unread: item.isRead ? 0 : 1,
+        });
       removeLocal(result.id);
       removeSearchResult(result.id);
       if (selectedEmailId === result.id) setSelectedEmailId(null);
@@ -866,12 +1204,18 @@ export function AppShell() {
   async function bulkMove(folder: string) {
     if (!token) return;
     const succeeded = await runBulkAction(
-      (accountEmail, ids) => api.bulkMoveEmails(token, accountEmail, ids, folder),
-      `Moved to ${folder} —`
+      (accountEmail, ids) =>
+        api.bulkMoveEmails(token, accountEmail, ids, folder),
+      `Moved to ${folder} —`,
     );
     const changes: Parameters<typeof applyCountChanges>[0] = [];
     succeeded.forEach(({ result, item }) => {
-      changes.push({ item, folder: item.folder, total: -1, unread: item.isRead ? 0 : -1 });
+      changes.push({
+        item,
+        folder: item.folder,
+        total: -1,
+        unread: item.isRead ? 0 : -1,
+      });
       changes.push({ item, folder, total: 1, unread: item.isRead ? 0 : 1 });
       removeLocal(result.id);
       // A moved message still matches a search (just in another folder) but leaves a combined Inbox/Sent.
@@ -892,13 +1236,13 @@ export function AppShell() {
   function requestDelete() {
     if (selectedIds.size > 0) {
       if (selectionItems.length === 0) return;
-      const soft = selectionItems.every(item =>
+      const soft = selectionItems.every((item) =>
         willSoftDelete(
-          accounts.find(a => a.email === item.accountEmail) ?? null,
+          accounts.find((a) => a.email === item.accountEmail) ?? null,
           item,
           // Only the selected account's live folder list is at hand for resolving the Trash path.
-          item.accountEmail === messageAccountEmail ? folders : []
-        )
+          item.accountEmail === messageAccountEmail ? folders : [],
+        ),
       );
       if (soft) bulkDelete();
       else setConfirmDelete({ mode: "bulk", count: selectionItems.length });
@@ -906,7 +1250,8 @@ export function AppShell() {
     }
     if (selectedEmail) {
       if (refuseIfDisabled(messageAccountEmail)) return;
-      if (willSoftDelete(selectedAccount, selectedEmail, folders)) handleDelete();
+      if (willSoftDelete(selectedAccount, selectedEmail, folders))
+        handleDelete();
       else setConfirmDelete({ mode: "single", count: 1 });
     }
   }
@@ -922,14 +1267,21 @@ export function AppShell() {
   // (editDraft sets `id`) doesn't — its body is already the draft's own finalized content.
   function openCompose(initial: ComposeDraft | null) {
     if (refuseIfDisabled(messageAccountEmail)) return;
-    setComposeInitial(initial?.id === undefined ? withSignature(initial, selectedAccount?.signature ?? null) : initial);
+    setComposeInitial(
+      initial?.id === undefined
+        ? withSignature(initial, selectedAccount?.signature ?? null)
+        : initial,
+    );
     setComposeOpen(true);
   }
 
   async function confirmDeleteAccount() {
     if (!token || !pendingDeleteAccount) return;
     await api.deleteAccount(token, pendingDeleteAccount);
-    if (selectedAccountEmail === pendingDeleteAccount || messageAccountEmail === pendingDeleteAccount) {
+    if (
+      selectedAccountEmail === pendingDeleteAccount ||
+      messageAccountEmail === pendingDeleteAccount
+    ) {
       setOpenedIn(null);
       setSelectedAccountEmail(null);
       setSelectedFolder(null);
@@ -940,8 +1292,11 @@ export function AppShell() {
   }
 
   const selected = useMemo(
-    () => (selectedAccountEmail && selectedFolder ? { accountEmail: selectedAccountEmail, folder: selectedFolder } : null),
-    [selectedAccountEmail, selectedFolder]
+    () =>
+      selectedAccountEmail && selectedFolder
+        ? { accountEmail: selectedAccountEmail, folder: selectedFolder }
+        : null,
+    [selectedAccountEmail, selectedFolder],
   );
 
   return (
@@ -950,28 +1305,48 @@ export function AppShell() {
 
       <header className="flex shrink-0 items-center justify-between gap-4 border-b px-4 py-2">
         <div className="flex items-center shrink-0">
-          <img src={logoUrl} alt="P.S.Mail" className="h-8 w-auto" />
+          <img
+            src={logoUrl}
+            alt="P.S.Mail"
+            className="h-6 w-auto"
+            style={{
+              opacity: 0.4,
+              filter: "saturate(0)",
+              // transform: "scale(0.8)",
+              // transformOrigin: "left",
+            }}
+          />
         </div>
 
         <div
           className="relative w-full max-w-md"
           onFocus={() => setSearchFocused(true)}
-          onBlur={e => setSearchFocused(e.currentTarget.contains(e.relatedTarget as Node | null))}
+          onBlur={(e) =>
+            setSearchFocused(
+              e.currentTarget.contains(e.relatedTarget as Node | null),
+            )
+          }
         >
           <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             ref={searchInputRef}
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder='Search all mail…'
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search all mail…"
             className="h-8 pl-8 pr-14"
           />
           {/* Options of the search, there while the box is in use (it would only be in the way otherwise). */}
           {(searchFocused || searchMenuOpen) && (
-            <DropdownMenu open={searchMenuOpen} onOpenChange={setSearchMenuOpen}>
+            <DropdownMenu
+              open={searchMenuOpen}
+              onOpenChange={setSearchMenuOpen}
+            >
               <DropdownMenuTrigger asChild>
                 <button
-                  className={cn("absolute top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground", searchQuery ? "right-7" : "right-2")}
+                  className={cn(
+                    "absolute top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground",
+                    searchQuery ? "right-7" : "right-2",
+                  )}
                   title="Search options"
                   aria-label="Search options"
                 >
@@ -982,7 +1357,7 @@ export function AppShell() {
                 <DropdownMenuCheckboxItem
                   checked={fullTextSearch}
                   onCheckedChange={setFullTextSearch}
-                  onSelect={e => e.preventDefault()}
+                  onSelect={(e) => e.preventDefault()}
                   title="Also search the text of the messages, not only when subject and sender find nothing"
                 >
                   Full text search
@@ -1026,8 +1401,16 @@ export function AppShell() {
               className="size-7"
               // In reading mode (a message opened with a double-click) the accounts are out of the way too, but only for
               // now: the button leaves reading mode. The remembered collapsed state is the user's own choice and isn't touched.
-              onClick={() => (listCollapsed ? setListCollapsed(false) : setSidebarCollapsed(false))}
-              title={listCollapsed ? "Show accounts and the message list" : "Show accounts"}
+              onClick={() =>
+                listCollapsed
+                  ? setListCollapsed(false)
+                  : setSidebarCollapsed(false)
+              }
+              title={
+                listCollapsed
+                  ? "Show accounts and the message list"
+                  : "Show accounts"
+              }
             >
               <PanelLeftOpen className="size-4" />
             </Button>
@@ -1045,11 +1428,17 @@ export function AppShell() {
                 onEditAccount={setEditingAccountEmail}
                 unifiedInboxUnread={unifiedInboxUnread}
                 syncJobs={syncJobs}
-                onSync={email => startSync(email)}
+                onSync={(email) => startSync(email)}
                 unifiedView={unifiedView}
                 onSelectUnified={selectUnified}
+                showImbox={settings.imboxEnabled === true}
                 onSyncAllInboxes={syncAllInboxes}
-                syncingAccounts={Object.values(syncJobs).filter(job => job.status === "pending" || job.status === "running").length}
+                syncingAccounts={
+                  Object.values(syncJobs).filter(
+                    (job) =>
+                      job.status === "pending" || job.status === "running",
+                  ).length
+                }
                 onCollapse={() => setSidebarCollapsed(true)}
                 sharedFolders={{
                   accountEmail: messageAccountEmail,
@@ -1067,138 +1456,208 @@ export function AppShell() {
 
         {listCollapsed ? (
           <div className="flex w-9 shrink-0 flex-col items-center border-r bg-muted/20 pt-3">
-            <Button variant="ghost" size="icon" className="size-7" onClick={() => setListCollapsed(false)} title="Show the message list">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              onClick={() => setListCollapsed(false)}
+              title="Show the message list"
+            >
               <PanelLeftOpen className="size-4" />
             </Button>
           </div>
         ) : (
-        <div style={{ width: messageListWidth }} className="flex shrink-0 flex-col border-r">
-          {selectionItems.length > 0 ? (
-            <BulkActionBar
-              count={selectionItems.length}
-              canMove={selectionAccount !== null && selectionAccount === messageAccountEmail}
-              folders={folders.filter(f => !selectionItems.every(item => item.folder === f.path))}
-              onMarkRead={() => bulkMarkRead(true)}
-              onMarkUnread={() => bulkMarkRead(false)}
-              onMove={bulkMove}
-              onDownload={bulkDownload}
-              onDelete={requestDelete}
-              onClear={() => setSelectedIds(new Set())}
-            />
-          ) : (
-            <div className="flex items-center justify-between border-b px-3 py-2">
-              <span className="truncate text-sm font-medium">
-                {isSearching
-                  ? `Search: "${searchQuery.trim()}"${fullTextSearch ? " · full text" : searchResults.length > 0 && searchResults.every(r => r.matchedInBody) ? " · in message text" : ""}`
-                  : unifiedView
-                    ? `${unifiedView === "inbox" ? "Inbox" : "Sent"} · all accounts`
-                    : selectedFolder ?? "—"}
-              </span>
-              <div className="flex shrink-0 items-center gap-1">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="size-8" title="More" aria-label="More">
-                      <MoreHorizontal className="size-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onSelect={() => setDateFilterOpen(true)}>
-                      <CalendarDays className="size-4" /> Filter by date…
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => setCategoryFilterOpen(true)}>
-                      <Tags className="size-4" /> Filter by category…
-                    </DropdownMenuItem>
-                    {dateFilter && <DropdownMenuItem onSelect={() => setDateFilter(null)}>Clear date filter</DropdownMenuItem>}
-                    {categoryFilter.length > 0 && <DropdownMenuItem onSelect={() => setCategoryFilter([])}>Clear category filter</DropdownMenuItem>}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <Button
-                  size="sm"
-                  disabled={!messageAccountEmail || isDisabledAccount(messageAccountEmail)}
-                  title={isDisabledAccount(messageAccountEmail) ? "This account is disabled" : undefined}
-                  onClick={() => openCompose(null)}
-                >
-                  <PenSquare className="size-4" /> New
-                </Button>
-              </div>
-            </div>
-          )}
-          {dateFilter && selectionItems.length === 0 && (
-            <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-1 text-xs text-muted-foreground">
-              <CalendarDays className="size-3.5 shrink-0" />
-              <button className="min-w-0 flex-1 truncate text-left hover:text-foreground" title="Change the date filter" onClick={() => setDateFilterOpen(true)}>
-                {describeFilter(dateFilter)}
-              </button>
-              <button title="Clear the date filter" aria-label="Clear the date filter" className="shrink-0 hover:text-foreground" onClick={() => setDateFilter(null)}>
-                <X className="size-3.5" />
-              </button>
-            </div>
-          )}
-          {categoryFilter.length > 0 && selectionItems.length === 0 && (
-            <div className="flex items-start gap-2 border-b bg-muted/30 px-3 py-1 text-xs text-muted-foreground" aria-label="Category filter">
-              <button className="mt-0.5 shrink-0 hover:text-foreground" title="Change the category filter" aria-label="Change the category filter" onClick={() => setCategoryFilterOpen(true)}>
-                <Tags className="size-3.5" />
-              </button>
-              <ul className="flex min-w-0 flex-1 flex-wrap gap-1">
-                {categoryFilter.map(label => (
-                  <li key={label}>
-                    <Badge variant="secondary" className="h-5 gap-1 pr-1 text-[11px] font-normal">
-                      {label}
-                      <button
-                        className="rounded-sm p-0.5 hover:bg-background/60"
-                        title={`Remove ${label} from the filter`}
-                        aria-label={`Remove ${label} from the filter`}
-                        onClick={() => setCategoryFilter(prev => prev.filter(l => l !== label))}
-                      >
-                        <X className="size-3" />
-                      </button>
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <div className="min-h-0 flex-1">
-            {showingResults ? (
-              <SearchResultList
-                results={searchResults}
-                loading={searchLoading}
-                hasMore={searchHasMore}
-                loadingMore={searchLoadingMore}
-                onLoadMore={loadMoreSearchResults}
-                onToggleFlag={toggleResultFlag}
-                showRecipient={unifiedView === "sent" && !isSearching}
-                selectedId={selectedEmailId}
-                selectedIds={selectedIds}
-                onSelect={selectResult}
-                onOpen={() => setListCollapsed(true)}
-                filtered={filtering}
-              />
-            ) : messageAccountEmail && selectedFolder ? (
-              <MessageList
-                emails={emails}
-                loading={emailsLoading}
-                hasMore={hasMore}
-                loadingMore={loadingMore}
-                onLoadMore={loadMore}
-                selectedId={selectedEmailId}
-                selectedIds={selectedIds}
-                folder={selectedFolder}
-                onSelect={selectEmail}
-                onToggleFlag={toggleFlag}
-                onEditDraft={email => openCompose(editDraft(email))}
-                onOpen={() => setListCollapsed(true)}
-                filtered={filtering}
+          <div
+            style={{ width: messageListWidth }}
+            className="flex shrink-0 flex-col border-r"
+          >
+            {selectionItems.length > 0 ? (
+              <BulkActionBar
+                count={selectionItems.length}
+                canMove={
+                  selectionAccount !== null &&
+                  selectionAccount === messageAccountEmail
+                }
+                folders={folders.filter(
+                  (f) =>
+                    !selectionItems.every((item) => item.folder === f.path),
+                )}
+                onMarkRead={() => bulkMarkRead(true)}
+                onMarkUnread={() => bulkMarkRead(false)}
+                onMove={bulkMove}
+                onDownload={bulkDownload}
+                onDelete={requestDelete}
+                onClear={() => setSelectedIds(new Set())}
               />
             ) : (
-              <EmptyState title="No account selected" description="Add or select an account to see messages." />
+              <div className="flex items-center justify-between border-b px-3 py-2">
+                <span className="truncate text-sm font-medium">
+                  {isSearching
+                    ? `Search: "${searchQuery.trim()}"${fullTextSearch ? " · full text" : searchResults.length > 0 && searchResults.every((r) => r.matchedInBody) ? " · in message text" : ""}`
+                    : unifiedView
+                      ? `${unifiedView === "inbox" ? "Inbox" : unifiedView === "imbox" ? "Imbox" : "Sent"} · all accounts`
+                      : (selectedFolder ?? "—")}
+                </span>
+                <div className="flex shrink-0 items-center gap-1">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8"
+                        title="More"
+                        aria-label="More"
+                      >
+                        <MoreHorizontal className="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onSelect={() => setDateFilterOpen(true)}
+                      >
+                        <CalendarDays className="size-4" /> Filter by date…
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() => setCategoryFilterOpen(true)}
+                      >
+                        <Tags className="size-4" /> Filter by category…
+                      </DropdownMenuItem>
+                      {dateFilter && (
+                        <DropdownMenuItem onSelect={() => setDateFilter(null)}>
+                          Clear date filter
+                        </DropdownMenuItem>
+                      )}
+                      {categoryFilter.length > 0 && (
+                        <DropdownMenuItem
+                          onSelect={() => setCategoryFilter([])}
+                        >
+                          Clear category filter
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <Button
+                    size="sm"
+                    disabled={
+                      !messageAccountEmail ||
+                      isDisabledAccount(messageAccountEmail)
+                    }
+                    title={
+                      isDisabledAccount(messageAccountEmail)
+                        ? "This account is disabled"
+                        : undefined
+                    }
+                    onClick={() => openCompose(null)}
+                  >
+                    <PenSquare className="size-4" /> New
+                  </Button>
+                </div>
+              </div>
             )}
+            {dateFilter && selectionItems.length === 0 && (
+              <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-1 text-xs text-muted-foreground">
+                <CalendarDays className="size-3.5 shrink-0" />
+                <button
+                  className="min-w-0 flex-1 truncate text-left hover:text-foreground"
+                  title="Change the date filter"
+                  onClick={() => setDateFilterOpen(true)}
+                >
+                  {describeFilter(dateFilter)}
+                </button>
+                <button
+                  title="Clear the date filter"
+                  aria-label="Clear the date filter"
+                  className="shrink-0 hover:text-foreground"
+                  onClick={() => setDateFilter(null)}
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            )}
+            {categoryFilter.length > 0 && selectionItems.length === 0 && (
+              <div
+                className="flex items-start gap-2 border-b bg-muted/30 px-3 py-1 text-xs text-muted-foreground"
+                aria-label="Category filter"
+              >
+                <button
+                  className="mt-0.5 shrink-0 hover:text-foreground"
+                  title="Change the category filter"
+                  aria-label="Change the category filter"
+                  onClick={() => setCategoryFilterOpen(true)}
+                >
+                  <Tags className="size-3.5" />
+                </button>
+                <ul className="flex min-w-0 flex-1 flex-wrap gap-1">
+                  {categoryFilter.map((label) => (
+                    <li key={label}>
+                      <Badge
+                        variant="secondary"
+                        className="h-5 gap-1 pr-1 text-[11px] font-normal"
+                      >
+                        {label}
+                        <button
+                          className="rounded-sm p-0.5 hover:bg-background/60"
+                          title={`Remove ${label} from the filter`}
+                          aria-label={`Remove ${label} from the filter`}
+                          onClick={() =>
+                            setCategoryFilter((prev) =>
+                              prev.filter((l) => l !== label),
+                            )
+                          }
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div className="min-h-0 flex-1">
+              {showingResults ? (
+                <SearchResultList
+                  results={searchResults}
+                  loading={searchLoading}
+                  hasMore={searchHasMore}
+                  loadingMore={searchLoadingMore}
+                  onLoadMore={loadMoreSearchResults}
+                  onToggleFlag={toggleResultFlag}
+                  showRecipient={unifiedView === "sent" && !isSearching}
+                  selectedId={selectedEmailId}
+                  selectedIds={selectedIds}
+                  onSelect={selectResult}
+                  onOpen={() => setListCollapsed(true)}
+                  filtered={filtering}
+                />
+              ) : messageAccountEmail && selectedFolder ? (
+                <MessageList
+                  emails={emails}
+                  loading={emailsLoading}
+                  hasMore={hasMore}
+                  loadingMore={loadingMore}
+                  onLoadMore={loadMore}
+                  selectedId={selectedEmailId}
+                  selectedIds={selectedIds}
+                  folder={selectedFolder}
+                  onSelect={selectEmail}
+                  onToggleFlag={toggleFlag}
+                  onEditDraft={(email) => openCompose(editDraft(email))}
+                  onOpen={() => setListCollapsed(true)}
+                  filtered={filtering}
+                />
+              ) : (
+                <EmptyState
+                  title="No account selected"
+                  description="Add or select an account to see messages."
+                />
+              )}
+            </div>
           </div>
-        </div>
-
         )}
 
-        {!listCollapsed && <ResizeHandle onPointerDown={startMessageListResize} />}
+        {!listCollapsed && (
+          <ResizeHandle onPointerDown={startMessageListResize} />
+        )}
 
         <div className="min-w-0 flex-1">
           {selectedEmail && messageAccountEmail ? (
@@ -1209,27 +1668,44 @@ export function AppShell() {
               preferredView={preferredBodyView}
               onViewChange={pickBodyView}
               onReply={() => openCompose(replyDraft(selectedEmail))}
-              onReplyAll={() => openCompose(replyAllDraft(selectedEmail, messageAccountEmail))}
+              onReplyAll={() =>
+                openCompose(replyAllDraft(selectedEmail, messageAccountEmail))
+              }
               onForward={() => openCompose(forwardDraft(selectedEmail))}
               onDelete={requestDelete}
               onMove={handleMove}
-              onDownload={() => downloadMessages(messageAccountEmail, [selectedEmail.id])}
+              onDownload={() =>
+                downloadMessages(messageAccountEmail, [selectedEmail.id])
+              }
               onToggleRead={toggleRead}
               onEditDraft={() => openCompose(editDraft(selectedEmail))}
               accountDisabled={isDisabledAccount(messageAccountEmail)}
               aiSkills={aiSkills}
               aiBusy={aiBusyEmailId === selectedEmail.id ? aiBusy : null}
-              onSummarize={skillId => requestAi("summarize", skillId)}
-              onTranslate={skillId => requestAi("translate", skillId)}
+              onSummarize={(skillId) => requestAi("summarize", skillId)}
+              onTranslate={(skillId) => requestAi("translate", skillId)}
             />
           ) : (
-            <EmptyState title="Select a message" description="Choose a message from the list to read it here." />
+            <EmptyState
+              title="Select a message"
+              description="Choose a message from the list to read it here."
+            />
           )}
         </div>
       </div>
 
-      <DateFilterDialog open={dateFilterOpen} onOpenChange={setDateFilterOpen} value={dateFilter} onApply={setDateFilter} />
-      <CategoryFilterDialog open={categoryFilterOpen} onOpenChange={setCategoryFilterOpen} value={categoryFilter} onApply={setCategoryFilter} />
+      <DateFilterDialog
+        open={dateFilterOpen}
+        onOpenChange={setDateFilterOpen}
+        value={dateFilter}
+        onApply={setDateFilter}
+      />
+      <CategoryFilterDialog
+        open={categoryFilterOpen}
+        onOpenChange={setCategoryFilterOpen}
+        value={categoryFilter}
+        onApply={setCategoryFilter}
+      />
 
       {messageAccountEmail && (
         <ComposeDialog
@@ -1241,7 +1717,7 @@ export function AppShell() {
           initial={composeInitial}
           aiSkills={aiSkills}
           aiLanguage={settings.aiTargetLanguage ?? "English"}
-          onSent={sent => {
+          onSent={(sent) => {
             refreshEmails();
             refreshSearchResults();
             refreshUnifiedInboxUnread();
@@ -1262,33 +1738,45 @@ export function AppShell() {
       />
 
       <EditAccountDialog
-        account={accounts.find(a => a.email === editingAccountEmail) ?? null}
+        account={accounts.find((a) => a.email === editingAccountEmail) ?? null}
         open={editingAccountEmail !== null}
-        onOpenChange={open => !open && setEditingAccountEmail(null)}
+        onOpenChange={(open) => !open && setEditingAccountEmail(null)}
         onSaved={refreshAccounts}
         accountCount={accounts.length}
       />
 
-      <AlertDialog open={pendingDeleteAccount !== null} onOpenChange={open => !open && setPendingDeleteAccount(null)}>
+      <AlertDialog
+        open={pendingDeleteAccount !== null}
+        onOpenChange={(open) => !open && setPendingDeleteAccount(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Remove {pendingDeleteAccount}?</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes the account and all its locally synced messages and attachments. The mailbox on the server is
-              untouched.
+              This removes the account and all its locally synced messages and
+              attachments. The mailbox on the server is untouched.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDeleteAccount}>Remove</AlertDialogAction>
+            <AlertDialogAction onClick={confirmDeleteAccount}>
+              Remove
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={confirmAi !== null} onOpenChange={open => !open && setConfirmAi(null)}>
+      <AlertDialog
+        open={confirmAi !== null}
+        onOpenChange={(open) => !open && setConfirmAi(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{confirmAi?.kind === "translate" ? "Translate again?" : "Summarize again?"}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {confirmAi?.kind === "translate"
+                ? "Translate again?"
+                : "Summarize again?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
               {confirmAi?.kind === "translate"
                 ? "This message has already been translated. Translating it again asks the AI once more and replaces the stored translation."
@@ -1303,17 +1791,26 @@ export function AppShell() {
                 setConfirmAi(null);
               }}
             >
-              {confirmAi?.kind === "translate" ? "Translate again" : "Summarize again"}
+              {confirmAi?.kind === "translate"
+                ? "Translate again"
+                : "Summarize again"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={confirmDelete !== null} onOpenChange={open => !open && setConfirmDelete(null)}>
+      <AlertDialog
+        open={confirmDelete !== null}
+        onOpenChange={(open) => !open && setConfirmDelete(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete {confirmDelete && confirmDelete.count > 1 ? confirmDelete.count : ""} message
+              Delete{" "}
+              {confirmDelete && confirmDelete.count > 1
+                ? confirmDelete.count
+                : ""}{" "}
+              message
               {(confirmDelete?.count ?? 1) === 1 ? "" : "s"}?
             </AlertDialogTitle>
             <AlertDialogDescription>
@@ -1324,7 +1821,9 @@ export function AppShell() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDeleteAction} autoFocus={true}>Delete</AlertDialogAction>
+            <AlertDialogAction onClick={confirmDeleteAction} autoFocus={true}>
+              Delete
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

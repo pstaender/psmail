@@ -100,6 +100,7 @@ Accounts are addressed in the URL **by email address** (URL-encoded), e.g. `/api
 - `GET/POST /api/accounts/:email/downloads`, `GET /api/accounts/:email/downloads/:id` — the sync job queue; only one active job per account at a time; the optional `folder` body field limits it to a single folder, otherwise every folder is synced. Jobs run in-process, so on server startup any job still pending/running (orphaned by a killed server) is marked `failed` ("Interrupted by server restart"), freeing the account to sync again. While a sync downloads, the job's `progressCurrent` counts messages downloaded so far (`progressTotal` is an estimate: folder size minus what's already stored); once storing begins, both are reset to the exact count and `progressCurrent` counts messages stored. Sync errors are also shown as toasts in the UI. The server console narrates each sync (`[sync …]` lines: connection target, reconcile/fetch stages, message counts, timing) and on failure logs the stage it died in plus IMAP details (error code, server response text) — the same text is stored as the job's `error`.
 - `POST /api/auth/change-password` `{ currentPassword, newPassword }` — changes the signed-in user's password: verifies the current one, re-encrypts every account's saved IMAP/SMTP password with the key for the new password and a fresh salt (atomically with the new hash; if some account's secrets can't be decrypted it refuses and changes nothing), gives the current session the new key and ends the user's other sessions (`{ ok, otherSessionsSignedOut }`). `PATCH /api/users/:id` `{ password, currentPassword }` does the same; it used to swap the hash alone, which would have left the saved account passwords undecryptable.
 - `GET/POST /api/ai/apis`, `PATCH/DELETE /api/ai/apis/:id`, `POST /api/ai/apis/:id/test`, `GET/POST /api/ai/skills`, `PATCH/DELETE /api/ai/skills/:id` — the user's AI providers (tables `ai_apis`; the key is encrypted with the user's key, re-encrypted on a password change, and never returned — only `hasKey`; `calls`, `input_tokens` and `output_tokens` add up the provider's usage, returned as `calls`, `inputTokens`, `outputTokens`) and skills (`ai_skills`, each with one `ai_api_id`, a `category` and a `prompt`). `POST /api/ai/run` `{ category: summarize|translate|grammar|improve, text, language?, skillId? }` runs a skill on some text (composing; nothing stored). `POST /api/accounts/:email/emails/:id/ai/summarize` (+ categorize, and the events search, when those skills exist; the answer then has `taxonomyError` / `eventsError` if that step failed while the summary was kept), `.../ai/categorize` and `.../ai/translate` `{ language?, skillId? }` (`skillId` picks one of several skills of the category; it must be the user's and of that category, else the oldest one is used); AI providers are returned with a `label` (the name, or `Vendor.model`) run a skill on a message and store the result in the message's `ai_summary`, `taxonomy_list` (JSON array), `translated_text` / `translated_language` columns. Vendors are called from the server with plain `fetch` (Anthropic messages, OpenAI-style chat completions, Gemini generateContent, Ollama chat); errors are passed on as a 502 with the vendor's message. New user setting `aiTargetLanguage`.
+- `POST /api/imbox/classify` `{ accounts?: string[], force?: boolean }` — classifies stored mail for the imbox (default: every account of the user; disabled ones are skipped): `{ results: [{ account, examined, important, notImportant, skipped? }] }`. `GET /api/accounts/:email/emails/:id/imbox` — the verdict computed now with `score`, `ruledOut` and every `reasons[]` entry, next to the `stored` one; `PUT` the same path overrides it (`{ imbox: true|false|null }`). `GET /api/unified/imbox` lists the important messages (same paging and `after`/`before`/`category` parameters as the other combined lists). The setting is `imboxEnabled`.
 - `GET /api/settings`, `PATCH /api/settings` — per-user preferences stored server-side (`users.settings`, JSON; a key set to `null` is removed): `bodyView` (`text`/`md`/`plain`/`safe`/`full`, the reading-pane tab last picked), `syncIntervalMinutes` (whole minutes 1–1440; unset = never) and `combinedInboxIncludesFolders` (boolean, default off). Edited in the web client's Settings dialog.
 - `GET /api/unified/inbox/new?afterId=` — unread mail that arrived in the combined Inbox after an email id (`{ latestId, total, messages: [...newest few, with sender/recipients/subject/date/snippet] }`); without `afterId` it only returns the current `latestId` to start from. Also new user settings `notifyBrowser`, `notifyToast` (booleans) and `notificationSound` (`crystal_clear`, `cute_bell`, `marimba`, `none`).
 - `GET /api/unified/inbox`, `GET /api/unified/sent` (`?limit=&offset=&after=&before=`, the same window as above) — newest-first messages across all of the caller's accounts' Inboxes / Sent folders, as the same rows search returns (Sent rows also carry `to`). Each account is read straight off the folder index and the results merged, so it stays fast on large mailboxes. An account's Sent folder is whatever the server reported as `\Sent` (learned whenever its folder list is fetched or a message is sent, kept in `accounts.sent_folder`), falling back to common names (`Sent`, `Sent Items`, `Gesendet`, …).
@@ -135,6 +136,34 @@ Always case-insensitive; searches every account you own. A bare word matches if 
 
 Implemented in `src/server/models/search.ts`; matching runs in JS (not SQL `LIKE`) so Unicode case-folding (e.g. `ä`/`Ä`) works correctly — stock SQLite's `LIKE`/`LOWER()` are ASCII-only without the ICU extension.
 
+## Imbox
+
+The **Imbox** is the important part of the combined Inbox — mail from people you know, answers to you, mail meant for you — without newsletters, one-time codes, activity notifications and suspected spam. Turn it on under Settings → *Enable imbox* (per user, off by default); it then appears between the combined Inbox and Sent (`/u/imbox`; for now only as a combined list over all accounts — the date and category filters work in it as everywhere). The Inbox itself still lists everything.
+
+**How it decides** — no AI service, everything runs on this computer (`src/server/services/imbox/classifier.ts`, pure and unit-tested with sample mail in `tests/fixtures/imbox/`). It adds up signals, each worth points, and a message is *important* at 2 points or more; two rules decide on their own. Every verdict can be explained (`imbox explain`, `GET .../emails/:id/imbox`).
+
+| Signal | Points |
+| --- | --- |
+| **Ruled out**: the message is in a Junk/Spam folder; a one-time code (login/verification code/OTP/TAN, DE + EN); a sign-in / password-reset / confirm-your-email link from someone you never wrote to | not important, whatever the rest says |
+| You have written to this exact address (from any of your accounts; the contact list's sent counts) | +4, +5 from 5 messages |
+| The message answers one of yours (`In-Reply-To` / `References` point at a message you sent) | +4 |
+| Addressed to you: you are the only or one of ≤3 recipients / among up to 10 / only in Cc / not addressed to you / more than 10 recipients | +1.5 / +0.5 / +1 or +0.5 / −1 / −1 |
+| Greets you by name (first names from your account names and addresses: *Hi Philipp*, *Lieber Philipp*, *Sehr geehrter Herr Staender*, or the name alone opening the mail) | +2 |
+| Reads like a personal message (no bulk machinery, short, few links and images); a person sent you a file | +1; +0.5 |
+| Normal mail was received from this exact address before (not counted for mailing lists) | +1, +2 from 5 |
+| Work-related wording (meeting, Termin, Projekt, Angebot, …) and meant for you | +1.5 |
+| Bulk headers (`List-Unsubscribe`, `List-Id`, `Precedence: bulk`); a mass-mailing service (Mailchimp, Sendgrid, …); auto-generated (`Auto-Submitted`) | −4 (−2 if you have written to it) / −3 / −3 |
+| "Unsubscribe" text; marketing wording (% off, Rabatt, Gutschein, Sale, Newsletter, …); newsletter-like design (many links/images) | −2 / −2 / −1 |
+| `noreply@`-type sender; `newsletter@`/`marketing@`-type sender; `info@`/`support@`-type sender | −3 (−1 if you know it) / −3 / −1 |
+| Activity/status notification (commented on, new follower, digest, order shipped, receipt, security alert, …); sent by a platform (GitHub, LinkedIn, Amazon, …) | −3 / −3 (both only for senders you never wrote to) |
+| Sender authentication failed (SPF/DKIM/DMARC) | −4, −2 for a known sender |
+| Display name claims a company (PayPal, Amazon, Sparkasse, DHL, …) that the address doesn't belong to; Reply-To on another domain | −4; −1.5 |
+| From an unknown sender only: pressure or credential wording (*verify your account*, *Konto gesperrt*, …); link shortener or raw IP in a link; a link whose text shows another address than it goes to; a risky attachment (.exe, .js, .html, macro documents, …) | −3; −2; −3; −3 |
+| Earlier messages from this address only ever ended up in Junk | −5 |
+| An unknown sender whose message has nothing personal in it (no greeting, no conversation) | −1.5 |
+
+New mail is classified while it is synced (a failure in the classifier never fails a sync), only in incoming folders — not Sent, Drafts, Trash, Junk or Archive. The verdict is `emails.imbox` (`1` important, `0` not, `NULL` not classified); `PUT /api/accounts/:email/emails/:id/imbox` `{ "imbox": true|false|null }` overrides it by hand. The imbox list reads its own partial index, so it stays fast however big the mailbox is (a page out of 100 000 messages in a few milliseconds).
+
 ## CLI
 
 The CLI talks to a running API server over HTTP — the same API the webclient uses — so start the server first.
@@ -148,7 +177,13 @@ bun run cli account add --user <username> \
   --smtp-host smtp.example.com --smtp-port 465 --smtp-username me@example.com
 
 bun run cli sync me@example.com --user <username> [--folder <name>]   # default: every folder
+
+# Imbox: classify the mail that is already stored (new mail is classified as it is synced)
+bun run cli imbox classify [account@example.com ...] [--force] --user <username>   # default: every account
+bun run cli imbox explain me@example.com <message-id> --user <username>            # score and reasons for one message
 ```
+
+`imbox classify` only looks at messages that have no verdict yet; `--force` classifies them all again (which also replaces verdicts set by hand). Disabled accounts are skipped. It prints a line per account and a total; `imbox explain` lists every reason with its points, which is the way to see why a message landed where it did.
 
 ## Testing the webclient with real sample mail
 

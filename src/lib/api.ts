@@ -37,7 +37,7 @@ export interface Contact {
   other?: boolean;
 }
 
-export type UnifiedKind = "inbox" | "sent";
+export type UnifiedKind = "inbox" | "sent" | "imbox";
 
 /** Server-persisted per-user preferences (GET/PATCH /api/settings). */
 export interface UserSettings {
@@ -46,6 +46,8 @@ export interface UserSettings {
   syncIntervalMinutes?: number;
   /** Opt-in: the combined Inbox also lists mail from accounts' other incoming folders. */
   combinedInboxIncludesFolders?: boolean;
+  /** Opt-in: the imbox (the important part of the combined Inbox) is listed between the combined Inbox and Sent. */
+  imboxEnabled?: boolean;
   /** Opt-in: a browser notification when new mail arrives. */
   notifyBrowser?: boolean;
   /** Opt-in: an in-app toast (with preview and details) when new mail arrives. */

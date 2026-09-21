@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS emails (
   translated_language TEXT,
   -- Calendar events the AI found in the message: a JSON array of VCALENDAR texts (one .ics per event); NULL = never searched, [] = searched, none found.
   calendar_events TEXT,
+  -- Imbox: 1 = important (a person's mail you want to see), 0 = not important, NULL = not classified yet (see services/imbox).
+  imbox INTEGER,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   UNIQUE(account_id, folder, uid)

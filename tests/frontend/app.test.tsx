@@ -125,7 +125,7 @@ const DRAFT_EMAIL = {
 };
 
 // What the Settings dialog saves when only the fields a test touches were changed.
-const DEFAULT_PATCH = { syncIntervalMinutes: null, combinedInboxIncludesFolders: false, notifyBrowser: false, notifyToast: false, notificationSound: "crystal_clear" };
+const DEFAULT_PATCH = { syncIntervalMinutes: null, combinedInboxIncludesFolders: false, imboxEnabled: false, notifyBrowser: false, notifyToast: false, notificationSound: "crystal_clear" };
 
 const SYNC_JOB = (status: string) => ({
   id: 1, accountId: 1, folder: null, status, progressCurrent: 0, progressTotal: 0, error: null, startedAt: NOW, finishedAt: null, createdAt: NOW,
@@ -156,7 +156,7 @@ let capturedCreateDraftBody: Record<string, unknown> | null = null;
 /** POST .../emails/download requests (account + ids) of the mock server. */
 let messageDownloads: { account: string; ids: number[] }[] = [];
 /** Query strings of the GET requests for a folder's messages / the combined lists, in order. */
-let listRequests: { list: "folder" | "inbox" | "sent" | "search"; params: URLSearchParams }[] = [];
+let listRequests: { list: "folder" | "inbox" | "imbox" | "sent" | "search"; params: URLSearchParams }[] = [];
 let createFolderPosts: { name: string; parent?: string }[] = [];
 let createFolderError: string | null = null;
 // Same, for PATCH .../emails/13 (DRAFT_EMAIL) — asserts that editing an existing draft updates
@@ -205,6 +205,7 @@ function installMockFetch(
       bodyView?: string;
       syncIntervalMinutes?: number;
       combinedInboxIncludesFolders?: boolean;
+      imboxEnabled?: boolean;
       notifyBrowser?: boolean;
       notifyToast?: boolean;
       notificationSound?: string;
@@ -459,6 +460,12 @@ function installMockFetch(
       capturedSettingsPatches.push(body);
       currentSettings = { ...currentSettings, ...body };
       return jsonResponse(currentSettings);
+    }
+    if (method === "GET" && path === "/api/unified/imbox") {
+      listRequests.push({ list: "imbox", params: new URL(url, "http://localhost").searchParams });
+      return jsonResponse([
+        { id: 10, accountEmail: "me@example.com", folder: "INBOX", uid: 1, isRead: false, isFlagged: false, subject: "Imbox hello", from: [{ name: "Alice", address: "alice@example.com" }], date: NOW },
+      ]);
     }
     if (method === "GET" && (path === "/api/unified/inbox" || path === "/api/unified/sent")) {
       const listParams = new URL(url, "http://localhost").searchParams;
@@ -1164,9 +1171,75 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(screen.queryByText("Edit draft", { selector: "[data-slot=dialog-title]" })).toBeNull();
   });
 
+  describe("the imbox", () => {
+    async function openApp() {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await screen.findByText("Unified hello");
+    }
+    const entries = () =>
+      Array.from(document.querySelectorAll("[title]")).map(el => el.getAttribute("title")!).filter(title => /^(Inbox|Imbox|Sent) of all accounts$/.test(title));
+    const last = (list: "imbox") => listRequests.filter(r => r.list === list).at(-1)!.params;
+
+    test("off by default: the sidebar has just Inbox and Sent", async () => {
+      await openApp();
+      expect(entries()).toEqual(["Inbox of all accounts", "Sent of all accounts"]);
+    });
+
+    test("Enable imbox in Settings saves the setting and adds Imbox between Inbox and Sent", async () => {
+      await openApp();
+      await userEvent.click(screen.getByTitle("Settings"));
+      const toggle = await screen.findByLabelText("Enable imbox");
+      expect(toggle.getAttribute("aria-checked")).toBe("false");
+      expect(screen.getByText(/bun run cli imbox classify/)).toBeTruthy(); // says how to classify the mail that is already there
+      await userEvent.click(toggle);
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(capturedSettingsPatches).toEqual([{ ...DEFAULT_PATCH, imboxEnabled: true }]));
+      await waitFor(() => expect(entries()).toEqual(["Inbox of all accounts", "Imbox of all accounts", "Sent of all accounts"]));
+    });
+
+    test("with it on, Imbox lists the important mail (its own list request), and its address is /u/imbox", async () => {
+      installMockFetch({ settings: { imboxEnabled: true } });
+      await openApp();
+      await waitFor(() => expect(entries()).toContain("Imbox of all accounts"));
+
+      await userEvent.click(screen.getByTitle("Imbox of all accounts"));
+      expect(await screen.findByText("Imbox hello")).toBeTruthy();
+      expect(screen.getByText("Imbox · all accounts")).toBeTruthy();
+      expect(listRequests.some(r => r.list === "imbox")).toBe(true);
+      await waitFor(() => expect(window.location.pathname).toBe("/u/imbox"));
+
+      await userEvent.click(screen.getByTitle("Sent of all accounts")); // and back out
+      await screen.findByText("Unified outgoing");
+      await waitFor(() => expect(window.location.pathname).toBe("/u/sent"));
+    });
+
+    test("the date and category filters work in the imbox too", async () => {
+      installMockFetch({ settings: { imboxEnabled: true } });
+      await openApp();
+      await userEvent.click(await screen.findByTitle("Imbox of all accounts"));
+      await screen.findByText("Imbox hello");
+      await userEvent.click(screen.getByRole("button", { name: "More" }));
+      await userEvent.click(await screen.findByRole("menuitem", { name: /filter by category/i }));
+      const dialog = within((await screen.findByText("Filter by category", { selector: "[data-slot=dialog-title]" })).closest('[role="dialog"]') as HTMLElement);
+      await userEvent.click(dialog.getByRole("combobox", { name: "Add a category" }));
+      await userEvent.click(await screen.findByRole("option", { name: /^finance/ }));
+      await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
+      await waitFor(() => expect(last("imbox").getAll("category")).toEqual(["finance"]));
+    });
+
+    test("a link to /u/imbox without the setting lands on the Inbox", async () => {
+      window.history.replaceState(null, "", "/u/imbox");
+      await openApp();
+      await waitFor(() => expect(window.location.pathname).toBe("/"));
+      expect(screen.getByText("Inbox · all accounts")).toBeTruthy();
+    });
+  });
+
   describe("filtering the list by date", () => {
     const localDay = (y: number, m: number, d: number) => new Date(y, m - 1, d);
-    const last = (list: "folder" | "inbox" | "sent" | "search") => listRequests.filter(r => r.list === list).at(-1)!.params;
+    const last = (list: "folder" | "inbox" | "imbox" | "sent" | "search") => listRequests.filter(r => r.list === list).at(-1)!.params;
 
     async function openFolder() {
       render(<App />);

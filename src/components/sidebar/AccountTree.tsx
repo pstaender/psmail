@@ -1,4 +1,4 @@
-import { Inbox, Loader2, PanelLeftClose, RefreshCw, Send } from "lucide-react";
+import { Inbox, Loader2, MailCheck, PanelLeftClose, RefreshCw, Send } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -20,6 +20,7 @@ export function AccountTree({
   sharedFolders,
   unifiedView,
   onSelectUnified,
+  showImbox = false,
   unifiedInboxUnread,
   onSyncAllInboxes,
   syncingAccounts,
@@ -44,6 +45,8 @@ export function AccountTree({
   /** Which cross-account mailbox (all Inboxes / all Sents) is showing, if any. */
   unifiedView: UnifiedKind | null;
   onSelectUnified: (kind: UnifiedKind) => void;
+  /** Show the Imbox entry (the user turned it on in Settings). */
+  showImbox?: boolean;
   /** Unread messages across all Inboxes, shown as a badge on the combined Inbox. */
   unifiedInboxUnread: number;
   /** Syncs the Inbox of every account (the combined Inbox's refresh button). */
@@ -66,6 +69,8 @@ export function AccountTree({
         {(
           [
             { kind: "inbox", label: "Inbox", Icon: Inbox },
+            // The imbox (opt-in in Settings) sits between the combined Inbox and Sent.
+            ...(showImbox ? ([{ kind: "imbox", label: "Imbox", Icon: MailCheck }] as const) : []),
             { kind: "sent", label: "Sent", Icon: Send },
           ] as const
         ).map(({ kind, label, Icon }) => (
