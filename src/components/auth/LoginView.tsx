@@ -11,7 +11,7 @@ import { api, ApiError } from "@/lib/api";
 import { hasVault, passkeysAvailable, removeVault, savePassword, unlockPassword } from "@/lib/passkeyVault";
 import { useAuth } from "@/contexts/AuthContext";
 import type { User } from "../../server/types";
-import logoUrl from "../../../logo/psmail_logo.svg";
+import logoUrl from "../../../logo/psmail_logo_text.svg";
 
 export function LoginView() {
   const { login } = useAuth();
@@ -125,7 +125,7 @@ export function LoginView() {
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center text-center gap-2">
           <img src={logoUrl} alt="P.S.Mail logo" className="size-20" />
-          <CardTitle className="text-2xl" >Mail</CardTitle>
+          {/*<CardTitle className="text-2xl" >Mail</CardTitle>*/}
           <CardDescription>Sign in to your profile to continue</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

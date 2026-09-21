@@ -780,7 +780,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
     // Login screen — clicking the profile logs straight in (an empty password works, so
     // LoginView skips the password prompt entirely), no separate "Sign in" click needed.
-    await waitFor(() => expect(screen.getByText("Mail")).toBeTruthy()); // the title next to the logo
+    await waitFor(() => expect(screen.getByAltText("P.S.Mail logo")).toBeTruthy()); // the logo (with the name in it) heads the card
     const userButton = await screen.findByText("default");
     await userEvent.click(userButton);
 
@@ -2803,13 +2803,25 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await waitFor(() => expect(capturedSettingsPatches).toEqual([{ bodyView: "plain" }]));
   });
 
+  test("the header shows the P.S.Mail logo instead of the mail icon and the name", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+
+    const logo = screen.getByAltText("P.S.Mail") as HTMLImageElement;
+    expect(logo.getAttribute("src")).toContain("psmail_logo.svg");
+    expect(logo.closest("header")).toBeTruthy();
+    expect(screen.getByRole("banner").querySelector("svg.lucide-mail")).toBeNull(); // no round mail icon…
+    expect(within(screen.getByRole("banner")).queryByText("P.S.Mail")).toBeNull(); // …and no text next to it
+  });
+
   test("the login window shows the P.S.Mail logo instead of the round mail icon", async () => {
     render(<App />);
     const logo = (await screen.findByAltText("P.S.Mail logo")) as HTMLImageElement;
-    expect(logo.getAttribute("src")).toContain("psmail_logo.svg");
     expect(document.querySelector(".bg-primary\\/10")).toBeNull();
-    // Centered above the title, in the card header.
-    expect(logo.closest('[data-slot="card-header"]')!.textContent).toContain("Mail");
+    // Centered in the card header, which has no separate title: the logo carries the name.
+    expect(logo.closest('[data-slot="card-header"]')).toBeTruthy();
+    expect(logo.getAttribute("src")).toContain("psmail_logo_text.svg");
 
     // Room above and below the card, and the screen scrolls when the card is taller than the window.
     const card = logo.closest('[data-slot="card"]')!;

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, LogOut, Mail, MoreHorizontal, PanelLeftOpen, PenSquare, Search, Settings, Tags, X } from "lucide-react";
+import { CalendarDays, LogOut, MoreHorizontal, PanelLeftOpen, PenSquare, Search, Settings, Tags, X } from "lucide-react";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { DateFilterDialog } from "@/components/mail/DateFilterDialog";
 import { boundsOf, describeFilter, type DateFilter } from "@/lib/dateFilter";
+import logoUrl from "../../../logo/psmail_logo.svg";
 import { CategoryFilterDialog } from "@/components/mail/CategoryFilterDialog";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -948,9 +949,8 @@ export function AppShell() {
       <Toaster position="bottom-right" />
 
       <header className="flex shrink-0 items-center justify-between gap-4 border-b px-4 py-2">
-        <div className="flex items-center gap-2 shrink-0">
-          <Mail className="size-5 text-primary" />
-          <span className="font-semibold">P.S.Mail</span>
+        <div className="flex items-center shrink-0">
+          <img src={logoUrl} alt="P.S.Mail" className="h-8 w-auto" />
         </div>
 
         <div
