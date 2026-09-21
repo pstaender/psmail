@@ -6,7 +6,7 @@ import { renderProgress } from "./progress";
 async function resolvePassword(flags: Record<string, string | boolean>, flagName: string, envVar: string, promptText: string) {
   const flagValue = flags[flagName];
   if (typeof flagValue === "string") return flagValue;
-  if (process.env[envVar]) return process.env[envVar]!;
+  if (process.env[envVar] !== undefined) return process.env[envVar]!;
   return promptHidden(promptText);
 }
 
@@ -16,6 +16,78 @@ async function loginFromFlags(client: ApiClient, flags: Record<string, string | 
   const { token } = await client.login(username, password);
   client.setToken(token);
   return { username, password };
+}
+
+/**
+ * Signs in for a command that works on the given accounts and says which profile that was. With `--user` that profile is used (and
+ * must own the accounts). Without it, the profile that owns the accounts is looked for: "default" first, then the others, with the
+ * password given (or asked for once) — a profile with another password is asked for its own when the terminal is interactive, and
+ * is otherwise named so `--user` can be used. Without any account given (= all of them), "default" is used as ever.
+ * Returns the profile's name.
+ */
+export async function signInForAccounts(client: ApiClient, flags: Record<string, string | boolean>, wanted: string[]): Promise<string> {
+  const owns = async (): Promise<{ has: boolean; emails: string[] }> => {
+    const emails = (await client.listAccounts()).map(account => account.email);
+    return { has: wanted.every(address => emails.some(email => email.toLowerCase() === address.toLowerCase())), emails };
+  };
+  const missing = (emails: string[]) => wanted.filter(address => !emails.some(email => email.toLowerCase() === address.toLowerCase()));
+
+  if (typeof flags.user === "string") {
+    await loginFromFlags(client, flags);
+    if (wanted.length > 0) {
+      const { has, emails } = await owns();
+      if (!has) throw new Error(`"${flags.user}" has no account ${missing(emails).join(", ")} (its accounts: ${emails.join(", ") || "none"}).`);
+    }
+    return flags.user;
+  }
+  if (wanted.length === 0) {
+    await loginFromFlags(client, flags);
+    return "default";
+  }
+
+  const known = await client.listUsers().catch(() => [] as { username: string }[]);
+  const names = known.map(user => user.username);
+  const candidates = [...names.filter(name => name === "default"), ...names.filter(name => name !== "default")];
+  if (candidates.length === 0) candidates.push("default");
+
+  // The first profile is asked for its password (unless given); the same one is tried on the others, silently.
+  let password = typeof flags.password === "string" ? flags.password : process.env.PSMAIL_PASSWORD;
+  if (password === undefined) password = await promptHidden(`Password for "${candidates[0]}": `);
+  const checked: string[] = [];
+  const unchecked: string[] = [];
+  const found = async (name: string, secret: string) => {
+    const { token } = await client.login(name, secret);
+    client.setToken(token);
+    const { has, emails } = await owns();
+    checked.push(`${name} (${emails.join(", ") || "no accounts"})`);
+    return has;
+  };
+  for (const name of candidates) {
+    try {
+      if (await found(name, password)) return name;
+    } catch (error) {
+      if (!(error instanceof CliApiError) || error.status !== 401) throw error;
+      unchecked.push(name);
+    }
+  }
+  // Profiles with another password: ask for it, when someone is there to answer.
+  if (process.stdin.isTTY) {
+    for (const name of [...unchecked]) {
+      const secret = await promptHidden(`Password for "${name}" (to look for ${wanted.join(", ")}; empty skips it): `);
+      if (secret === "") continue;
+      try {
+        if (await found(name, secret)) return name;
+        unchecked.splice(unchecked.indexOf(name), 1);
+      } catch (error) {
+        if (!(error instanceof CliApiError) || error.status !== 401) throw error;
+        console.error(`Wrong password for "${name}".`);
+      }
+    }
+  }
+  throw new Error(
+    `No profile has the account ${wanted.join(", ")}. Looked at: ${checked.join("; ") || "nothing"}.` +
+      (unchecked.length > 0 ? ` Profiles with another password that could not be looked at: ${unchecked.join(", ")} — name one with --user <username>.` : "")
+  );
 }
 
 async function cmdUserCreate(argv: string[]) {
@@ -109,8 +181,9 @@ async function cmdImbox(subcommand: string | undefined, argv: string[]) {
 
   const url = typeof flags.url === "string" ? flags.url : undefined;
   const client = new ApiClient(url);
-  const username = typeof flags.user === "string" ? flags.user : "default";
-  await loginFromFlags(client, flags);
+  // classify takes account addresses; explain takes one address followed by a message id.
+  const wanted = subcommand === "explain" ? positionals.slice(0, 1) : subcommand === "classify" ? positionals : [];
+  const username = await signInForAccounts(client, flags, wanted);
   console.log(`Signed in to ${url ?? process.env.PSMAIL_API_URL ?? "http://localhost:3001"} as "${username}".`);
 
   if (subcommand === "classify") {
@@ -207,8 +280,7 @@ async function cmdSummarize(argv: string[]) {
 
   const url = typeof flags.url === "string" ? flags.url : undefined;
   const client = new ApiClient(url);
-  const username = typeof flags.user === "string" ? flags.user : "default";
-  await loginFromFlags(client, flags);
+  const username = await signInForAccounts(client, flags, positionals);
   console.log(`Signed in to ${url ?? process.env.PSMAIL_API_URL ?? "http://localhost:3001"} as "${username}".`);
 
   const short = (text: string | null, length: number) => (text ?? "(no subject)").replace(/\s+/g, " ").slice(0, length);

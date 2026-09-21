@@ -188,3 +188,66 @@ describe("the command line", () => {
     expect(bad.err).toContain("--folder needs a folder name");
   }, 60_000);
 });
+
+describe("which profile a command signs in as (no --user)", () => {
+  const spawn = async (args: string[], env: Record<string, string> = { PSMAIL_PASSWORD: "" }) => {
+    const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args, "--url", base], {
+      stdout: "pipe",
+      stderr: "pipe",
+      stdin: "ignore",
+      cwd: join(import.meta.dir, "../.."),
+      env: { ...process.env, ...env },
+    });
+    const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+    return { out, err, code: await proc.exited };
+  };
+
+  test("the profile that owns the account is found; --user must own it; unknown accounts and other passwords are explained", async () => {
+    // "default" has no account of the address, "philipp" has; both without a password. "secret" has its own password.
+    await api("POST", "/api/users", { body: { username: "default", password: "" } });
+    await api("POST", "/api/users", { body: { username: "philipp", password: "" } });
+    await api("POST", "/api/users", { body: { username: "secret", password: "pw" } });
+    const login = async (username: string, password: string) => (await api("POST", "/api/auth/login", { body: { username, password } })).json.token as string;
+    const add = async (token: string, email: string) =>
+      (await api("POST", "/api/accounts", { token, body: { email, imapHost: "h", imapPort: 993, imapUsername: email, imapPassword: "x", smtpHost: "h", smtpPort: 465, smtpUsername: email, smtpPassword: "y" } })).json.id as number;
+    const philipp = await login("philipp", "");
+    const id = await add(philipp, "pstaender@mailbox.org");
+    createEmail(db, id, { folder: "INBOX", isDraft: false, subject: "Hi", from: [{ address: "x@y.z" }], date: "2026-03-01T00:00:00Z", plainText: "Body" });
+    await add(await login("default", ""), "other@example.com");
+    await add(await login("secret", "pw"), "hidden@example.com");
+    const provider = await api("POST", "/api/ai/apis", { token: philipp, body: { vendor: "anthropic", model: "m", apiKey: "k" } });
+    await api("POST", "/api/ai/skills", { token: philipp, body: { aiApiId: provider.json.id, category: "summarize", prompt: "You summarize." } });
+    fakeAi(() => "- fine");
+
+    // Found without --user, although "default" is tried first.
+    const found = await spawn(["summarize", "pstaender@mailbox.org", "--folder", "Inbox"]);
+    expect(found.err).toBe("");
+    expect(found.out).toContain('as "philipp"');
+    expect(found.out).toContain("1 message(s) summarized");
+
+    // imbox too.
+    const imbox = await spawn(["imbox", "classify", "pstaender@mailbox.org"]);
+    expect(imbox.err).toBe("");
+    expect(imbox.out).toContain('as "philipp"');
+
+    // With --user, that profile has to have it — and the message says what it does have.
+    const wrong = await spawn(["summarize", "pstaender@mailbox.org", "--user", "default"]);
+    expect(wrong.code).toBe(1);
+    expect(wrong.err).toContain('"default" has no account pstaender@mailbox.org (its accounts: other@example.com)');
+
+    // Nobody has it; a profile with a password of its own could not be looked at.
+    const nobody = await spawn(["summarize", "nobody@example.com"]);
+    expect(nobody.code).toBe(1);
+    expect(nobody.err).toContain("No profile has the account nobody@example.com");
+    expect(nobody.err).toContain("default (other@example.com)");
+    expect(nobody.err).toContain("secret");
+    expect(nobody.err).toContain("--user <username>");
+
+    // An account of the profile with its own password: the error points to --user, which then works.
+    const hidden = await spawn(["summarize", "hidden@example.com"]);
+    expect(hidden.err).toContain("Profiles with another password that could not be looked at");
+    const named = await spawn(["summarize", "hidden@example.com", "--user", "secret", "--password", "pw"]);
+    expect(named.out).toContain('as "secret"'); // signed in and owning it; that profile just has no summarize skill
+    expect(named.err).toContain("No \"summarize\" skill");
+  }, 60_000);
+});
