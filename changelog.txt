@@ -1,3 +1,9 @@
+2026-09-21 - CLI: summarize stored mail (1fe91dc)
+New command: bun run cli summarize [account@example.com ...] [--folder <name>] [--force] [--verbose] --user <username>. It runs your Summarize skill over stored mail like the Summarize button (with categories and dates when those skills exist).
+Default: every account and every folder, newest first, only messages without a summary. An account address limits it to that account, --folder to one folder (case doesn't matter), --force summarizes again, --verbose prints each summary.
+Because an AI call can take long, it names the message it is waiting for ("[3/120] INBOX: #481 Subject - waiting for the AI ..."), then how long it took and what was found. A failing message is reported and skipped; five failures in a row (wrong key, server down) stop that account; messages without text are skipped; disabled accounts are left alone; the exit code is 1 if anything failed.
+Server side: POST /api/ai/summarize { accounts?, folder?, force?, verbose?, stream? } streams JSON events. The Summarize button's endpoint now shares the same code. Backend 482 pass, build OK.
+
 2026-09-21 - Settings: UI tab with opt-in interface options (9220d26)
 Settings has a new "UI" tab (between Inboxes and Notifications) with four options. All are off by default, so P.S.Mail starts plain and distraction-free and you turn on what you want:
 - Show conversations: the conversation marks in the lists, the conversation bar and "See your reply". When off, the conversation isn't even fetched.
