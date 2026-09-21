@@ -7,6 +7,28 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-21 - Filter by category (0f561a3)
+------------------------------------------
+The "More" menu has "Filter by category..." beside "Filter by date...". Its dialog has a combobox (searchable: type to narrow) with the
+categories that exist - the AI labels of the user's messages, each with the number of messages that carry it; a chosen category is moved
+out of the list and shown as a label with an x to remove it again. "Apply" filters the list you are looking at: the folder list, the combined
+Inbox / Sent and a search (the same query within the categories). A message must have EVERY chosen category. The chosen labels show
+under the list header, each with an x; "Clear filter" is in the dialog and the menu. It combines with the date filter and, like it, belongs
+to the list it was set on. An empty result says "Nothing matches the filter." (the message for the date filter now says that too).
+Server:
+- GET /api/categories -> [{ label, count }], most used first (only messages with labels are read, and only that small column).
+- category=... (repeated) on GET .../emails, GET /api/unified/:kind and GET /api/search; at most 20, each up to 100 characters (else 400).
+  Each is an EXISTS over the message's own label list (json_each on taxonomy_list, guarded by json_valid so one broken list can't fail a
+  query). The conditions only look at the row being considered, so the list is still walked in the date index's order and stops when the
+  page is full. Measured, 100 000 messages with ~5 KB of text: a page of a category takes 1 ms (5% or 33% of messages have it), and
+  46 ms when no message has it at all (the whole folder's small label column is read once). No new table or index was needed.
+- Search: the category condition is part of the first query and of the text pass (full text search too).
+Not covered: matching is exact (labels are lowercased by the suggested prompt; "Invoice" and "invoice" would be two categories) and it is AND only.
+Tests: parsing, every/none/broken-list matching, with dates and paging and other folders/accounts, unified and search, the counts, the timing on
+100 000 rows, the HTTP routes, and the UI (menu, combobox, remove, apply, cancel, clear, combined with date and search, reset per list).
+Not looked at in a browser.
+
+
 2026-09-21 - Compose: unsaved changes are asked about when closing (b7144a6)
 -------------------------------------------------------------------------
 Closing a compose window (Esc, the x, a click outside) that has changes which are not saved now asks: "Save this message as a draft?"
