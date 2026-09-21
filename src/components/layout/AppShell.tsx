@@ -8,6 +8,7 @@ import {
   PenSquare,
   Search,
   Settings,
+  Star,
   Tags,
   X,
 } from "lucide-react";
@@ -16,6 +17,9 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -309,17 +313,31 @@ export function AppShell() {
   const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
   const [categoryFilterOpen, setCategoryFilterOpen] = useState(false);
   const dateBounds = useMemo(() => boundsOf(dateFilter), [dateFilter]);
+  // …only the favorites (starred), and/or only the unread or only the read ones.
+  const [favsOnly, setFavsOnly] = useState(false);
+  const [readFilter, setReadFilter] = useState<"all" | "unread" | "read">("all");
   const listFilter = useMemo(
-    () => ({ ...dateBounds, categories: categoryFilter }),
-    [dateBounds, categoryFilter],
+    () => ({
+      ...dateBounds,
+      categories: categoryFilter,
+      ...(favsOnly ? { flagged: true } : {}),
+      ...(readFilter === "all" ? {} : { read: readFilter === "read" }),
+    }),
+    [dateBounds, categoryFilter, favsOnly, readFilter],
   );
-  const filtering = dateFilter !== null || categoryFilter.length > 0;
+  const filtering =
+    dateFilter !== null ||
+    categoryFilter.length > 0 ||
+    favsOnly ||
+    readFilter !== "all";
   const listKey = unifiedView
     ? `unified:${unifiedView}`
     : `${selectedAccountEmail}/${selectedFolder}`;
   useEffect(() => {
     setDateFilter(null);
     setCategoryFilter([]);
+    setFavsOnly(false);
+    setReadFilter("all");
   }, [listKey]);
   // The imbox is opt-in: a link to it (/u/imbox) or a setting turned off again while it is open falls back to the Inbox — once the
   // settings are known (they load a moment after the app does).
@@ -1586,6 +1604,29 @@ export function AppShell() {
                           <Tags className="size-4" /> Filter by category…
                         </DropdownMenuItem>
                       )}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuCheckboxItem
+                        checked={favsOnly}
+                        onCheckedChange={setFavsOnly}
+                      >
+                        <Star className="size-4" /> Favorites only
+                      </DropdownMenuCheckboxItem>
+                      <DropdownMenuRadioGroup
+                        value={readFilter}
+                        onValueChange={(value) =>
+                          setReadFilter(value as "all" | "unread" | "read")
+                        }
+                      >
+                        <DropdownMenuRadioItem value="all">
+                          Read and unread
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="unread">
+                          Unread only
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="read">
+                          Read only
+                        </DropdownMenuRadioItem>
+                      </DropdownMenuRadioGroup>
                       {dateFilter && (
                         <DropdownMenuItem onSelect={() => setDateFilter(null)}>
                           Clear date filter
@@ -1637,6 +1678,43 @@ export function AppShell() {
                   <X className="size-3.5" />
                 </button>
               </div>
+            )}
+            {(favsOnly || readFilter !== "all") && selectionItems.length === 0 && (
+              <ul
+                className="flex flex-wrap items-center gap-1 border-b bg-muted/30 px-3 py-1 text-xs text-muted-foreground"
+                aria-label="Active filters"
+              >
+                {favsOnly && (
+                  <li>
+                    <Badge variant="secondary" className="h-5 gap-1 pr-1 text-[11px] font-normal">
+                      <Star className="size-3" /> Favorites
+                      <button
+                        className="rounded-sm p-0.5 hover:bg-background/60"
+                        title="Show all messages, not only favorites"
+                        aria-label="Remove the favorites filter"
+                        onClick={() => setFavsOnly(false)}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </Badge>
+                  </li>
+                )}
+                {readFilter !== "all" && (
+                  <li>
+                    <Badge variant="secondary" className="h-5 gap-1 pr-1 text-[11px] font-normal">
+                      {readFilter === "unread" ? "Unread" : "Read"}
+                      <button
+                        className="rounded-sm p-0.5 hover:bg-background/60"
+                        title="Show read and unread messages"
+                        aria-label="Remove the read / unread filter"
+                        onClick={() => setReadFilter("all")}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </Badge>
+                  </li>
+                )}
+              </ul>
             )}
             {categoryFilter.length > 0 && selectionItems.length === 0 && (
               <div

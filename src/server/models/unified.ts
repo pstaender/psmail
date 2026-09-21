@@ -3,7 +3,7 @@ import type { EmailAddress } from "../types";
 import { emailIdsWithAttachments, taxonomyListsFor } from "./emails";
 import type { SearchResult } from "./search";
 import { conversationInfoFor } from "./conversations";
-import { listFilterSql } from "./dateBounds";
+import { listFilterSql, type ListFilter } from "./dateBounds";
 
 /** `imbox` is the important part of the Inbox: the messages the classifier picked (see models/imbox.ts). */
 export type UnifiedKind = "inbox" | "sent" | "imbox";
@@ -94,7 +94,7 @@ export function listUnifiedEmails(
   db: Database,
   userId: number,
   kind: UnifiedKind,
-  options: { limit?: number; offset?: number; includeFolders?: boolean; after?: string; before?: string; categories?: string[] } = {}
+  options: { limit?: number; offset?: number; includeFolders?: boolean } & ListFilter = {}
 ): SearchResult[] {
   const limit = Math.min(Math.max(options.limit ?? 50, 1), 500);
   const offset = Math.max(options.offset ?? 0, 0);

@@ -28,8 +28,6 @@ export interface SearchResult {
 interface ParsedQuery {
   generalTerms: string[];
   fromTerms: string[];
-  /** Set by a leading `favs` word: only flagged ("favorite") messages match. */
-  favsOnly: boolean;
 }
 
 /**
@@ -65,19 +63,13 @@ export function parseSearchQuery(query: string): ParsedQuery {
   const generalTerms: string[] = [];
   const fromTerms: string[] = [];
 
-  // `favs` only counts as a command as the very first word (checked on the raw text, so a quoted
-  // "favs" — a phrase to search for — isn't mistaken for it). Everything after it filters as usual:
-  // `favs amazon` = flagged messages matching "amazon"; a lone `favs` lists all flagged messages.
-  const favsMatch = /^\s*favs(?:\s+|$)/i.exec(query);
-  const favsOnly = favsMatch !== null;
-
-  for (const token of tokenizeQuery(favsMatch ? query.slice(favsMatch[0].length) : query)) {
+  for (const token of tokenizeQuery(query)) {
     const fromMatch = /^from:(.+)$/i.exec(token);
     if (fromMatch) fromTerms.push(fromMatch[1]!);
     else generalTerms.push(token);
   }
 
-  return { generalTerms, fromTerms, favsOnly };
+  return { generalTerms, fromTerms };
 }
 
 /**
@@ -174,18 +166,18 @@ const BODY_CHUNK = 200;
 function searchBodies(
   db: Database,
   userId: number,
-  { generalTerms, generalRegexes, fromRegexes, favsOnly, window }: { generalTerms: string[]; generalRegexes: RegExp[]; fromRegexes: RegExp[]; favsOnly: boolean; window: ListFilter },
+  { generalTerms, generalRegexes, fromRegexes, window }: { generalTerms: string[]; generalRegexes: RegExp[]; fromRegexes: RegExp[]; window: ListFilter },
   wanted: number
 ): SearchResult[] {
   // The newest messages first, without their texts: sorting rows that carry long bodies is what made this slow.
-  const dates = listFilterSql(window, { date: "emails.date", taxonomy: "emails.taxonomy_list" });
+  const dates = listFilterSql(window, { date: "emails.date", taxonomy: "emails.taxonomy_list", flagged: "emails.is_flagged", read: "emails.is_read" });
   const headers = db
     .query<SearchRow, (string | number)[]>(
       `SELECT emails.id, accounts.email as account_email, emails.folder, emails.uid,
               emails.is_read, emails.is_flagged, emails.subject, emails.from_addr, emails.date
        FROM emails
        JOIN accounts ON accounts.id = emails.account_id
-       WHERE accounts.user_id = ? AND emails.plain_text IS NOT NULL${favsOnly ? " AND emails.is_flagged = 1" : ""}${dates.sql}
+       WHERE accounts.user_id = ? AND emails.plain_text IS NOT NULL${dates.sql}
        ORDER BY emails.date DESC
        LIMIT ?`
     )
@@ -238,22 +230,22 @@ export interface SearchOptions extends ListFilter {
  * top of that. Always case-insensitive.
  */
 export function searchEmails(db: Database, userId: number, query: string, options: SearchOptions = {}): SearchResult[] {
-  const { generalTerms, fromTerms, favsOnly } = parseSearchQuery(query);
-  if (generalTerms.length === 0 && fromTerms.length === 0 && !favsOnly) return [];
+  const { generalTerms, fromTerms } = parseSearchQuery(query);
+  if (generalTerms.length === 0 && fromTerms.length === 0) return [];
 
   const generalRegexes = generalTerms.map(wildcardToRegExp);
   const fromRegexes = fromTerms.map(wildcardToRegExp);
 
   // A date window (the list's date filter) narrows what is looked at in the first place: search "as before", but only there.
-  const window: ListFilter = { after: options.after, before: options.before, categories: options.categories };
-  const dates = listFilterSql(window, { date: "emails.date", taxonomy: "emails.taxonomy_list" });
+  const window: ListFilter = { after: options.after, before: options.before, categories: options.categories, flagged: options.flagged, read: options.read };
+  const dates = listFilterSql(window, { date: "emails.date", taxonomy: "emails.taxonomy_list", flagged: "emails.is_flagged", read: "emails.is_read" });
   const rows = db
     .query<SearchRow, (string | number)[]>(
       `SELECT emails.id, accounts.email as account_email, emails.folder, emails.uid,
               emails.is_read, emails.is_flagged, emails.subject, emails.from_addr, emails.date
        FROM emails
        JOIN accounts ON accounts.id = emails.account_id
-       WHERE accounts.user_id = ?${favsOnly ? " AND emails.is_flagged = 1" : ""}${dates.sql}
+       WHERE accounts.user_id = ?${dates.sql}
        ORDER BY emails.date DESC`
     )
     .all(userId, ...dates.params);
@@ -277,14 +269,14 @@ export function searchEmails(db: Database, userId: number, query: string, option
     if (options.fullText) {
       // Full text search: the message text is always part of it. Each term still has to be in the subject, the sender or
       // the text, so the text pass finds everything the subject/sender pass did (and more): merge the two, newest first.
-      const inText = searchBodies(db, userId, { generalTerms, generalRegexes, fromRegexes, favsOnly, window }, offset + limit);
+      const inText = searchBodies(db, userId, { generalTerms, generalRegexes, fromRegexes, window }, offset + limit);
       const byId = new Map<number, SearchResult>();
       for (const result of [...inText, ...results]) byId.set(result.id, result); // a header match wins over "in the text"
       results.length = 0;
       results.push(...[...byId.values()].sort((a, b) => ((a.date ?? "") === (b.date ?? "") ? b.id - a.id : (a.date ?? "") < (b.date ?? "") ? 1 : -1)));
     } else if (results.length === 0) {
       // Nothing matched subject or sender: look in the message text too.
-      results.push(...searchBodies(db, userId, { generalTerms, generalRegexes, fromRegexes, favsOnly, window }, offset + limit));
+      results.push(...searchBodies(db, userId, { generalTerms, generalRegexes, fromRegexes, window }, offset + limit));
     }
   }
 

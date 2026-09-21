@@ -64,6 +64,24 @@ export interface UserSettings {
   textViewOnly?: boolean;
 }
 
+/** What narrows a message list (folder, combined or search): a date window, categories, only favorites, only read / only unread. */
+export interface ListQuery {
+  after?: string;
+  before?: string;
+  categories?: string[];
+  flagged?: boolean;
+  /** true: only read messages, false: only unread ones. */
+  read?: boolean;
+}
+
+function appendListQuery(params: URLSearchParams, opts: ListQuery) {
+  for (const category of opts.categories ?? []) params.append("category", category);
+  if (opts.after) params.set("after", opts.after);
+  if (opts.before) params.set("before", opts.before);
+  if (opts.flagged) params.set("flagged", "true");
+  if (opts.read !== undefined) params.set("read", String(opts.read));
+}
+
 export interface BulkResult {
   id: number;
   ok: boolean;
@@ -168,11 +186,9 @@ export const api = {
       body: { name, parent: parent ?? undefined },
     }),
 
-  listEmails: (token: string, accountEmail: string, folder: string, opts: { limit?: number; offset?: number; after?: string; before?: string; categories?: string[] } = {}) => {
+  listEmails: (token: string, accountEmail: string, folder: string, opts: ListQuery & { limit?: number; offset?: number } = {}) => {
     const params = new URLSearchParams({ folder });
-    for (const category of opts.categories ?? []) params.append("category", category);
-    if (opts.after) params.set("after", opts.after);
-    if (opts.before) params.set("before", opts.before);
+    appendListQuery(params, opts);
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.offset) params.set("offset", String(opts.offset));
     return request<EmailRecord[]>("GET", `/api/accounts/${enc(accountEmail)}/emails?${params}`, { token });
@@ -316,11 +332,9 @@ export const api = {
     request<EmailRecord>("PUT", `/api/accounts/${enc(accountEmail)}/emails/${emailId}/imbox`, { token, body: { imbox } }),
   unifiedInboxUnread: (token: string) => request<{ count: number }>("GET", "/api/unified/inbox/unread", { token }),
   /** Newest-first messages across all accounts' Inboxes (`inbox`) or Sent folders (`sent`). */
-  listUnified: (token: string, kind: UnifiedKind, opts: { limit?: number; offset?: number; after?: string; before?: string; categories?: string[] } = {}) => {
+  listUnified: (token: string, kind: UnifiedKind, opts: ListQuery & { limit?: number; offset?: number } = {}) => {
     const params = new URLSearchParams();
-    for (const category of opts.categories ?? []) params.append("category", category);
-    if (opts.after) params.set("after", opts.after);
-    if (opts.before) params.set("before", opts.before);
+    appendListQuery(params, opts);
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.offset) params.set("offset", String(opts.offset));
     return request<SearchResult[]>("GET", `/api/unified/${kind}?${params}`, { token });
@@ -328,12 +342,10 @@ export const api = {
   /** Searches across every account the user owns. See src/server/models/search.ts for query syntax. */
   /** The categories (AI labels) the user's messages have, most used first, with how many messages carry each. */
   listCategories: (token: string) => request<{ label: string; count: number }[]>("GET", "/api/categories", { token }),
-  search: (token: string, query: string, opts: { limit?: number; offset?: number; after?: string; before?: string; categories?: string[]; fullText?: boolean } = {}) => {
+  search: (token: string, query: string, opts: ListQuery & { limit?: number; offset?: number; fullText?: boolean } = {}) => {
     const params = new URLSearchParams({ q: query });
-    for (const category of opts.categories ?? []) params.append("category", category);
+    appendListQuery(params, opts);
     if (opts.fullText) params.set("fulltext", "1");
-    if (opts.after) params.set("after", opts.after);
-    if (opts.before) params.set("before", opts.before);
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.offset) params.set("offset", String(opts.offset));
     return request<SearchResult[]>("GET", `/api/search?${params}`, { token });

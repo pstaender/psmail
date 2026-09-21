@@ -7,6 +7,7 @@ import { addAttachment, createEmail, listEmails, setEmailAiFields, updateEmail }
 import { countUnifiedInboxUnread, listNewInboxMail, listUnifiedEmails } from "../../src/server/models/unified";
 import { searchEmails } from "../../src/server/models/search";
 import { getUserSettings, updateUserSettings } from "../../src/server/models/userSettings";
+import { readListFilter } from "../../src/server/models/dateBounds";
 
 const key = deriveEncryptionKey("pw", generateSalt());
 
@@ -132,16 +133,45 @@ describe("categories (AI taxonomy labels) in the lists", () => {
   });
 });
 
-describe("search: leading `favs`", () => {
-  test("lists only flagged messages, combined with any remaining terms", async () => {
+describe("list filters: favorites and read / unread", () => {
+  async function fixture() {
     const { db, user, accounts } = await setup(["a@x.com"]);
-    mail(db, accounts[0]!.id, "INBOX", "Amazon fav", "2026-01-01T00:00:00.000Z", { isFlagged: true });
-    mail(db, accounts[0]!.id, "INBOX", "Amazon plain", "2026-01-02T00:00:00.000Z");
-    mail(db, accounts[0]!.id, "INBOX", "Other fav", "2026-01-03T00:00:00.000Z", { isFlagged: true });
+    const id = accounts[0]!.id;
+    mail(db, id, "INBOX", "Amazon fav read", "2026-01-01T00:00:00.000Z", { isFlagged: true, isRead: true });
+    mail(db, id, "INBOX", "Amazon plain unread", "2026-01-02T00:00:00.000Z");
+    mail(db, id, "INBOX", "Other fav unread", "2026-01-03T00:00:00.000Z", { isFlagged: true });
+    mail(db, id, "INBOX", "Other plain read", "2026-01-04T00:00:00.000Z", { isRead: true });
+    return { db, user, id };
+  }
+  const subjects = (rows: { subject: string | null }[]) => rows.map(r => r.subject);
 
-    expect(searchEmails(db, user.id, "favs").map(r => r.subject)).toEqual(["Other fav", "Amazon fav"]);
-    expect(searchEmails(db, user.id, "favs amazon").map(r => r.subject)).toEqual(["Amazon fav"]);
-    expect(searchEmails(db, user.id, "amazon").map(r => r.subject)).toEqual(["Amazon plain", "Amazon fav"]);
+  test("the folder list: only favorites, only read, only unread — and combined", async () => {
+    const { db, id } = await fixture();
+    const list = (filter: object) => subjects(listEmails(db, id, { folder: "INBOX", ...filter }));
+    expect(list({})).toHaveLength(4);
+    expect(list({ flagged: true })).toEqual(["Other fav unread", "Amazon fav read"]);
+    expect(list({ read: true })).toEqual(["Other plain read", "Amazon fav read"]);
+    expect(list({ read: false })).toEqual(["Other fav unread", "Amazon plain unread"]);
+    expect(list({ flagged: true, read: false })).toEqual(["Other fav unread"]);
+    expect(list({ flagged: false })).toHaveLength(4); // "false" doesn't mean "not favorites": the filter is off
+  });
+
+  test("the combined lists and the search take them too, next to what is typed", async () => {
+    const { db, user } = await fixture();
+    expect(subjects(listUnifiedEmails(db, user.id, "inbox", { flagged: true }))).toEqual(["Other fav unread", "Amazon fav read"]);
+    expect(subjects(listUnifiedEmails(db, user.id, "inbox", { read: false, after: "2026-01-03T00:00:00.000Z" }))).toEqual(["Other fav unread"]);
+    expect(subjects(searchEmails(db, user.id, "amazon"))).toEqual(["Amazon plain unread", "Amazon fav read"]);
+    expect(subjects(searchEmails(db, user.id, "amazon", { flagged: true }))).toEqual(["Amazon fav read"]);
+    expect(subjects(searchEmails(db, user.id, "amazon", { read: false }))).toEqual(["Amazon plain unread"]);
+    expect(subjects(searchEmails(db, user.id, "other", { flagged: true, read: true }))).toEqual([]);
+  });
+
+  test("the query string: flagged=true, read=true|false; anything else is a 400", () => {
+    expect(readListFilter(new URLSearchParams("flagged=true&read=false"))).toEqual({ flagged: true, read: false });
+    expect(readListFilter(new URLSearchParams("flagged=1&read=1"))).toEqual({ flagged: true, read: true });
+    expect(readListFilter(new URLSearchParams("flagged=false"))).toEqual({});
+    expect(() => readListFilter(new URLSearchParams("flagged=maybe"))).toThrow(/flagged/);
+    expect(() => readListFilter(new URLSearchParams("read=maybe"))).toThrow(/read/);
   });
 });
 

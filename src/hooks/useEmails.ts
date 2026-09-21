@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "../lib/api";
+import { api, type ListQuery } from "../lib/api";
 import type { EmailRecord } from "../server/types";
 import { useAuth } from "../contexts/AuthContext";
 
 const PAGE_SIZE = 100;
 
-export function useEmails(accountEmail: string | null, folder: string | null, bounds: { after?: string; before?: string; categories?: string[] } = {}) {
-  const categoryKey = (bounds.categories ?? []).join("\u0001");
+export function useEmails(accountEmail: string | null, folder: string | null, bounds: ListQuery = {}) {
+  // Everything but the dates that narrows the list, as one string (the categories, favorites, read / unread).
+  const categoryKey = `${(bounds.categories ?? []).join("\u0001")}\u0002${bounds.flagged ? "f" : ""}\u0002${bounds.read ?? ""}`;
   const { token } = useAuth();
   const [emails, setEmails] = useState<EmailRecord[]>([]);
   const [loading, setLoading] = useState(false);

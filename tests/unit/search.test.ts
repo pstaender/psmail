@@ -11,7 +11,6 @@ describe("parseSearchQuery", () => {
     expect(parseSearchQuery("amazon gutschein")).toEqual({
       generalTerms: ["amazon", "gutschein"],
       fromTerms: [],
-      favsOnly: false,
     });
   });
 
@@ -19,7 +18,6 @@ describe("parseSearchQuery", () => {
     expect(parseSearchQuery('"Mountain Bike"')).toEqual({
       generalTerms: ["Mountain Bike"],
       fromTerms: [],
-      favsOnly: false,
     });
   });
 
@@ -27,7 +25,6 @@ describe("parseSearchQuery", () => {
     expect(parseSearchQuery("from:alice@example.com amazon*gutschein")).toEqual({
       generalTerms: ["amazon*gutschein"],
       fromTerms: ["alice@example.com"],
-      favsOnly: false,
     });
   });
 
@@ -35,7 +32,6 @@ describe("parseSearchQuery", () => {
     expect(parseSearchQuery('from:"jane doe" hello')).toEqual({
       generalTerms: ["hello"],
       fromTerms: ["jane doe"],
-      favsOnly: false,
     });
   });
 
@@ -43,19 +39,12 @@ describe("parseSearchQuery", () => {
     expect(parseSearchQuery("from:alice@x.com from:bob@x.com")).toEqual({
       generalTerms: [],
       fromTerms: ["alice@x.com", "bob@x.com"],
-      favsOnly: false,
     });
   });
 
-  test("a leading `favs` is a command, not a search term; the rest filters as usual", () => {
-    expect(parseSearchQuery("favs amazon from:bob")).toEqual({ generalTerms: ["amazon"], fromTerms: ["bob"], favsOnly: true });
-    expect(parseSearchQuery("FAVS")).toEqual({ generalTerms: [], fromTerms: [], favsOnly: true });
-  });
-
-  test("`favs` anywhere but first, inside a longer word, or quoted is an ordinary term", () => {
-    expect(parseSearchQuery("amazon favs").favsOnly).toBe(false);
-    expect(parseSearchQuery("favsfoo").favsOnly).toBe(false);
-    expect(parseSearchQuery('"favs" x')).toEqual({ generalTerms: ["favs", "x"], fromTerms: [], favsOnly: false });
+  test("`favs` is not a command any more: just an ordinary term wherever it stands", () => {
+    expect(parseSearchQuery("favs amazon from:bob")).toEqual({ generalTerms: ["favs", "amazon"], fromTerms: ["bob"] });
+    expect(parseSearchQuery("FAVS")).toEqual({ generalTerms: ["FAVS"], fromTerms: [] });
   });
 });
 
@@ -359,13 +348,14 @@ describe("search: falling back to the message text", () => {
     expect(searchEmails(db, user.id, "termin marktplatz")).toHaveLength(1); // one in the subject, one in the text
   });
 
-  test("from: and favs still restrict, and a query without general terms doesn't read bodies at all", async () => {
+  test("from: still restricts, the favorite and read filters narrow the search, and a query without general terms doesn't read bodies at all", async () => {
     const { db, user, mail } = await mailbox();
     mail("A", "the secret word", "2026-01-01T00:00:00.000Z", { from: [{ name: "Bob", address: "bob@y.com" }] });
     mail("B", "the secret word", "2026-01-02T00:00:00.000Z", { from: [{ name: "Cy", address: "cy@y.com" }], isFlagged: true });
 
     expect(searchEmails(db, user.id, "secret from:bob").map(r => r.subject)).toEqual(["A"]);
-    expect(searchEmails(db, user.id, "favs secret").map(r => r.subject)).toEqual(["B"]);
+    expect(searchEmails(db, user.id, "secret", { flagged: true }).map(r => r.subject)).toEqual(["B"]);
+    expect(searchEmails(db, user.id, "favs secret")).toEqual([]); // "favs" is a word to find now
     expect(searchEmails(db, user.id, "from:nobody")).toEqual([]);
   });
 

@@ -44,11 +44,15 @@ export function dateBoundsSql(bounds: DateBounds | undefined, column = "date"): 
 }
 
 /**
- * What narrows a message list: a date window and/or categories (the AI's taxonomy labels). A message must have EVERY
- * chosen category.
+ * What narrows a message list: a date window, categories (the AI's taxonomy labels; a message must have EVERY chosen
+ * category), only favorites (starred messages) and/or only read or only unread ones.
  */
 export interface ListFilter extends DateBounds {
   categories?: string[];
+  /** Only starred messages. */
+  flagged?: boolean;
+  /** `true`: only read messages, `false`: only unread ones; unset: both. */
+  read?: boolean;
 }
 
 export const MAX_FILTER_CATEGORIES = 20;
@@ -61,6 +65,14 @@ export function readListFilter(params: URLSearchParams): ListFilter {
   if (categories.length > MAX_FILTER_CATEGORIES) throw new ApiError(400, `At most ${MAX_FILTER_CATEGORIES} categories can be combined`);
   if (categories.some(label => label.length > MAX_CATEGORY_LENGTH)) throw new ApiError(400, "A category is too long");
   if (categories.length > 0) filter.categories = categories;
+
+  const flagged = params.get("flagged");
+  if (flagged === "true" || flagged === "1") filter.flagged = true;
+  else if (flagged !== null && flagged !== "" && flagged !== "false" && flagged !== "0") throw new ApiError(400, "flagged must be true or false");
+  const read = params.get("read");
+  if (read === "true" || read === "1") filter.read = true;
+  else if (read === "false" || read === "0") filter.read = false;
+  else if (read !== null && read !== "") throw new ApiError(400, "read must be true (only read) or false (only unread)");
   return filter;
 }
 
@@ -68,11 +80,12 @@ export function readListFilter(params: URLSearchParams): ListFilter {
  * The SQL for a whole filter: the date range (see dateBoundsSql) and one condition per category, each an EXISTS over the
  * message's own label list (a small JSON array in `taxonomy_list`). The conditions only look at the row being considered, so
  * the list is still walked in the date index's order and stops as soon as the page is full; a message with no labels, or
- * with a list that isn't valid JSON, simply doesn't match. `columns` name the (qualified) date and taxonomy columns.
+ * with a list that isn't valid JSON, simply doesn't match. Favorites and read/unread are equality tests on the row's own
+ * flag columns, which the walk in date order checks the same way. `columns` name the (qualified) columns.
  */
 export function listFilterSql(
   filter: ListFilter | undefined,
-  columns: { date?: string; taxonomy?: string } = {}
+  columns: { date?: string; taxonomy?: string; flagged?: string; read?: string } = {}
 ): { sql: string; params: string[] } {
   const dates = dateBoundsSql(filter, columns.date ?? "date");
   const taxonomy = columns.taxonomy ?? "taxonomy_list";
@@ -82,5 +95,7 @@ export function listFilterSql(
     sql += ` AND CASE WHEN json_valid(${taxonomy}) THEN EXISTS (SELECT 1 FROM json_each(${taxonomy}) WHERE value = ?) ELSE 0 END`;
     params.push(label);
   }
+  if (filter?.flagged) sql += ` AND ${columns.flagged ?? "is_flagged"} = 1`;
+  if (filter?.read !== undefined) sql += ` AND ${columns.read ?? "is_read"} = ${filter.read ? 1 : 0}`;
   return { sql, params };
 }

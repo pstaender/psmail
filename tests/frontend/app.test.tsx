@@ -1789,6 +1789,81 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       });
     });
 
+    describe("favorites and read / unread", () => {
+      const pick = async (name: RegExp | string, role: "menuitemcheckbox" | "menuitemradio") => {
+        await userEvent.click(screen.getByRole("button", { name: "More" }));
+        await userEvent.click(await screen.findByRole(role, { name }));
+      };
+
+      test("the More menu offers Favorites only and Read and unread / Unread only / Read only, beside the date filter", async () => {
+        await openFolder();
+        await userEvent.click(screen.getByRole("button", { name: "More" }));
+        expect(await screen.findByRole("menuitem", { name: /filter by date/i })).toBeTruthy();
+        expect(screen.getByRole("menuitemcheckbox", { name: /favorites only/i }).getAttribute("aria-checked")).toBe("false");
+        const radios = screen.getAllByRole("menuitemradio").map(r => [r.textContent!.trim(), r.getAttribute("aria-checked")]);
+        expect(radios).toEqual([["Read and unread", "true"], ["Unread only", "false"], ["Read only", "false"]]);
+      });
+
+      test("Favorites only asks the server for flagged messages, shows a chip and clears again", async () => {
+        await openFolder();
+        expect(last("folder").has("flagged")).toBe(false);
+        await pick(/favorites only/i, "menuitemcheckbox");
+        await waitFor(() => expect(last("folder").get("flagged")).toBe("true"));
+        const chips = within(screen.getByRole("list", { name: "Active filters" }));
+        expect(chips.getByText("Favorites")).toBeTruthy();
+
+        await userEvent.click(screen.getByLabelText("Remove the favorites filter"));
+        await waitFor(() => expect(last("folder").has("flagged")).toBe(false));
+        expect(screen.queryByRole("list", { name: "Active filters" })).toBeNull();
+      });
+
+      test("Unread only / Read only send read=false / read=true; both combine with each other and with the date filter", async () => {
+        await openFolder();
+        await pick("Unread only", "menuitemradio");
+        await waitFor(() => expect(last("folder").get("read")).toBe("false"));
+        expect(within(screen.getByRole("list", { name: "Active filters" })).getByText("Unread")).toBeTruthy();
+
+        await pick("Read only", "menuitemradio");
+        await waitFor(() => expect(last("folder").get("read")).toBe("true"));
+
+        await pick(/favorites only/i, "menuitemcheckbox");
+        const dialog = await openDialog();
+        setDay(dialog, "Day", "2026-03-02");
+        await userEvent.click(dialog.getByRole("button", { name: "Apply" }));
+        await waitFor(() => expect(last("folder").get("after")).toBe(localDay(2026, 3, 2).toISOString()));
+        expect(last("folder").get("flagged")).toBe("true");
+        expect(last("folder").get("read")).toBe("true");
+
+        await userEvent.click(screen.getByLabelText("Remove the read / unread filter"));
+        await waitFor(() => expect(last("folder").has("read")).toBe(false));
+        expect(last("folder").get("flagged")).toBe("true");
+      });
+
+      test("they narrow a search and the combined lists too, and each list starts without them", async () => {
+        await openFolder();
+        await pick("Unread only", "menuitemradio");
+        await userEvent.type(screen.getByPlaceholderText(/search all mail/i), "second");
+        await waitFor(() => expect(listRequests.some(r => r.list === "search")).toBe(true));
+        expect(last("search").get("q")).toBe("second");
+        expect(last("search").get("read")).toBe("false");
+
+        await userEvent.click(screen.getByTitle("Inbox of all accounts")); // another list: no filters
+        await screen.findByText("Unified hello");
+        expect(screen.queryByRole("list", { name: "Active filters" })).toBeNull();
+        expect(last("inbox").has("read")).toBe(false);
+        await pick(/favorites only/i, "menuitemcheckbox");
+        await waitFor(() => expect(last("inbox").get("flagged")).toBe("true"));
+      });
+
+      test("`favs` is no search command any more: it is searched for like any word", async () => {
+        await openFolder();
+        await userEvent.type(screen.getByPlaceholderText(/search all mail/i), "favs second");
+        await waitFor(() => expect(listRequests.some(r => r.list === "search")).toBe(true));
+        expect(last("search").get("q")).toBe("favs second");
+        expect(last("search").has("flagged")).toBe(false);
+      });
+    });
+
     test("More sits to the left of New", async () => {
       await openFolder();
       const more = screen.getByRole("button", { name: "More" });
