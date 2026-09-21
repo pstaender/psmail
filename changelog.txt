@@ -7,6 +7,40 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-21 - Imbox: a local classifier for important mail (4f9ef9d)
+-------------------------------------------------------------------
+Every message can now be classified as important or not: emails.imbox (1 / 0 / NULL = not yet), a partial index for the list, and
+- a CLASSIFIER that runs entirely on this computer (no AI service, no new module needed): services/imbox/classifier.ts, pure, adds up
+  signals worth points (important at 2 or more) with two rules that decide alone (Junk folder, one-time codes / login links). Your
+  criteria are all in: a person you have written to (contact list, all your accounts) or write to regularly; work-related and meant for you
+  (addressed to you / greeted by name / business wording); not marketing (List-Unsubscribe, unsubscribe text, sales wording,
+  mass-mailing services, no-reply senders); not a temporary mail (OTP / TAN / login codes and sign-in or reset links, English + German);
+  not spam or phishing (sender authentication failed, display name claiming a bank or shop the address doesn't belong to, earlier mail
+  from the same exact address that was only ever in Junk - and receiving normal mail from it before counts for it); not an activity
+  mail (commented on / new follower / digest / order shipped / receipt / platform senders like GitHub or LinkedIn). Additions: answers
+  to a message you sent (In-Reply-To / References), a message meant for you among few recipients, risky attachments or link tricks from
+  unknown senders, and "an unknown sender with nothing personal in it" so being the only recipient of spam isn't enough.
+  The full table is in the README ("Imbox"). Every verdict has reasons that add up to the score.
+- The mailbox side (models/imbox.ts): who you wrote to, what came from each address before (one pass over the stored mail, so a whole
+  mailbox is classified in one go), Junk folder detection (learned path or name), thread replies. New mail is classified while it is
+  synced (only incoming folders; a classifier failure never fails a sync).
+- CLI: "bun run cli imbox classify [account ...] [--force]" (default every account; messages that have a verdict are left alone unless
+  --force) and "bun run cli imbox explain <account> <message-id>" (points and reasons). API: POST /api/imbox/classify,
+  GET/PUT /api/accounts/:email/emails/:id/imbox (explain / override by hand).
+- Setting "Enable imbox" (Settings > Inboxes; user setting imboxEnabled, off by default): adds an Imbox entry between the combined Inbox
+  and Sent (GET /api/unified/imbox, address /u/imbox). For now only as a combined list over all accounts, as asked; the date and category
+  filters work in it. The Inbox still lists everything. Without the setting /u/imbox falls back to the Inbox.
+- Performance: the imbox list uses its own partial index (INDEXED BY, since the planner would otherwise walk the whole folder's date index):
+  a page out of 100 000 messages in milliseconds; classifying 3 000 messages takes well under a second.
+- Test infrastructure: the test database now runs the migrations too (as the real one does), and the migration for indexes tolerates the
+  bare tables the migration tests start from.
+- Tests: 35 for the classifier on sample mail (fixtures/imbox: friends, colleagues, replies, newsletters, codes, phishing, GitHub/LinkedIn/
+  Amazon mail, out-of-office, Junk, in English and German) plus each criterion alone; the mailbox side (sent-to across accounts, Junk history,
+  thread replies, attachments, names, chunks, force, hand overrides); the sync hook; the HTTP routes and the real CLI against a test server;
+  the UI (setting, sidebar entry between Inbox and Sent, /u/imbox, filters, fallback). Not run against a real mailbox: the thresholds are
+  tuned on the fixtures, so expect to adjust some weights after looking at real verdicts with "imbox explain".
+
+
 2026-09-21 - Header: the logo instead of the icon and the name (7cb48a2)
 ------------------------------------------------------------------------
 The top-left of the app header shows logo/psmail_logo.svg (h-8, alt "P.S.Mail") instead of the round mail icon and the "P.S.Mail" text. The
