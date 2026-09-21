@@ -19,75 +19,45 @@ async function loginFromFlags(client: ApiClient, flags: Record<string, string | 
 }
 
 /**
- * Signs in for a command that works on the given accounts and says which profile that was. With `--user` that profile is used (and
- * must own the accounts). Without it, the profile that owns the accounts is looked for: "default" first, then the others, with the
- * password given (or asked for once) — a profile with another password is asked for its own when the terminal is interactive, and
- * is otherwise named so `--user` can be used. Without any account given (= all of them), "default" is used as ever.
+ * Signs in for a command that works on the given accounts and says which profile that was. Without `--user` the server is asked
+ * which profile has the account(s) — that one is used (`default` only when it is one of them, or when no account is named, i.e. all).
+ * With `--user` that profile is used, and if it doesn't have the account the error names the profile that does.
  * Returns the profile's name.
  */
 export async function signInForAccounts(client: ApiClient, flags: Record<string, string | boolean>, wanted: string[]): Promise<string> {
-  const owns = async (): Promise<{ has: boolean; emails: string[] }> => {
-    const emails = (await client.listAccounts()).map(account => account.email);
-    return { has: wanted.every(address => emails.some(email => email.toLowerCase() === address.toLowerCase())), emails };
-  };
-  const missing = (emails: string[]) => wanted.filter(address => !emails.some(email => email.toLowerCase() === address.toLowerCase()));
+  const ownersOf = async (address: string) => (await client.accountOwners(address)).map(owner => owner.username);
 
+  // Who has which of the named accounts (looked up before signing in, so the right profile is asked for its password).
+  const owners = new Map<string, string[]>();
+  for (const address of wanted) owners.set(address, await ownersOf(address));
+  const nobody = wanted.filter(address => owners.get(address)!.length === 0);
+  if (nobody.length > 0) throw new Error(`No profile has the account ${nobody.join(", ")}.`);
+
+  let username: string;
   if (typeof flags.user === "string") {
-    await loginFromFlags(client, flags);
-    if (wanted.length > 0) {
-      const { has, emails } = await owns();
-      if (!has) throw new Error(`"${flags.user}" has no account ${missing(emails).join(", ")} (its accounts: ${emails.join(", ") || "none"}).`);
+    username = flags.user;
+    const lacking = wanted.filter(address => !owners.get(address)!.includes(username));
+    if (lacking.length > 0) {
+      const hints = lacking.map(address => `${address} belongs to ${owners.get(address)!.map(name => `"${name}"`).join(" / ")}`);
+      throw new Error(`"${username}" has no account ${lacking.join(", ")}: ${hints.join("; ")} — use --user ${owners.get(lacking[0]!)![0]}.`);
     }
-    return flags.user;
-  }
-  if (wanted.length === 0) {
-    await loginFromFlags(client, flags);
-    return "default";
+  } else if (wanted.length === 0) {
+    username = "default";
+  } else {
+    // Profiles that have every named account; "default" wins when it is one of them.
+    const candidates = owners.get(wanted[0]!)!.filter(name => wanted.every(address => owners.get(address)!.includes(name)));
+    if (candidates.length === 0) {
+      throw new Error(`These accounts belong to different profiles: ${wanted.map(address => `${address} → ${owners.get(address)!.join(" / ")}`).join("; ")}. Run the command once per profile with --user.`);
+    }
+    if (candidates.length > 1 && !candidates.includes("default")) {
+      throw new Error(`${wanted.join(", ")} exist in several profiles (${candidates.join(", ")}) — choose one with --user <username>.`);
+    }
+    username = candidates.includes("default") ? "default" : candidates[0]!;
+    console.log(`${wanted.length === 1 ? `The account ${wanted[0]} belongs` : "The accounts belong"} to the profile "${username}".`);
   }
 
-  const known = await client.listUsers().catch(() => [] as { username: string }[]);
-  const names = known.map(user => user.username);
-  const candidates = [...names.filter(name => name === "default"), ...names.filter(name => name !== "default")];
-  if (candidates.length === 0) candidates.push("default");
-
-  // The first profile is asked for its password (unless given); the same one is tried on the others, silently.
-  let password = typeof flags.password === "string" ? flags.password : process.env.PSMAIL_PASSWORD;
-  if (password === undefined) password = await promptHidden(`Password for "${candidates[0]}": `);
-  const checked: string[] = [];
-  const unchecked: string[] = [];
-  const found = async (name: string, secret: string) => {
-    const { token } = await client.login(name, secret);
-    client.setToken(token);
-    const { has, emails } = await owns();
-    checked.push(`${name} (${emails.join(", ") || "no accounts"})`);
-    return has;
-  };
-  for (const name of candidates) {
-    try {
-      if (await found(name, password)) return name;
-    } catch (error) {
-      if (!(error instanceof CliApiError) || error.status !== 401) throw error;
-      unchecked.push(name);
-    }
-  }
-  // Profiles with another password: ask for it, when someone is there to answer.
-  if (process.stdin.isTTY) {
-    for (const name of [...unchecked]) {
-      const secret = await promptHidden(`Password for "${name}" (to look for ${wanted.join(", ")}; empty skips it): `);
-      if (secret === "") continue;
-      try {
-        if (await found(name, secret)) return name;
-        unchecked.splice(unchecked.indexOf(name), 1);
-      } catch (error) {
-        if (!(error instanceof CliApiError) || error.status !== 401) throw error;
-        console.error(`Wrong password for "${name}".`);
-      }
-    }
-  }
-  throw new Error(
-    `No profile has the account ${wanted.join(", ")}. Looked at: ${checked.join("; ") || "nothing"}.` +
-      (unchecked.length > 0 ? ` Profiles with another password that could not be looked at: ${unchecked.join(", ")} — name one with --user <username>.` : "")
-  );
+  await loginFromFlags(client, { ...flags, user: username });
+  return username;
 }
 
 async function cmdUserCreate(argv: string[]) {

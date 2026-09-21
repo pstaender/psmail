@@ -189,7 +189,7 @@ describe("the command line", () => {
   }, 60_000);
 });
 
-describe("which profile a command signs in as (no --user)", () => {
+describe("which profile a command signs in as (no --user): the one that has the account", () => {
   const spawn = async (args: string[], env: Record<string, string> = { PSMAIL_PASSWORD: "" }) => {
     const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args, "--url", base], {
       stdout: "pipe",
@@ -212,6 +212,7 @@ describe("which profile a command signs in as (no --user)", () => {
       (await api("POST", "/api/accounts", { token, body: { email, imapHost: "h", imapPort: 993, imapUsername: email, imapPassword: "x", smtpHost: "h", smtpPort: 465, smtpUsername: email, smtpPassword: "y" } })).json.id as number;
     const philipp = await login("philipp", "");
     const id = await add(philipp, "pstaender@mailbox.org");
+    const getEmailIdFor = (accountId: number) => db.query<{ id: number }, [number]>("SELECT id FROM emails WHERE account_id = ?").get(accountId)!.id;
     createEmail(db, id, { folder: "INBOX", isDraft: false, subject: "Hi", from: [{ address: "x@y.z" }], date: "2026-03-01T00:00:00Z", plainText: "Body" });
     await add(await login("default", ""), "other@example.com");
     await add(await login("secret", "pw"), "hidden@example.com");
@@ -219,9 +220,15 @@ describe("which profile a command signs in as (no --user)", () => {
     await api("POST", "/api/ai/skills", { token: philipp, body: { aiApiId: provider.json.id, category: "summarize", prompt: "You summarize." } });
     fakeAi(() => "- fine");
 
-    // Found without --user, although "default" is tried first.
+    const owners = await api("GET", "/api/account-owners?email=PSTAENDER@mailbox.org");
+    expect(owners.json).toEqual([{ username: "philipp" }]); // case-insensitive, and only names
+    expect((await api("GET", "/api/account-owners?email=nobody@example.com")).json).toEqual([]);
+    expect((await api("GET", "/api/account-owners")).status).toBe(400);
+
+    // Without --user: the profile that has the account is named and used — not "default".
     const found = await spawn(["summarize", "pstaender@mailbox.org", "--folder", "Inbox"]);
     expect(found.err).toBe("");
+    expect(found.out).toContain('The account pstaender@mailbox.org belongs to the profile "philipp".');
     expect(found.out).toContain('as "philipp"');
     expect(found.out).toContain("1 message(s) summarized");
 
@@ -229,25 +236,28 @@ describe("which profile a command signs in as (no --user)", () => {
     const imbox = await spawn(["imbox", "classify", "pstaender@mailbox.org"]);
     expect(imbox.err).toBe("");
     expect(imbox.out).toContain('as "philipp"');
+    const explain = await spawn(["imbox", "explain", "pstaender@mailbox.org", String(getEmailIdFor(id))]);
+    expect(explain.err).toBe("");
+    expect(explain.out).toContain('as "philipp"');
 
-    // With --user, that profile has to have it — and the message says what it does have.
+    // With --user, that profile has to have it — and the error says who does.
     const wrong = await spawn(["summarize", "pstaender@mailbox.org", "--user", "default"]);
     expect(wrong.code).toBe(1);
-    expect(wrong.err).toContain('"default" has no account pstaender@mailbox.org (its accounts: other@example.com)');
+    expect(wrong.err).toContain('"default" has no account pstaender@mailbox.org: pstaender@mailbox.org belongs to "philipp" — use --user philipp.');
 
-    // Nobody has it; a profile with a password of its own could not be looked at.
+    // Nobody has it.
     const nobody = await spawn(["summarize", "nobody@example.com"]);
     expect(nobody.code).toBe(1);
-    expect(nobody.err).toContain("No profile has the account nobody@example.com");
-    expect(nobody.err).toContain("default (other@example.com)");
-    expect(nobody.err).toContain("secret");
-    expect(nobody.err).toContain("--user <username>");
+    expect(nobody.err).toContain("No profile has the account nobody@example.com.");
 
-    // An account of the profile with its own password: the error points to --user, which then works.
-    const hidden = await spawn(["summarize", "hidden@example.com"]);
-    expect(hidden.err).toContain("Profiles with another password that could not be looked at");
-    const named = await spawn(["summarize", "hidden@example.com", "--user", "secret", "--password", "pw"]);
-    expect(named.out).toContain('as "secret"'); // signed in and owning it; that profile just has no summarize skill
-    expect(named.err).toContain("No \"summarize\" skill");
+    // Accounts of two profiles at once can't be done in one run.
+    const mixed = await spawn(["summarize", "pstaender@mailbox.org", "other@example.com"]);
+    expect(mixed.err).toContain("belong to different profiles");
+
+    // The profile found is asked for its password (here given): a profile with a password of its own works the same.
+    const hidden = await spawn(["summarize", "hidden@example.com", "--password", "pw"]);
+    expect(hidden.out).toContain('The account hidden@example.com belongs to the profile "secret".');
+    expect(hidden.out).toContain('as "secret"'); // signed in; that profile just has no summarize skill
+    expect(hidden.err).toContain("No \"summarize\" skill");
   }, 60_000);
 });

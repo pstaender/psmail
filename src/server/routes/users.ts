@@ -26,6 +26,23 @@ export function usersRoutes(db: Database) {
         return json(user, { status: 201 });
       }),
     },
+    /**
+     * Which profiles have an account with this address: `GET /api/account-owners?email=a@b.example` -> `[{ username }]`. For the CLI,
+     * to tell which `--user` to use — profile names are listed for everybody here already (the sign-in screen), nothing else is given away.
+     */
+    "/api/account-owners": {
+      GET: withErrorHandling(async req => {
+        const email = new URL(req.url).searchParams.get("email")?.trim();
+        if (!email) throw new ApiError(400, "email is required");
+        return json(
+          db
+            .query<{ username: string }, [string]>(
+              "SELECT users.username FROM accounts JOIN users ON users.id = accounts.user_id WHERE lower(accounts.email) = lower(?) ORDER BY users.id"
+            )
+            .all(email)
+        );
+      }),
+    },
     "/api/users/:id": {
       GET: withErrorHandling(async req => {
         const id = parseIntParam(req.params.id, "id");

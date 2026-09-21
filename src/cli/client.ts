@@ -84,6 +84,11 @@ export class ApiClient {
     return this.request<{ id: number; username: string }[]>("GET", "/api/users");
   }
 
+  /** The profiles that have an account with this address (unauthenticated: profile names are public anyway). */
+  accountOwners(email: string) {
+    return this.request<{ username: string }[]>("GET", `/api/account-owners?email=${encodeURIComponent(email)}`);
+  }
+
   listAccounts() {
     return this.request<{ id: number; email: string }[]>("GET", "/api/accounts");
   }
