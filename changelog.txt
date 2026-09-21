@@ -7,6 +7,21 @@ the git commit messages, not from the original end-of-task summaries. Later entr
 summaries as written.
 
 
+2026-09-21 - Compose: unsaved changes are asked about when closing (b7144a6)
+-------------------------------------------------------------------------
+Closing a compose window (Esc, the x, a click outside) that has changes which are not saved now asks: "Save this message as a draft?"
+(or "Save the changes to this draft?" when an existing draft is being edited) with
+- Keep editing (back to the window, nothing lost),
+- Save draft (saves - creating the draft, or updating the same one - and closes; if saving fails the window stays open with the error),
+- Discard changes - the DEFAULT: it has the focus, so Enter discards.
+What counts as a change: To/Cc/Bcc, subject, body (compared with what the window was opened with; line endings and trailing blank lines are
+ignored so an editor that tidies the text on load doesn't make an untouched draft look edited) and a file added. An untouched new message, an
+untouched reply (its quote and signature are not "changes"), an unchanged draft and Send never ask. An attachment removed from an existing draft
+is not counted: it is already deleted on the server.
+Tests: no question when untouched, Enter discards (nothing saved), Save draft saves and closes, Keep editing keeps the text, the x asks, To/file
+count, Send doesn't ask, reply untouched, existing draft asks and updates in place. Not looked at in a browser.
+
+
 2026-09-21 - Safe HTML: no inline images, no embedded SVG; script removal checked (f5db612)
 -------------------------------------------------------------------------------------------
 Checked first, as asked: scripts were ALREADY removed in both HTML views (DOMPurify's defaults plus an explicit forbid list:
