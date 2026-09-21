@@ -87,7 +87,7 @@ export function MessageBody({
   const safeHtml = useMemo(
     () =>
       email.htmlText
-        ? sanitizeEmailHtml(email.htmlText, { allowExternalContent: showExternal, stripLinkTracking: true })
+        ? sanitizeEmailHtml(email.htmlText, { allowExternalContent: showExternal, stripLinkTracking: true, stripInlineImages: true })
         : "",
     [email.htmlText, showExternal]
   );
