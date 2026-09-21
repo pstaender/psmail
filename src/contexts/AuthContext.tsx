@@ -13,6 +13,8 @@ interface AuthContextValue {
   username: string | null;
   ready: boolean;
   login: (username: string, password: string) => Promise<void>;
+  /** The signed-in user was renamed: keeps this browser's session (and what it shows) in step. */
+  renameUser: (username: string) => void;
   logout: () => void;
 }
 
@@ -55,6 +57,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(next);
   }, []);
 
+  const renameUser = useCallback((username: string) => {
+    setSession(current => {
+      if (!current) return current;
+      const next = { ...current, username };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
   const logout = useCallback(() => {
     if (session) api.logout(session.token).catch(() => {});
     localStorage.removeItem(STORAGE_KEY);
@@ -69,9 +80,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       username: session?.username ?? null,
       ready,
       login,
+      renameUser,
       logout,
     }),
-    [session, ready, login, logout]
+    [session, ready, login, renameUser, logout]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

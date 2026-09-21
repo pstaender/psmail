@@ -1,6 +1,9 @@
 import { Database } from "bun:sqlite";
 import { hashPassword, verifyPassword } from "../crypto/password";
 import { decryptSecret, deriveEncryptionKey, encryptSecret, generateSalt } from "../crypto/secrets";
+import { existsSync, renameSync } from "node:fs";
+import { join } from "node:path";
+import { getAttachmentsDir, sanitizeSegment } from "../config/paths";
 import { ApiError, ConflictError, NotFoundError, UnauthorizedError, type User } from "../types";
 
 interface UserRow {
@@ -39,6 +42,52 @@ export async function createUser(db: Database, username: string, password: strin
     .get(username, passwordHash, salt);
 
   return toUser(row!);
+}
+
+export const MAX_USERNAME_LENGTH = 64;
+
+/**
+ * Renames a user. The name only identifies the profile at sign-in — the encryption key comes from the password, sessions and data
+ * hang on the user's id — so nothing else has to be re-encrypted. What does carry the name is the folder the user's attachment
+ * files are kept in (attachments/<username>/…): it is renamed too, and the stored paths follow, so downloads keep finding their files.
+ * Returns the user. A name already in use is a 409; an empty or oversized one a 400; the same name again changes nothing.
+ */
+export function changeUsername(db: Database, userId: number, requested: string): User {
+  const username = requested.trim();
+  if (!username) throw new ApiError(400, "The username can't be empty");
+  if (username.length > MAX_USERNAME_LENGTH) throw new ApiError(400, `The username can be at most ${MAX_USERNAME_LENGTH} characters`);
+  if (/[\u0000-\u001f\u007f]/.test(username)) throw new ApiError(400, "The username can't contain control characters");
+
+  const row = db.query<UserRow, [number]>("SELECT * FROM users WHERE id = ?").get(userId);
+  if (!row) throw new NotFoundError(`User ${userId} not found`);
+  if (row.username === username) return toUser(row);
+
+  const taken = db.query<{ id: number }, [string, number]>("SELECT id FROM users WHERE username = ? AND id <> ?").get(username, userId);
+  if (taken) throw new ConflictError(`Username "${username}" already exists`);
+
+  const oldDir = join(getAttachmentsDir(), sanitizeSegment(row.username));
+  const newDir = join(getAttachmentsDir(), sanitizeSegment(username));
+  const moveFiles = oldDir !== newDir && existsSync(oldDir) && !existsSync(newDir);
+  if (moveFiles) renameSync(oldDir, newDir);
+
+  try {
+    const renamed = db.transaction(() => {
+      const updated = db
+        .query<UserRow, [string, number]>("UPDATE users SET username = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *")
+        .get(username, userId)!;
+      if (moveFiles) {
+        db.query(
+          `UPDATE attachments SET file_path = ? || substr(file_path, ?)
+           WHERE substr(file_path, 1, ?) = ? AND email_id IN (SELECT e.id FROM emails e JOIN accounts a ON a.id = e.account_id WHERE a.user_id = ?)`
+        ).run(newDir, oldDir.length + 1, oldDir.length, oldDir, userId);
+      }
+      return updated;
+    })();
+    return toUser(renamed);
+  } catch (error) {
+    if (moveFiles) renameSync(newDir, oldDir); // the database refused: put the files back where the stored paths say they are
+    throw error;
+  }
 }
 
 export function listUsers(db: Database): User[] {

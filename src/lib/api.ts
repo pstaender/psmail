@@ -256,6 +256,9 @@ export const api = {
   getDownloadJob: (token: string, accountEmail: string, jobId: number) =>
     request<DownloadJob>("GET", `/api/accounts/${enc(accountEmail)}/downloads/${jobId}`, { token }),
 
+  /** Renames the signed-in user; the sign-in name changes, nothing else. A name that is taken is a 409. */
+  changeUsername: (token: string, username: string) =>
+    request<{ id: number; username: string }>("POST", "/api/auth/change-username", { token, body: { username } }),
   /** Changes the signed-in user's password (the server re-encrypts the accounts' saved passwords) and signs out their other sessions. */
   changePassword: (token: string, currentPassword: string, newPassword: string) =>
     request<{ ok: true; otherSessionsSignedOut: number }>("POST", "/api/auth/change-password", {

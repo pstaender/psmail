@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { deriveEncryptionKey } from "../crypto/secrets";
 import { json, readJsonBody, requireAuth, withErrorHandling } from "../http";
-import { verifyUserPassword } from "../models/users";
+import { changeUsername, verifyUserPassword } from "../models/users";
 import { changePasswordForSession } from "../services/passwordChange";
 import { createSession, destroySession } from "../services/sessions";
 import { ApiError } from "../types";
@@ -38,6 +38,15 @@ export function authRoutes(db: Database) {
         }
         const result = await changePasswordForSession(db, session, encryptionKey, body.currentPassword, body.newPassword);
         return json({ ok: true, ...result });
+      }),
+    },
+    /** Renames the signed-in user (their attachment folder follows). Nothing else changes: same password, same sessions, same data. */
+    "/api/auth/change-username": {
+      POST: withErrorHandling(async req => {
+        const { session } = requireAuth(req, db);
+        const body = await readJsonBody<{ username?: unknown }>(req);
+        if (typeof body.username !== "string") throw new ApiError(400, "username is required");
+        return json(changeUsername(db, session.userId, body.username));
       }),
     },
     "/api/auth/logout": {

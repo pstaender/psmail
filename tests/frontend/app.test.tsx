@@ -174,6 +174,8 @@ const downloadAccounts: string[] = []; // the account of each of those POSTs
 const capturedResultPatches: Record<string, unknown>[] = [];
 // Bodies of POST /api/auth/change-password.
 const passwordChanges: Record<string, unknown>[] = [];
+// Bodies of POST /api/auth/change-username.
+const usernameChanges: { username: string }[] = [];
 // Every bulk PATCH/DELETE/move request, with the account it went to.
 // The `scope` param of every GET .../contacts call.
 const contactRequests: (string | null)[] = [];
@@ -237,6 +239,8 @@ function installMockFetch(
     otherAccountContacts?: boolean;
     /** Replaces the combined Inbox's rows (default: one starred message). */
     unifiedInboxRows?: Record<string, unknown>[];
+    /** Makes POST /api/auth/change-username answer with this error (status 409) instead of succeeding. */
+    changeUsernameError?: string;
     /** Makes POST /api/auth/change-password answer with this error (status 401) instead of succeeding. */
     changePasswordError?: string;
     /** What GET /api/unified/inbox/new answers when asked with an afterId (without one it just reports latestId: 100). */
@@ -260,6 +264,7 @@ function installMockFetch(
   downloadAccounts.length = 0;
   capturedResultPatches.length = 0;
   passwordChanges.length = 0;
+  usernameChanges.length = 0;
   bulkRequests.length = 0;
   loginPosts.length = 0;
   emailPatches.length = 0;
@@ -403,6 +408,12 @@ function installMockFetch(
         return jsonResponse(all.slice(offset, offset + limit));
       }
       return jsonResponse([EMAIL, SECOND_EMAIL, THIRD_EMAIL, DRAFT_EMAIL]);
+    }
+    if (method === "POST" && path === "/api/auth/change-username") {
+      const body = JSON.parse(init!.body as string) as { username: string };
+      usernameChanges.push(body);
+      if (opts.changeUsernameError) return jsonResponse({ error: opts.changeUsernameError }, 409);
+      return jsonResponse({ id: 1, username: body.username.trim() });
     }
     if (method === "POST" && path === "/api/auth/change-password") {
       passwordChanges.push(init?.body ? JSON.parse(init.body as string) : {});
@@ -3052,6 +3063,66 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await userEvent.click(screen.getByTitle("Settings"));
       await screen.findByRole("tab", { name: "Inboxes" });
     }
+
+    describe("the username", () => {
+      async function openCredentials() {
+        await openSettings();
+        await userEvent.click(screen.getByRole("tab", { name: "Credentials" }));
+        return (await screen.findByLabelText("Username")) as HTMLInputElement;
+      }
+      const rename = () => screen.getByRole("button", { name: "Rename" });
+
+      test("Credentials starts with the username, filled in; Rename is off until it is changed", async () => {
+        const field = await openCredentials();
+        expect(field.value).toBe("default");
+        expect(rename().hasAttribute("disabled")).toBe(true);
+
+        await userEvent.clear(field);
+        expect(rename().hasAttribute("disabled")).toBe(true); // empty
+        await userEvent.type(field, "  default  ");
+        expect(rename().hasAttribute("disabled")).toBe(true); // only spaces around it
+        await userEvent.clear(field);
+        await userEvent.type(field, "philipp");
+        expect(rename().hasAttribute("disabled")).toBe(false);
+      });
+
+      test("renaming sends the new name and updates this browser's session and the dialog", async () => {
+        const field = await openCredentials();
+        await userEvent.clear(field);
+        await userEvent.type(field, "  philipp ");
+        await userEvent.click(rename());
+
+        await waitFor(() => expect(usernameChanges).toEqual([{ username: "philipp" }]));
+        expect((await screen.findAllByText('Your username is now "philipp".')).length).toBeGreaterThan(0);
+        expect(field.value).toBe("philipp");
+        expect(JSON.parse(localStorage.getItem("psmail.session")!).username).toBe("philipp");
+        expect(screen.getByText("For philipp")).toBeTruthy(); // the dialog's subtitle names the new user
+        expect(rename().hasAttribute("disabled")).toBe(true);
+      });
+
+      test("a name that is taken is refused and shown, and nothing changes", async () => {
+        installMockFetch({ changeUsernameError: 'Username "secure" already exists' });
+        const field = await openCredentials();
+        await userEvent.clear(field);
+        await userEvent.type(field, "secure");
+        await userEvent.click(rename());
+
+        expect(await screen.findByText('Username "secure" already exists')).toBeTruthy();
+        expect(JSON.parse(localStorage.getItem("psmail.session")!).username).toBe("default");
+        expect(field.value).toBe("secure"); // left for the user to change
+      });
+
+      test("the passkey unlock of the old name is removed (it is bound to the name), with a note", async () => {
+        localStorage.setItem("psmail.passkeyVault.default", JSON.stringify({ v: 2, entries: [{ credentialId: "abc", salt: "s", iv: "i", ciphertext: "c", addedAt: "2026-01-01" }] }));
+        const field = await openCredentials();
+        await userEvent.clear(field);
+        await userEvent.type(field, "philipp");
+        await userEvent.click(rename());
+
+        expect((await screen.findAllByText(/passkey unlock for the old name was removed/)).length).toBeGreaterThan(0);
+        expect(localStorage.getItem("psmail.passkeyVault.default")).toBeNull();
+      });
+    });
 
     test("the settings are split into Inboxes, Notifications and Credentials tabs", async () => {
       await openSettings();

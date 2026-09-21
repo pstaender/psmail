@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AiSettings } from "./AiSettings";
 import { PasswordForm } from "./PasswordForm";
+import { UsernameForm } from "./UsernameForm";
 import type { UserSettings } from "@/lib/api";
 import { DEFAULT_NOTIFICATION_SOUND, NOTIFICATION_SOUNDS, playNotificationSound } from "@/lib/notifications";
 
@@ -124,7 +125,11 @@ export function SettingsDialog({
         </Tabs>
 
         {tab === "credentials" ? (
-          <PasswordForm />
+          <div className="space-y-5">
+            <UsernameForm />
+            <div className="border-t" />
+            <PasswordForm key={username} />
+          </div>
         ) : tab === "ai" ? (
           <AiSettings settings={settings} onSaveLanguage={onSaveLanguage} onChanged={onAiChanged} />
         ) : (
