@@ -1,3 +1,11 @@
+2026-09-21 - Settings: UI tab with opt-in interface options (9220d26)
+Settings has a new "UI" tab (between Inboxes and Notifications) with four options. All are off by default, so P.S.Mail starts plain and distraction-free and you turn on what you want:
+- Show conversations: the conversation marks in the lists, the conversation bar and "See your reply". When off, the conversation isn't even fetched.
+- Show categories: the category chips in the lists, and "Filter by category..." in the More menu.
+- Show unread badges: the counts next to the Inbox, Imbox and each folder.
+- Always show the text view: the reading pane offers only Text (no MD, Plain, Safe HTML, HTML). Translation and Summary tabs still show when a message has them, a message without text keeps the usual tabs, and the tab you picked earlier is not overwritten.
+The options are saved per user on the server (showConversations, showCategories, showUnreadBadges, textViewOnly) and validated as true/false/null. Existing users therefore see the plain client until they switch these on. Backend 475 pass, frontend 354 pass, build OK.
+
 2026-09-21 - Choose among found models (8f82f42)
 When "Find models" finds more than one model, the model field becomes a dropdown ("Choose a model...") so you pick one yourself; nothing is chosen for you. With exactly one model, it is filled in directly. Switching the vendor clears the found list. Frontend tests: 349 pass.
 
