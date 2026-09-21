@@ -1,3 +1,9 @@
+2026-09-21 - OpenAI-compatible AI vendor (de48e1a)
+There is a new AI provider vendor, "OpenAI-compatible (LM Studio, vLLM, …)". It talks to any server that speaks the OpenAI chat-completions API: LM Studio, vLLM, llama.cpp's server, LocalAI, OpenRouter and so on. I chose the general name so it isn't read as LM Studio only; the list entry names LM Studio and vLLM as examples.
+The API key is optional (like Ollama). The address defaults to LM Studio's http://localhost:1234/v1, and a bare http://host:port gets /v1 added. A key, if given, is sent as a bearer token. A reasoning model's <think>...</think> is dropped from the answer, and token usage comes from the server. If the server doesn't answer, the error says which address to check.
+In the provider form, "Find models" (also for Ollama) asks the server which models it has, offers them in the model field and fills in the first one if the field is empty. It uses a new POST /api/ai/models.
+Tested against the LM Studio running on localhost:1234: model list, and a real completion ("Ping" -> "Pong", with token counts). Unit tests cover the adapter, address handling, model lists and the form; a live test runs only when a server is reachable. Backend 474 pass, frontend 349 pass, build OK.
+
 P.S.Mail changelog
 ==================
 
