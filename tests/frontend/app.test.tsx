@@ -3857,7 +3857,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(providers).toEqual(["OpenAI.gpt-5", "Work Claude"]);
     });
 
-    test("an OpenAI-compatible provider needs no key, suggests the LM Studio address and can look up the server's models", async () => {
+    test("an OpenAI-compatible provider needs no key, suggests the LM Studio address and lets you choose among the server's models", async () => {
       installMockFetch();
       await login();
       await openAiTab();
@@ -3867,8 +3867,13 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect((screen.getByLabelText(/Address/) as HTMLInputElement).placeholder).toBe("http://localhost:1234/v1");
 
       await userEvent.click(screen.getByRole("button", { name: "Find models" }));
-      await waitFor(() => expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe("qwen/qwen3-8b")); // the first one is filled in
+      // Several models: the user chooses one (nothing is picked for them).
+      const choice = (await screen.findByLabelText("Model")) as HTMLSelectElement;
+      expect(choice.tagName).toBe("SELECT");
+      expect(choice.value).toBe("");
+      expect(Array.from(choice.options).map(o => o.value)).toEqual(["", "qwen/qwen3-8b", "llama-3"]);
       expect(calls("POST", "/api/ai/models")).toEqual([{ vendor: "openai-compatible", baseUrl: null, apiId: null }]);
+      await userEvent.selectOptions(choice, "qwen/qwen3-8b");
 
       await userEvent.click(screen.getByRole("button", { name: "Save provider" }));
       await waitFor(() => expect(calls("POST", "/api/ai/apis")).toEqual([expect.objectContaining({ vendor: "openai-compatible", model: "qwen/qwen3-8b" })]));

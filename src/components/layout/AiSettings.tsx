@@ -95,7 +95,7 @@ export function AiSettings({
       const found = await api.listAiModels(token, { vendor: apiForm.vendor, baseUrl: apiForm.baseUrl.trim() || null, apiKey: apiForm.apiKey.trim() || undefined, apiId: apiForm.id });
       setModels(found.models);
       if (found.models.length === 0) toast.info("The server doesn't list any model — load one first.");
-      else if (!apiForm.model.trim()) setApiForm({ ...apiForm, model: found.models[0]! });
+      else if (found.models.length === 1) setApiForm({ ...apiForm, model: found.models[0]! }); // with several, the user picks
     } catch (err) {
       setModels([]);
       setError(message(err));
@@ -268,7 +268,10 @@ export function AiSettings({
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="ai-api-vendor">Vendor</Label>
-                <select id="ai-api-vendor" className={SELECT_CLASS} value={apiForm.vendor} onChange={e => setApiForm({ ...apiForm, vendor: e.target.value as AiVendor })}>
+                <select id="ai-api-vendor" className={SELECT_CLASS} value={apiForm.vendor} onChange={e => {
+                    setModels([]);
+                    setApiForm({ ...apiForm, vendor: e.target.value as AiVendor });
+                  }}>
                   {AI_VENDORS.map(vendor => (
                     <option key={vendor} value={vendor}>
                       {VENDOR_LABELS[vendor]}
@@ -278,12 +281,18 @@ export function AiSettings({
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="ai-api-model">Model</Label>
-                <Input id="ai-api-model" list="ai-api-models" placeholder={MODEL_EXAMPLES[apiForm.vendor]} value={apiForm.model} onChange={e => setApiForm({ ...apiForm, model: e.target.value })} />
-                <datalist id="ai-api-models">
-                  {models.map(name => (
-                    <option key={name} value={name} />
-                  ))}
-                </datalist>
+                {models.length > 1 ? (
+                  <select id="ai-api-model" className={SELECT_CLASS} value={apiForm.model} onChange={e => setApiForm({ ...apiForm, model: e.target.value })}>
+                    <option value="">Choose a model…</option>
+                    {(models.includes(apiForm.model) || !apiForm.model ? models : [apiForm.model, ...models]).map(name => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <Input id="ai-api-model" placeholder={MODEL_EXAMPLES[apiForm.vendor]} value={apiForm.model} onChange={e => setApiForm({ ...apiForm, model: e.target.value })} />
+                )}
               </div>
             </div>
             <div className="space-y-1.5">
