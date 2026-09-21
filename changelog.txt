@@ -1,3 +1,7 @@
+2026-09-21 - CLI: sign in as the profile that owns the account (6ef8297)
+bun run cli summarize / imbox classify / imbox explain assumed the profile "default" when --user was missing, even if the account you named belongs to another profile (e.g. philipp). Now, without --user, they look for the profile that owns the named account address: "default" first, then the others, trying the same password on each. The output says which profile it signed in as. A profile with a password of its own is asked for it (interactive terminal, empty skips it); otherwise the error names it so you can pass --user.
+With --user, that profile must own the account; if not, the error says which accounts it has instead. Without an account address, "default" is used as before. An empty PSMAIL_PASSWORD is now accepted as a (passwordless) password. Backend 483 pass.
+
 2026-09-21 - CLI: summarize stored mail (1fe91dc)
 New command: bun run cli summarize [account@example.com ...] [--folder <name>] [--force] [--verbose] --user <username>. It runs your Summarize skill over stored mail like the Summarize button (with categories and dates when those skills exist).
 Default: every account and every folder, newest first, only messages without a summary. An account address limits it to that account, --folder to one folder (case doesn't matter), --force summarizes again, --verbose prints each summary.
