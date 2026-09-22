@@ -23,7 +23,7 @@ import { getEmail, getEmailRow, setEmailAiFields } from "../models/emails";
 import { getUserSettings } from "../models/userSettings";
 import { complete, emailTextForAi, listModels, parseTaxonomy, runSkill } from "../services/ai";
 import { icsFromAnswer } from "../services/ics";
-import { ApiError, NotFoundError } from "../types";
+import { AiTimeoutError, ApiError, NotFoundError } from "../types";
 import { getOwnedAccountByEmailParam } from "./accounts";
 
 const DEFAULT_LANGUAGE = "English";
@@ -117,8 +117,9 @@ export function aiRoutes(db: Database) {
    * Summarizes the stored mail of the chosen accounts one message at a time (newest first, so an interrupted run has done the most
    * useful part), reporting through `send`: `start`, `account`, `working` (before each AI call — they can take long), `message` (after
    * it; with `verbose` incl. the summary), `progress`, `account-done`, `done`. Without `force` only messages without a summary; `folder`
-   * limits it to one folder. A message that fails is reported and skipped; five failures in a row (a wrong key, a server that is
-   * down) stop that account instead of grinding through the rest.
+   * limits it to one folder. A message that fails is reported and skipped and the batch moves on to the next one; a timeout (the AI
+   * took too long to answer) never stops anything by itself, however many happen in a row — only five non-timeout failures in a
+   * row (a wrong key, a server that rejects the request outright) stop that account instead of grinding through the rest.
    */
   async function summarizeBatch(
     userId: number,
@@ -189,9 +190,12 @@ export function aiRoutes(db: Database) {
           });
         } catch (error) {
           failed++;
-          inARow++;
-          send({ type: "message", account: account.email, id, folder: email.folder, subject, from, ok: false, error: error instanceof Error ? error.message : String(error) });
-          if (inARow >= 5) {
+          // A slow/unresponsive AI provider is logged like any other failure, but never counts toward the "stop this account"
+          // circuit breaker below — only a hard failure (wrong key, model gone) that repeats does.
+          const timedOut = error instanceof AiTimeoutError;
+          if (!timedOut) inARow++;
+          send({ type: "message", account: account.email, id, folder: email.folder, subject, from, ok: false, error: error instanceof Error ? error.message : String(error), ...(timedOut ? { timedOut: true } : {}) });
+          if (!timedOut && inARow >= 5) {
             stopped = `stopped after ${inARow} failures in a row`;
             break;
           }

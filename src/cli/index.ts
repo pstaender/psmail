@@ -286,6 +286,8 @@ async function cmdSummarize(argv: string[]) {
           if (event.summary) console.log(event.summary.split("\n").map(line => `              ${line}`).join("\n"));
         } else if (event.skipped) {
           console.log(`  skipped     ${label} (${event.skipped})`);
+        } else if (event.timedOut) {
+          console.log(`  TIMED OUT   ${label}\n              ${event.error} — logged, moving on`);
         } else {
           console.log(`  FAILED      ${label}\n              ${event.error}`);
         }

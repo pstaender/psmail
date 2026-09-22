@@ -29,7 +29,7 @@ export type SummarizeEvent =
   | { type: "working"; account: string; id: number; folder: string; subject: string | null; from: string; done: number; total: number }
   | ({ type: "message"; account: string; id: number; folder: string; subject: string | null; from: string } & (
       | { ok: true; seconds: number; categories: string[]; dates: number; warnings: string[]; summary?: string }
-      | { ok: false; skipped?: string; error?: string }
+      | { ok: false; skipped?: string; error?: string; timedOut?: boolean }
     ))
   | { type: "progress"; account: string; done: number; total: number; summarized: number; failed: number }
   | ({ type: "account-done" } & SummarizeResult)

@@ -148,6 +148,46 @@ describe("summarizing stored mail in bulk (psmail summarize)", () => {
     expect(failures[0]).toMatchObject({ error: expect.stringContaining("invalid x-api-key") });
     expect(events.find(e => e.type === "account-done")).toMatchObject({ examined: 5, summarized: 0, failed: 5, skipped: "stopped after 5 failures in a row" });
   });
+
+  test("a timeout is logged and the batch moves on to the next message — any number of them in a row, never stopping the account", async () => {
+    db.query("UPDATE emails SET ai_summary = NULL").run();
+    // A fresh batch of 7 messages: more than the "5 failures in a row" threshold that applies to hard failures.
+    const addedNow = new Set<number>();
+    for (let i = 0; i < 7; i++) addedNow.add(addMail(accountIds[1]!, "INBOX", `B timeout ${i}`, `2026-04-0${i + 1}T00:00:00Z`));
+    aiHttp.fetch = async () => {
+      throw Object.assign(new Error("The operation was aborted"), { name: "TimeoutError" });
+    };
+    const client = new ApiClient(base);
+    client.setToken(token);
+    const events: SummarizeEvent[] = [];
+    await client.summarizeStream({ accounts: ["b@example.com"], force: false, verbose: false }, e => events.push(e));
+
+    const failures = events.filter(e => e.type === "message" && !e.ok) as { id: number; timedOut?: boolean }[];
+    // Every message in this batch was attempted — none skipped by a circuit breaker — and the new ones are among them.
+    expect(addedNow.size).toBeLessThanOrEqual(failures.length);
+    expect([...addedNow].every(id => failures.some(f => f.id === id))).toBe(true);
+    expect(failures.every(e => e.timedOut)).toBe(true);
+    expect(failures[0]).toMatchObject({ error: expect.stringContaining("it didn't answer in time") });
+    const done = events.find(e => e.type === "account-done") as { examined: number; summarized: number; failed: number; skipped?: string };
+    expect(done.failed).toBe(failures.length);
+    expect(done.skipped).toBeUndefined(); // not stopped — timeouts don't count toward the circuit breaker
+
+    // A mix: timeouts never contribute to the "5 in a row" count, but a real failure in between still does when repeated.
+    db.query("UPDATE emails SET ai_summary = NULL").run();
+    let call = 0;
+    aiHttp.fetch = async () => {
+      call++;
+      if (call % 2 === 1) throw Object.assign(new Error("aborted"), { name: "TimeoutError" }); // odd calls: timeout
+      return new Response(JSON.stringify({ error: { message: "invalid x-api-key" } }), { status: 401 }); // even calls: a hard failure
+    };
+    const mixed: SummarizeEvent[] = [];
+    await client.summarizeStream({ accounts: ["b@example.com"], force: false, verbose: false }, e => mixed.push(e));
+    const mixedFailures = mixed.filter(e => e.type === "message" && !e.ok) as { timedOut?: boolean }[];
+    // 5 non-timeout ("hard") failures interleaved with timeouts still triggers the breaker — just later than 5 raw failures would.
+    expect(mixedFailures.filter(e => !e.timedOut)).toHaveLength(5);
+    const mixedDone = mixed.find(e => e.type === "account-done") as { skipped?: string };
+    expect(mixedDone.skipped).toBe("stopped after 5 failures in a row");
+  });
 });
 
 describe("the command line", () => {

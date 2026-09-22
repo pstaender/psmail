@@ -125,6 +125,14 @@ export class ApiError extends Error {
   }
 }
 
+/** An AI provider that didn't answer in time (see services/ai.ts's TIMEOUT_MS) — distinguished so a batch (the CLI's summarize) can tell
+ * "this one call was slow" from a hard failure (wrong key, model gone) and keep going instead of giving up on the account. */
+export class AiTimeoutError extends ApiError {
+  constructor(message: string) {
+    super(502, message);
+  }
+}
+
 export class NotFoundError extends ApiError {
   constructor(message = "Not found") {
     super(404, message);

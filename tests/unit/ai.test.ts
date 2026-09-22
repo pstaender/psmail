@@ -22,6 +22,7 @@ import { parseJsonArray } from "../../src/server/services/jsonAnswer";
 import { parseEventsAnswer } from "../../src/server/services/ics";
 import { aiHttp, aiLog, complete, emailTextForAi, listModels, parseTaxonomy, renderPrompt } from "../../src/server/services/ai";
 import { SKILL_DEFAULTS, AI_CATEGORIES, defaultApiLabel } from "../../src/ai/categories";
+import { AiTimeoutError, ApiError } from "../../src/server/types";
 
 const key = deriveEncryptionKey("pw", generateSalt());
 
@@ -314,6 +315,26 @@ describe("talking to the vendors", () => {
 
     stub({ choices: [{ message: { content: "  " } }] });
     await expect(complete({ id: 1, vendor: "openai", model: "m", baseUrl: null, apiKey: "k" }, "s", "u")).rejects.toThrow(/empty answer/);
+  });
+
+  test("a timeout is a distinct AiTimeoutError — a plain connection failure isn't", async () => {
+    aiHttp.fetch = async () => {
+      throw Object.assign(new Error("The operation was aborted"), { name: "TimeoutError" });
+    };
+    await expect(complete({ id: 1, vendor: "openai", model: "m", baseUrl: null, apiKey: "k" }, "s", "u")).rejects.toThrow(AiTimeoutError);
+    await expect(complete({ id: 1, vendor: "openai", model: "m", baseUrl: null, apiKey: "k" }, "s", "u")).rejects.toThrow(/it didn't answer in time/);
+
+    aiHttp.fetch = async () => {
+      throw new TypeError("fetch failed");
+    };
+    let caught: unknown;
+    try {
+      await complete({ id: 1, vendor: "openai", model: "m", baseUrl: null, apiKey: "k" }, "s", "u");
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).not.toBeInstanceOf(AiTimeoutError);
+    expect(caught).toBeInstanceOf(ApiError);
   });
 
   test("a very long text is cut before it is sent", async () => {

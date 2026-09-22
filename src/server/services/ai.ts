@@ -2,7 +2,7 @@ import { DEFAULT_ADDRESSES, VENDOR_LABELS, type AiCategory, type AiVendor } from
 import type { AiApiConfig, AiSkillRecord, AiUsage } from "../models/ai";
 import { peekSettings } from "../config/settings";
 import { ANY_QUOTES_AT_ENDS, parseJsonArray } from "./jsonAnswer";
-import { ApiError } from "../types";
+import { AiTimeoutError, ApiError } from "../types";
 
 /**
  * The HTTP client the AI calls go through — a single object so tests can replace `fetch` for just these
@@ -164,8 +164,9 @@ export async function complete(api: AiApiConfig, system: string, user: string): 
     response = await aiHttp.fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch (error) {
     if (log) aiLog.write(`[ai] ✗ ${callId}  no answer after ${Date.now() - started} ms: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`);
-    const reason = error instanceof Error && error.name === "TimeoutError" ? "it didn't answer in time" : "it couldn't be reached";
-    throw new ApiError(502, `${vendorLabel}: ${reason}${localServerHint(api.vendor, api.baseUrl)}.`);
+    const timedOut = error instanceof Error && error.name === "TimeoutError";
+    const message = `${vendorLabel}: ${timedOut ? "it didn't answer in time" : "it couldn't be reached"}${localServerHint(api.vendor, api.baseUrl)}.`;
+    throw timedOut ? new AiTimeoutError(message) : new ApiError(502, message);
   }
 
   const text = await response.text();
