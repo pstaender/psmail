@@ -1,3 +1,7 @@
+2026-09-22 - CLI summarize: timeouts no longer stop the batch (0782042)
+bun run cli summarize had a "stop after 5 failures in a row" safety net meant for things like a wrong API key, but it also counted AI timeouts (the provider took too long to answer) toward that count -- so a slow or overloaded server could abort an account partway through. Timeouts are now logged and skipped like any other failure, but never count toward the circuit breaker, however many happen in a row; only five non-timeout failures in a row (wrong key, request rejected outright) still stop an account. The CLI marks a timed-out message as "TIMED OUT ... logged, moving on" instead of "FAILED".
+Under the hood: services/ai.ts now throws a distinct AiTimeoutError for a request that timed out, and the batch (also used by the Summarize button's endpoint) only counts other errors toward the stop condition. Backend 490 pass, frontend 364 pass, build OK.
+
 2026-09-21 - Filter menu: uniform check items (a40cdb3)
 In the More menu the filters now look and work alike: Favorites, Read and Unread (no star icon, no "only", and no "Read and unread" entry) are check items with a checkmark when selected, and "Filter by category..." also shows a checkmark while categories are chosen. Only "Filter by date..." stays a plain entry. Read and Unread toggle independently: if only one is selected it filters; with both selected, or neither, nothing is filtered by read state. The chips under the list header show only filters that are in effect. Frontend tests: 364 pass.
 
