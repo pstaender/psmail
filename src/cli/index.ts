@@ -239,6 +239,57 @@ async function classifyCommand(client: ApiClient, accounts: string[] | undefined
  * (plus categories and dates when those skills exist): every account and every folder by default, only messages without a summary
  * unless --force. One AI call can take a while, so each message is announced before it is sent.
  */
+/**
+ * Runs one streamed summarize call and, if the connection itself drops mid-run (a network hiccup, or just a very long total
+ * duration — the whole batch rides one HTTP response) — as opposed to a real answer from the server, a `CliApiError`, which is
+ * never retried — reconnects and resumes instead of losing everything done so far. An account that already finished (its
+ * `account-done` arrived) isn't asked for again; within an account that hadn't finished, `/api/ai/summarize` itself only
+ * redoes messages without a summary unless `--force`, so a resumed run picks up close to where it left off. Gives up after
+ * `maxReconnects` drops in a row (a server that is genuinely gone, not just a blip). Totals are the true grand total across every
+ * attempt, added up from each account's own `account-done` (which fires exactly once per account, whichever attempt did it).
+ */
+export async function runSummarizeWithReconnect(
+  attempt: (accounts: string[] | undefined, onEvent: (event: SummarizeEvent) => void) => Promise<SummarizeEvent & { type: "done" }>,
+  initialAccounts: string[] | undefined,
+  onEvent: (event: SummarizeEvent) => void,
+  options: { onReconnect?: (message: string, attemptNumber: number) => void; sleep?: (ms: number) => Promise<void>; maxReconnects?: number } = {}
+): Promise<{ summarized: number; failed: number; reconnects: number }> {
+  const sleep = options.sleep ?? ((ms: number) => Bun.sleep(ms));
+  const maxReconnects = options.maxReconnects ?? 20;
+  let accountsToRequest = initialAccounts;
+  const finishedAccounts = new Set<string>();
+  // A plain object, not a bare `let`: reassigned only from the `track` closure below, and TypeScript's narrowing loses track of a
+  // `let`'s type across a closure invoked through an opaque callback parameter — this keeps `resolved.accounts` typed correctly.
+  const resolved: { accounts: string[] | null } = { accounts: null };
+  let reconnects = 0;
+  let summarized = 0;
+  let failed = 0;
+
+  const track = (event: SummarizeEvent) => {
+    onEvent(event);
+    if (event.type === "start") resolved.accounts = event.accounts;
+    if (event.type === "account-done" && !finishedAccounts.has(event.account)) {
+      finishedAccounts.add(event.account);
+      summarized += event.summarized;
+      failed += event.failed;
+    }
+  };
+
+  for (;;) {
+    try {
+      await attempt(accountsToRequest, track);
+      return { summarized, failed, reconnects };
+    } catch (error) {
+      if (error instanceof CliApiError) throw error; // the server answered with a real error — retrying won't fix that
+      reconnects++;
+      if (reconnects > maxReconnects) throw error;
+      options.onReconnect?.(error instanceof Error ? error.message : String(error), reconnects);
+      if (resolved.accounts !== null) accountsToRequest = resolved.accounts.filter(a => !finishedAccounts.has(a));
+      await sleep(Math.min(reconnects, 10) * 1000);
+    }
+  }
+}
+
 async function cmdSummarize(argv: string[]) {
   const { positionals, flags } = parseFlags(argv);
   // `--force a@b.example` would read the address as the flag's value; these flags take none.
@@ -312,7 +363,19 @@ async function cmdSummarize(argv: string[]) {
     }
   };
 
-  await client.summarizeStream({ accounts: positionals.length > 0 ? positionals : undefined, folder, force, verbose }, onEvent);
+  const { summarized, failed, reconnects } = await runSummarizeWithReconnect(
+    (accounts, handler) => client.summarizeStream({ accounts, folder, force, verbose }, handler),
+    positionals.length > 0 ? positionals : undefined,
+    onEvent,
+    {
+      onReconnect: (message, attempt) =>
+        console.error(`\nConnection to the server was lost (${message}). Reconnecting and resuming (attempt ${attempt}) …`),
+    }
+  );
+  if (reconnects > 0) {
+    console.log(`\nReconnected ${reconnects} time(s) after the connection dropped: ${summarized} message(s) summarized in total across the whole run${failed > 0 ? `, ${failed} failed` : ""}.`);
+    if (failed > 0) process.exitCode = 1;
+  }
 }
 
 function printUsage() {
