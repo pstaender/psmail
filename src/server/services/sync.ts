@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { getEmailAttachmentsDir, sanitizeSegment } from "../config/paths";
 import { classifyAndStore, createImboxContext, isImboxFolder, type ImboxContext } from "../models/imbox";
-import { addAttachment, createEmail, deleteEmail, findEmailByUid, listSyncedRefs, updateEmail } from "../models/emails";
+import { addAttachment, createEmail, deleteEmail, findEmailByUid, findSentPlaceholderByMessageId, listSyncedRefs, updateEmail } from "../models/emails";
 import { completeDownloadJob, failDownloadJob, startDownloadJob, updateDownloadProgress, updateDownloadTotal } from "../models/downloads";
 import { isAccountDisabled, learnSpecialFolders, type AccountRow } from "../models/accounts";
 import { isUidDeleted, listDeletedUids, maxDeletedUid, removeDeletedUids } from "../models/tombstones";
@@ -221,53 +221,61 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
       if (!findEmailByUid(db, account.id, folderPath, message.uid) && !isUidDeleted(db, account.id, folderPath, message.uid)) {
         const parsed = await parseMessage(message.source);
 
-        const email = createEmail(db, account.id, {
-          folder: folderPath,
-          uid: message.uid,
-          isDraft: false,
-          isRead: false,
-          messageId: parsed.messageId,
-          inReplyTo: parsed.inReplyTo,
-          from: parsed.from,
-          to: parsed.to,
-          cc: parsed.cc,
-          bcc: parsed.bcc,
-          replyTo: parsed.replyTo,
-          subject: parsed.subject,
-          date: parsed.date,
-          returnPath: parsed.returnPath,
-          received: parsed.received,
-          mimeVersion: parsed.mimeVersion,
-          contentType: parsed.contentType,
-          authenticationResults: parsed.authenticationResults,
-          dkim: parsed.dkim,
-          spf: parsed.spf,
-          plainText: parsed.plainText,
-          htmlText: parsed.htmlText,
-          headersRaw: parsed.headersRaw,
-          size: message.size,
-        });
+        // Not a message the server is showing us for the first time — this app sent it, and already stored it under this
+        // same Message-ID without a UID (see findSentPlaceholderByMessageId's own comment). Attach the real UID instead of
+        // storing a duplicate; the placeholder already has the full content, from composing it locally.
+        const placeholder = parsed.messageId ? findSentPlaceholderByMessageId(db, account.id, folderPath, parsed.messageId) : null;
+        if (placeholder) {
+          updateEmail(db, placeholder.id, { uid: message.uid });
+        } else {
+          const email = createEmail(db, account.id, {
+            folder: folderPath,
+            uid: message.uid,
+            isDraft: false,
+            isRead: false,
+            messageId: parsed.messageId,
+            inReplyTo: parsed.inReplyTo,
+            from: parsed.from,
+            to: parsed.to,
+            cc: parsed.cc,
+            bcc: parsed.bcc,
+            replyTo: parsed.replyTo,
+            subject: parsed.subject,
+            date: parsed.date,
+            returnPath: parsed.returnPath,
+            received: parsed.received,
+            mimeVersion: parsed.mimeVersion,
+            contentType: parsed.contentType,
+            authenticationResults: parsed.authenticationResults,
+            dkim: parsed.dkim,
+            spf: parsed.spf,
+            plainText: parsed.plainText,
+            htmlText: parsed.htmlText,
+            headersRaw: parsed.headersRaw,
+            size: message.size,
+          });
 
-        if (parsed.attachments.length > 0) {
-          const dir = getEmailAttachmentsDir(username, account.email, email.id);
-          await Bun.$`mkdir -p ${dir}`.quiet();
+          if (parsed.attachments.length > 0) {
+            const dir = getEmailAttachmentsDir(username, account.email, email.id);
+            await Bun.$`mkdir -p ${dir}`.quiet();
 
-          for (const attachment of parsed.attachments) {
-            const safeName = sanitizeSegment(attachment.filename);
-            const filePath = join(dir, safeName);
-            await Bun.write(filePath, attachment.content);
-            addAttachment(db, email.id, {
-              filename: attachment.filename,
-              contentType: attachment.contentType,
-              contentId: attachment.contentId,
-              isInline: attachment.isInline,
-              size: attachment.size,
-              filePath,
-            });
+            for (const attachment of parsed.attachments) {
+              const safeName = sanitizeSegment(attachment.filename);
+              const filePath = join(dir, safeName);
+              await Bun.write(filePath, attachment.content);
+              addAttachment(db, email.id, {
+                filename: attachment.filename,
+                contentType: attachment.contentType,
+                contentId: attachment.contentId,
+                isInline: attachment.isInline,
+                size: attachment.size,
+                filePath,
+              });
+            }
           }
-        }
 
-        classifyForImbox(email.id, folderPath);
+          classifyForImbox(email.id, folderPath);
+        }
       }
 
       downloaded += 1;

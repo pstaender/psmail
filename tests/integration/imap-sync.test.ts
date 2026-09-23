@@ -195,6 +195,39 @@ describe.skipIf(!RUN)("IMAP sync against a real server (Greenmail)", () => {
     expect(match).toBeDefined();
   });
 
+  test("sending from a read-only account still files the local copy under the account's real Sent folder, without writing to the server", async () => {
+    // A read-only account must never append — but it can still read (list folders), which is all resolving the real Sent
+    // path needs; before the fix this fell back to a hardcoded "Sent" instead, which is wrong for a server that calls it
+    // something else (e.g. Gmail's "[Gmail]/Sent Mail") and made the message look like it never arrived.
+    const roToggle = await api("PATCH", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}`, { token, body: { readOnly: true } });
+    expect(roToggle.status).toBe(200);
+
+    const draft = await api("POST", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/emails`, {
+      token,
+      body: {
+        from: [{ address: MAILBOX_EMAIL }],
+        to: [{ address: MAILBOX_EMAIL }],
+        subject: "Read-only account, sent-folder placement",
+        plainText: "Should file under the real Sent folder, not a guess.",
+      },
+    });
+    expect(draft.status).toBe(201);
+
+    const sent = await api("POST", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/emails/${draft.json.id}/send`, {
+      token,
+    });
+    expect(sent.status).toBe(200);
+    expect(sent.json.uid).toBeNull(); // nothing was appended — a read-only account never writes
+
+    const folders = await api("GET", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/folders`, { token });
+    const realSent = folders.json.find((f: { specialUse: string | null }) => f.specialUse === "\\Sent");
+    expect(realSent).toBeDefined();
+    expect(sent.json.folder).toBe(realSent.path); // resolved from the live listing, not a hardcoded guess
+
+    // Restore write access for the tests that follow.
+    expect((await api("PATCH", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}`, { token, body: { readOnly: false } })).status).toBe(200);
+  });
+
   test("deleting a synced message soft-deletes (moves to Trash) once UIDPLUS support is confirmed", async () => {
     const check = await api("POST", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/imap-capabilities`, { token });
     expect(check.status).toBe(200);

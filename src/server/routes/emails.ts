@@ -479,20 +479,28 @@ export function emailsRoutes(db: Database) {
         // Sent path is resolved from the live IMAP listing (not assumed to be literally named
         // "Sent" — see resolveSpecialFolder), falling back to that literal if the connection fails
         // before it gets that far.
+        //
+        // Resolving the folder is a read — done even for a read-only account, so the message is filed under its account's
+        // real Sent folder (which often isn't literally named "Sent", e.g. Gmail's "[Gmail]/Sent Mail") instead of a
+        // fallback name that may not match anything in the sidebar, making the message look like it never arrived even
+        // though the provider likely saved its own copy there anyway (most do, on SMTP submission). Only the write — the
+        // actual append — is skipped for a read-only account.
         let sentUid: number | null = null;
         let sentFolder = SENT_FOLDER;
-        if (!account.read_only && !account.disabled) {
+        if (!account.disabled) {
           try {
             sentFolder = await withImapClient(imapCredentialsFor(account, imapPassword), async client => {
               const liveFolders = await listFolders(client);
               const target = resolveSpecialFolder(liveFolders, "\\Sent", SENT_FOLDER);
               learnSpecialFolders(db, account.id, liveFolders);
-              const result = await appendMessage(client, target, composed.raw, ["\\Seen"]);
-              sentUid = result.uid;
+              if (!account.read_only) {
+                const result = await appendMessage(client, target, composed.raw, ["\\Seen"]);
+                sentUid = result.uid;
+              }
               return target;
             });
           } catch (error) {
-            console.error(`Failed to append sent message to IMAP Sent folder for ${account.email}:`, error);
+            console.error(`Failed to resolve/append the Sent folder for ${account.email}:`, error);
           }
         }
 

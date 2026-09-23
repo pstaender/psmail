@@ -7,7 +7,7 @@ import { createUser } from "../../src/server/models/users";
 import { deriveEncryptionKey, generateSalt } from "../../src/server/crypto/secrets";
 import { createAccount, getAccountRow } from "../../src/server/models/accounts";
 import { createDownloadJob, getDownloadJob } from "../../src/server/models/downloads";
-import { findEmailByUid, getEmail, listEmails } from "../../src/server/models/emails";
+import { createEmail, findEmailByUid, findSentPlaceholderByMessageId, getEmail, listEmails } from "../../src/server/models/emails";
 import { performDelete } from "../../src/server/routes/emails";
 import { listDeletedUids } from "../../src/server/models/tombstones";
 import { isSyncableFolder, runSync } from "../../src/server/services/sync";
@@ -127,6 +127,46 @@ describe("runSync", () => {
     const job2 = getDownloadJob(db, job.id);
     expect(job2.status).toBe("completed");
     expect(job2.progressCurrent).toBe(3);
+  });
+
+  test("a message this app already sent — stored locally without a UID — is matched by Message-ID and given the real UID instead of being downloaded a second time", async () => {
+    const { db, user, account } = await setup();
+
+    // What POST .../send leaves behind when the server didn't confirm a UID at send time (a read-only account, whose own
+    // append is skipped on purpose, or a connection hiccup during the append): the full message, already in "Sent", uid null.
+    const placeholder = createEmail(db, account.id, {
+      folder: "Sent",
+      uid: null,
+      isDraft: false,
+      messageId: "<2@example.com>", // matches FAKE_MESSAGES' uid-2 message ("Second")
+      subject: "Second",
+      plainText: "My own composed body — not what the server's copy would parse to.",
+    });
+    expect(findSentPlaceholderByMessageId(db, account.id, "Sent", "<2@example.com>")?.id).toBe(placeholder.id);
+
+    const job = createDownloadJob(db, account.id, "Sent");
+    const result = await runSync({
+      db,
+      account,
+      username: user.username,
+      folder: "Sent",
+      downloadJobId: job.id,
+      imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      fetchMessages: fakeFetchMessages,
+      fetchRemoteFlags: fakeFetchRemoteFlagsNoop,
+    });
+
+    expect(result.downloaded).toBe(3); // still counted for progress, same as any other processed message
+
+    const stored = listEmails(db, account.id, { folder: "Sent" });
+    expect(stored.map(e => e.messageId).sort()).toEqual(["<1@example.com>", "<2@example.com>", "<3@example.com>"]); // no duplicate
+    expect(stored).toHaveLength(3);
+
+    const merged = getEmail(db, placeholder.id);
+    expect(merged.uid).toBe(2); // the UID FAKE_MESSAGES actually reports for this Message-ID
+    expect(merged.plainText).toBe("My own composed body — not what the server's copy would parse to."); // untouched — not overwritten by the server's copy
+    expect(findSentPlaceholderByMessageId(db, account.id, "Sent", "<2@example.com>")).toBeNull(); // no longer a placeholder, now it has a UID
+    expect(findEmailByUid(db, account.id, "Sent", 2)?.id).toBe(placeholder.id);
   });
 
   test("exposes download progress on the job row while messages are still being downloaded", async () => {

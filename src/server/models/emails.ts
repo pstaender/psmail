@@ -292,6 +292,20 @@ export function findEmailByUid(db: Database, accountId: number, folder: string, 
     .get(accountId, folder, uid);
 }
 
+/**
+ * A message this app itself sent (see the .../send route), stored right away but without a UID because the server didn't
+ * confirm one at send time — a read-only account (whose own IMAP append is skipped on purpose) or a connection hiccup during
+ * the append. A regular sync then finds it "for the first time" under a real UID; matching it here by Message-ID, instead of
+ * treating it as unseen, lets the sync attach the real UID to this same row rather than storing the message a second time.
+ */
+export function findSentPlaceholderByMessageId(db: Database, accountId: number, folder: string, messageId: string): EmailRow | null {
+  return db
+    .query<EmailRow, [number, string, string]>(
+      "SELECT * FROM emails WHERE account_id = ? AND folder = ? AND uid IS NULL AND is_draft = 0 AND message_id = ?"
+    )
+    .get(accountId, folder, messageId);
+}
+
 export interface SyncedEmailRef {
   id: number;
   uid: number;
