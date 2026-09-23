@@ -80,9 +80,12 @@ Override with `PSMAIL_CONFIG_DIR` (used by the test suite to avoid touching your
 ```json
 {
   "port": 3001,
+  "hostname": "127.0.0.1",
   "sessionTtlSeconds": 43200
 }
 ```
+
+`"hostname"` is the interface the server binds to, passed straight to `Bun.serve`; a fresh `settings.json` gets `"127.0.0.1"` written in, so a new install only answers local traffic. It's optional — remove it (or set it to `"0.0.0.0"`) to open the server up to the network, and a `settings.json` from before this setting existed simply doesn't have it, which behaves the same as before (every interface, Bun's own default) rather than suddenly locking out whatever was already reaching it.
 
 Optional: `"verboseAiApiCalls": true` makes every AI API call (summaries, categories, translations, Refine, the provider *Test*) verbose on the server's console — the one running `bun run dev`/`bun run start`: the request (vendor, model, URL, the system prompt and the text sent, cut after 4000 characters in the log), then the answer with its HTTP status, the time it took, the tokens ("(estimated)" when the service reported none) and the answer text, or what went wrong (HTTP error and body, no answer, not JSON, empty). The API key is never logged. Mail text ends up in the console with it, so it is off by default; settings are read at start, so restart the server after changing it.
 

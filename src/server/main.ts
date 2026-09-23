@@ -44,6 +44,9 @@ export async function startServer() {
 
   const server = Bun.serve({
     port: settings.port,
+    // Unset (an existing settings.json from before this setting existed) leaves it to Bun's own default, every
+    // interface — so nothing already relying on remote access is suddenly locked out by this change.
+    hostname: settings.hostname,
     routes,
     // Bun closes a connection whose response hasn't started after 10 s — silently, so the client just sees an
     // empty reply. Requests that talk to IMAP (folder lists, capability checks, bulk actions on a big mailbox) can

@@ -3,6 +3,13 @@ import { getConfigDir, getSettingsPath } from "./paths";
 export interface Settings {
   /** HTTP port the API server listens on. */
   port: number;
+  /**
+   * Interface the API server binds to; passed straight to Bun.serve. Optional: a freshly created settings.json gets
+   * "127.0.0.1" written in (local traffic only), but the field itself stays optional so an existing settings.json
+   * without it keeps working exactly as before (Bun's own default, every interface) rather than suddenly locking
+   * out whatever was reaching it. Set it to "0.0.0.0" (or leave it unset) to open the server up again.
+   */
+  hostname?: string;
   /** Session lifetime in seconds. */
   sessionTtlSeconds: number;
   /** Log every AI API call (what is sent, what comes back, how long it took, the tokens) to the server's console. Off by default. */
@@ -26,7 +33,9 @@ export async function loadSettings(): Promise<Settings> {
     const parsed = (await file.json()) as Partial<Settings>;
     cached = { ...DEFAULT_SETTINGS, ...parsed };
   } else {
-    cached = { ...DEFAULT_SETTINGS };
+    // A brand-new install: default to local traffic only. Written explicitly (not into DEFAULT_SETTINGS itself), so
+    // an existing settings.json from before this setting existed is never retroactively restricted.
+    cached = { ...DEFAULT_SETTINGS, hostname: "127.0.0.1" };
     await saveSettings(cached);
   }
 
