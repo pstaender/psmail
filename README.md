@@ -21,6 +21,16 @@ bun run start   # production
 
 Open `http://localhost:3001` (configurable, see [Configuration](#configuration)). On first boot the server creates a default user (`username: default`, empty password) — pick it on the login screen to get in immediately.
 
+To keep it running as a background service (auto-restart on crash, start on boot), use [pm2](https://pm2.keymetrics.io) with the bundled `ecosystem.config.cjs`:
+
+```bash
+pm2 start ecosystem.config.cjs   # start it
+pm2 logs psmail                  # tail its output
+pm2 save && pm2 startup          # keep it running across reboots
+```
+
+It runs `bun src/server/main.ts` with `NODE_ENV=production`, one instance (the sqlite database is a single file — no cluster mode), and writes its logs to `logs/` (gitignored). Its port and other settings come from its own `settings.json`, not from pm2 — see [Configuration](#configuration).
+
 ## Webclient
 
 The app opens on the combined Inbox (all accounts' Inboxes) with every account collapsed in the sidebar (nothing is selected yet, and a collapsed account's folders aren't even fetched); expand an account and pick a folder to see its mail. A sync that was already running when the page loads (started in an earlier visit, another tab, or another browser's automatic sync) is picked up from the account's job history: its spinner and progress show, and the app refreshes when it ends.
