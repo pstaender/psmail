@@ -3,11 +3,14 @@ import { UiSettingsContext } from "@/contexts/UiSettingsContext";
 import {
   CalendarDays,
   LogOut,
+  Mail,
+  MailOpen,
   MoreHorizontal,
   PanelLeftOpen,
   PenSquare,
   Search,
   Settings,
+  Star,
   Tags,
   X,
 } from "lucide-react";
@@ -1603,11 +1606,12 @@ export function AppShell() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem
+                      <DropdownMenuCheckboxItem
+                        checked={dateFilter !== null}
                         onSelect={() => setDateFilterOpen(true)}
                       >
                         <CalendarDays className="size-4" /> Filter by date…
-                      </DropdownMenuItem>
+                      </DropdownMenuCheckboxItem>
                       {uiSettings.showCategories && (
                         <DropdownMenuCheckboxItem
                           checked={categoryFilter.length > 0}
@@ -1621,19 +1625,19 @@ export function AppShell() {
                         checked={favsOnly}
                         onCheckedChange={setFavsOnly}
                       >
-                        Favorites
+                        <Star className="size-4" /> Favorites
                       </DropdownMenuCheckboxItem>
                       <DropdownMenuCheckboxItem
                         checked={readOn}
                         onCheckedChange={setReadOn}
                       >
-                        Read
+                        <MailOpen className="size-4" /> Read
                       </DropdownMenuCheckboxItem>
                       <DropdownMenuCheckboxItem
                         checked={unreadOn}
                         onCheckedChange={setUnreadOn}
                       >
-                        Unread
+                        <Mail className="size-4" /> Unread
                       </DropdownMenuCheckboxItem>
                       {dateFilter && (
                         <DropdownMenuItem onSelect={() => setDateFilter(null)}>

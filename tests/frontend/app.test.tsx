@@ -1565,7 +1565,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     }
     async function openDialog() {
       await userEvent.click(screen.getByRole("button", { name: "More" }));
-      await userEvent.click(await screen.findByRole("menuitem", { name: /filter by date/i }));
+      await userEvent.click(await screen.findByRole("menuitemcheckbox", { name: /filter by date/i }));
       return within((await screen.findByText("Filter by date", { selector: "[data-slot=dialog-title]" })).closest('[role="dialog"]') as HTMLElement);
     }
     const setDay = (dialog: ReturnType<typeof within>, label: string, value: string) => fireEvent.change(dialog.getByLabelText(label), { target: { value } });
@@ -1707,7 +1707,7 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       test("the More menu has it beside Filter by date", async () => {
         await openFolder();
         await userEvent.click(screen.getByRole("button", { name: "More" }));
-        await screen.findByRole("menuitem", { name: /filter by date/i });
+        await screen.findByRole("menuitemcheckbox", { name: /filter by date/i });
         const category = screen.getByRole("menuitemcheckbox", { name: /filter by category/i });
         expect(category.getAttribute("aria-checked")).toBe("false"); // a checkmark once categories are chosen
       });
@@ -1827,13 +1827,19 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
         await userEvent.click(await screen.findByRole("menuitemcheckbox", { name }));
       };
 
-      test("the More menu has Favorites, Read and Unread as check items (like the category filter), unchecked", async () => {
+      test("the More menu has Filter by date, Favorites, Read and Unread all as check items, unchecked", async () => {
         await openFolder();
         await userEvent.click(screen.getByRole("button", { name: "More" }));
-        expect(await screen.findByRole("menuitem", { name: /filter by date/i })).toBeTruthy();
         const items = screen.getAllByRole("menuitemcheckbox");
-        expect(items.map(i => [i.textContent!.trim(), i.getAttribute("aria-checked")])).toEqual([["Filter by category…", "false"], ["Favorites", "false"], ["Read", "false"], ["Unread", "false"]]);
+        expect(items.map(i => [i.textContent!.trim(), i.getAttribute("aria-checked")])).toEqual([
+          ["Filter by date…", "false"],
+          ["Filter by category…", "false"],
+          ["Favorites", "false"],
+          ["Read", "false"],
+          ["Unread", "false"],
+        ]);
         expect(screen.queryByText(/only/i)).toBeNull(); // no "Favorites only" / "Unread only", no "Read and unread"
+        expect(screen.queryByRole("menuitem")).toBeNull(); // every item here is a check item now, none plain
         expect(screen.queryByRole("menuitemradio")).toBeNull();
       });
 
