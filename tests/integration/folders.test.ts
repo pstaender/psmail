@@ -165,3 +165,35 @@ describe("creating a folder (POST /api/accounts/:email/folders)", () => {
     expect((await post(path("ok@example.com"), { name: "x" }, other)).status).toBe(404);
   });
 });
+
+describe("GET .../folders/:folder/find-message-id (diagnostic)", () => {
+  let token: string;
+  const path = (folder: string, id: string) => `/api/accounts/${encodeURIComponent("slow@example.com")}/folders/${encodeURIComponent(folder)}/find-message-id?id=${encodeURIComponent(id)}`;
+
+  test("set up: reuse the unreachable account from above", async () => {
+    token = (await post("/api/auth/login", { username: "fay", password: "pw" })).json.token;
+  });
+
+  test("a missing id is a 400", async () => {
+    const res = await get(`/api/accounts/${encodeURIComponent("slow@example.com")}/folders/Sent/find-message-id`, token);
+    expect(res.status).toBe(400);
+    expect(res.json.error).toMatch(/id/i);
+  });
+
+  test("needs a login, like everything else", async () => {
+    const res = await fetch(`${base}${path("Sent", "<a@b>")}`);
+    expect(res.status).toBe(401);
+  });
+
+  test("an unreachable server is a 502 naming what was being searched, not a hang or a 500", async () => {
+    const res = await get(path("Sent", "<a@b.example>"), token);
+    expect(res.status).toBe(502);
+    expect(res.json.error).toContain('Couldn\'t search "Sent"');
+    expect(res.json.error).toContain("127.0.0.1");
+  });
+
+  test("another user's account is not found", async () => {
+    const other = (await post("/api/auth/login", { username: "ivy", password: "pw" })).json.token;
+    expect((await get(path("Sent", "<a@b>"), other)).status).toBe(404);
+  });
+});

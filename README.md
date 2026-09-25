@@ -213,9 +213,14 @@ bun run cli sync me@example.com --user <username> [--folder <name>]   # default:
 bun run cli imbox classify [account@example.com ...] [--force] [--verbose] --user <username>   # default: every account
 bun run cli imbox explain me@example.com <message-id> --user <username>            # score and reasons for one message
 
+# Diagnostic: is a message really on the server, in this folder, and under what UID
+bun run cli imap find-message-id me@example.com Sent "<some-id@example.com>" --user <username>
+
 # AI: summarize stored mail like the Summarize button
 bun run cli summarize [account@example.com ...] [--folder <name>] [--force] [--verbose] --user <username>   # default: every account, every folder
 ```
+
+`imap find-message-id` is a diagnostic, not something the webclient uses: it asks the server directly, with a plain IMAP `SEARCH`, whether a message with the given `Message-ID` exists in that folder, and prints its UID (and subject/date/size) if so — entirely read-only, nothing is written locally. It's for when another mail client shows a message that never shows up in psmail: a normal sync only ever asks the server for UIDs *newer* than the highest one already stored for that folder (`GET /api/accounts/:email/folders/:folder/find-message-id?id=…` on the server side), so a message whose real UID turns out to be *lower* than that — an out-of-order append being the one case seen so far — would never surface on its own, no matter how many times you sync; this bypasses that and asks the server for the truth.
 
 `imbox classify` says what it does: who it signed in as, which accounts, how many messages each has to do (and in which folders), a progress bar (a line per 2 000 messages when the output is not a terminal), the result per account and the total; **`--verbose`** also prints every message as it is classified — verdict, score, `#id`, subject, sender and its three strongest reasons. It only looks at messages that have no verdict yet; `--force` classifies them all again (which also replaces verdicts set by hand). Disabled accounts are skipped. It prints a line per account and a total; `imbox explain` lists every reason with its points, which is the way to see why a message landed where it did.
 

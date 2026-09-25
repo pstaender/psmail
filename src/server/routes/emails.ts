@@ -77,7 +77,7 @@ export function wantsSoftDelete(account: AccountRow, folder: string, trashFolder
   return account.imap_uidplus === 1 && !account.skip_soft_delete && folder !== trashFolder;
 }
 
-function imapCredentialsFor(account: AccountRow, imapPassword: string) {
+export function imapCredentialsFor(account: AccountRow, imapPassword: string) {
   return {
     host: account.imap_host,
     port: account.imap_port,

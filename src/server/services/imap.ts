@@ -299,6 +299,31 @@ export async function fetchMessageSource(client: ImapFlow, folder: string, uid: 
   return message && message.source ? message.source : null;
 }
 
+export interface FoundMessage {
+  uid: number;
+  subject: string | null;
+  date: string | null;
+  size: number;
+}
+
+/**
+ * A server-side SEARCH for messages carrying a given Message-ID header, in `folder` — a diagnostic: is a
+ * message really on the server, and if so under what UID (the sync's own "newer than my highest known
+ * UID" watermark only ever looks forward, so a message whose UID turns out to be lower than what's already
+ * stored — an out-of-order append, a folder that was renumbered and only partly re-walked, and the like —
+ * would never surface through a normal sync no matter how many times it runs; this is how to tell).
+ */
+export async function findByMessageId(client: ImapFlow, folder: string, messageId: string): Promise<FoundMessage[]> {
+  await client.mailboxOpen(folder, { readOnly: true });
+  const uids = await client.search({ header: { "message-id": messageId } }, { uid: true });
+  if (!uids || uids.length === 0) return [];
+  const found: FoundMessage[] = [];
+  for await (const message of client.fetch(uids, { uid: true, envelope: true, size: true }, { uid: true })) {
+    found.push({ uid: message.uid, subject: message.envelope?.subject ?? null, date: message.envelope?.date ? new Date(message.envelope.date).toISOString() : null, size: message.size ?? 0 });
+  }
+  return found.sort((a, b) => a.uid - b.uid);
+}
+
 /** Whether the connected server advertises the UIDPLUS extension (RFC 4315). */
 export function hasUidPlusCapability(client: ImapFlow): boolean {
   return client.capabilities.has("UIDPLUS");

@@ -142,6 +142,41 @@ async function cmdSync(argv: string[]) {
  * for the imbox; only messages without a verdict, or all of them with --force.
  * `psmail imbox explain <account-email> <message-id>` — why a message is (not) important.
  */
+/**
+ * `psmail imap find-message-id <account-email> <folder> <message-id>` — a diagnostic: asks the server directly
+ * whether a message with this Message-ID exists in `folder`, and under what UID. Useful when a message another
+ * mail client shows never shows up in psmail: a normal sync only asks for UIDs newer than the highest one already
+ * stored, so a message whose real UID turns out to be lower than that would never be found by it, however many
+ * times it runs — this bypasses the sync and asks the server. Read-only; nothing gets written locally.
+ */
+async function cmdImap(subcommand: string | undefined, argv: string[]) {
+  const { positionals, flags } = parseFlags(argv);
+  const url = typeof flags.url === "string" ? flags.url : undefined;
+  const client = new ApiClient(url);
+
+  if (subcommand !== "find-message-id") {
+    throw new Error("Usage: psmail imap find-message-id <account-email> <folder> <message-id> [--user <username>] [--password <pw>] [--url <api-url>]");
+  }
+  const [accountEmail, folder, messageId] = positionals;
+  if (!accountEmail || !folder || !messageId) {
+    throw new Error("Usage: psmail imap find-message-id <account-email> <folder> <message-id> [--user <username>] [--password <pw>] [--url <api-url>]");
+  }
+
+  const username = await signInForAccounts(client, flags, [accountEmail]);
+  console.log(`Signed in to ${url ?? process.env.PSMAIL_API_URL ?? "http://localhost:3001"} as "${username}".`);
+  console.log(`Searching "${folder}" on ${accountEmail} for Message-ID ${messageId} …`);
+
+  const { found } = await client.findMessageId(accountEmail, folder, messageId);
+  if (found.length === 0) {
+    console.log(`Not found. The server's "${folder}" genuinely has no message with that Message-ID right now.`);
+    return;
+  }
+  for (const message of found) {
+    console.log(`  UID ${message.uid}  ${message.date ?? "(no date)"}  ${(message.subject ?? "(no subject)").slice(0, 80)}  (${message.size} bytes)`);
+  }
+  console.log(`\n${found.length} message(s) found. If psmail's own highest known UID for "${folder}" is already above ${Math.max(...found.map(m => m.uid))}, a normal sync will never pick this up on its own.`);
+}
+
 async function cmdImbox(subcommand: string | undefined, argv: string[]) {
   const { positionals, flags } = parseFlags(argv);
   // `--force a@b.example` would read the address as the flag's value; these flags take none.
@@ -393,6 +428,10 @@ Usage:
                classifies stored mail as important / not important (default: every account; --force redoes messages that have a verdict;
                --verbose prints every message with its verdict and main reasons)
   psmail imbox explain <account-email> <message-id> [--user <username>] [--password <pw>] [--url <api-url>]
+  psmail imap find-message-id <account-email> <folder> <message-id> [--user <username>] [--password <pw>] [--url <api-url>]
+               diagnostic: asks the server directly whether a message with this Message-ID exists in <folder> and under what
+               UID — for when another mail client shows a message that psmail's own sync never picks up (a sync only asks for
+               UIDs newer than the highest one already stored, so a message whose real UID is lower than that never surfaces)
   psmail summarize [account-email ...] [--folder <name>] [--force] [--verbose] [--user <username>] [--password <pw>] [--url <api-url>]
                summarizes stored mail with your AI Summarize skill, like the Summarize button (also categories and dates when those skills
                exist): default every account and every folder, newest first, only messages without a summary; --folder limits it to one
@@ -413,6 +452,8 @@ async function main() {
       await cmdAccountAdd(rest);
     } else if (group === "imbox") {
       await cmdImbox(subcommand, rest);
+    } else if (group === "imap") {
+      await cmdImap(subcommand, rest);
     } else if (group === "summarize") {
       await cmdSummarize([subcommand, ...rest].filter((x): x is string => x !== undefined));
     } else if (group === "sync") {

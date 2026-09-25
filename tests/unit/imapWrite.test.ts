@@ -5,6 +5,7 @@ import {
   createFolder,
   deleteMessage,
   fetchRemoteFlags,
+  findByMessageId,
   hasUidPlusCapability,
   FolderNameError,
   moveMessage,
@@ -60,6 +61,8 @@ function createFakeClient(
     append?: unknown;
     capabilities?: Map<string, boolean | number>;
     fetchResults?: { uid: number; flags: Set<string> }[];
+    envelopeResults?: { uid: number; envelope?: { subject?: string; date?: string }; size?: number }[];
+    search?: number[] | false;
     list?: unknown[];
     uidValidity?: number;
   } = {}
@@ -97,10 +100,14 @@ function createFakeClient(
     },
     fetch: (...args: unknown[]) => {
       calls.push({ method: "fetch", args });
-      const results = overrides.fetchResults ?? [];
+      const results = overrides.envelopeResults ?? overrides.fetchResults ?? [];
       return (async function* () {
         for (const message of results) yield message;
       })();
+    },
+    search: async (...args: unknown[]) => {
+      calls.push({ method: "search", args });
+      return overrides.search ?? [];
     },
   };
   return { client: client as unknown as ImapFlow, calls };
@@ -518,5 +525,41 @@ describe("creating folders", () => {
 
     const refusing = { ...base, mailboxCreate: async () => Promise.reject(new Error("NO [NOPERM]")) } as unknown as ImapFlow;
     await expect(createFolder(refusing, "B", null)).rejects.toThrow("NOPERM");
+  });
+});
+
+describe("findByMessageId", () => {
+  test("opens the folder read-only, searches by the Message-ID header, and fetches envelope + size for the matching UIDs", async () => {
+    const { client, calls } = createFakeClient({
+      search: [5, 2],
+      envelopeResults: [
+        { uid: 2, envelope: { subject: "Older", date: "2026-01-01T00:00:00.000Z" }, size: 100 },
+        { uid: 5, envelope: { subject: "Newer", date: "2026-02-01T00:00:00.000Z" }, size: 200 },
+      ],
+    });
+
+    const found = await findByMessageId(client, "Sent", "<abc@example.com>");
+
+    expect(calls[0]).toEqual({ method: "mailboxOpen", args: ["Sent", { readOnly: true }] });
+    expect(calls[1]).toEqual({ method: "search", args: [{ header: { "message-id": "<abc@example.com>" } }, { uid: true }] });
+    expect(calls[2]).toEqual({ method: "fetch", args: [[5, 2], { uid: true, envelope: true, size: true }, { uid: true }] });
+    // Sorted by UID, ascending — lowest first, so a message hiding below the sync's watermark is easy to spot.
+    expect(found).toEqual([
+      { uid: 2, subject: "Older", date: "2026-01-01T00:00:00.000Z", size: 100 },
+      { uid: 5, subject: "Newer", date: "2026-02-01T00:00:00.000Z", size: 200 },
+    ]);
+  });
+
+  test("nothing found: an empty list, and no wasted FETCH round-trip", async () => {
+    const { client, calls } = createFakeClient({ search: [] });
+    const found = await findByMessageId(client, "Sent", "<gone@example.com>");
+    expect(found).toEqual([]);
+    expect(calls.some(c => c.method === "fetch")).toBe(false);
+  });
+
+  test("a message missing envelope/date fields still comes back, with nulls instead of throwing", async () => {
+    const { client } = createFakeClient({ search: [9], envelopeResults: [{ uid: 9 }] });
+    const found = await findByMessageId(client, "Sent", "<x@example.com>");
+    expect(found).toEqual([{ uid: 9, subject: null, date: null, size: 0 }]);
   });
 });

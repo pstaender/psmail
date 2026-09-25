@@ -312,4 +312,46 @@ describe.skipIf(!RUN)("IMAP sync against a real server (Greenmail)", () => {
     });
     expect(draftsEmails.json.some((e: { id: number }) => e.id === draft.json.id)).toBe(true);
   });
+
+  test("find-message-id finds a real message on the server by its Message-ID, UID and all — without touching the local database", async () => {
+    await sendViaGreenmail("Diagnostic search target", "Findable by Message-ID");
+    // A distinct account with nothing synced yet, so this is genuinely "never downloaded" — proving the search
+    // works against the server directly, not by falling back to something already in the local database.
+    const untouched = "untouched@example.com";
+    const acc = await api("POST", "/api/accounts", {
+      token,
+      body: {
+        email: untouched,
+        imapHost: GREENMAIL_HOST, imapPort: GREENMAIL_IMAP_PORT, imapSecure: false, imapUsername: GREENMAIL_USER, imapPassword: GREENMAIL_PASSWORD,
+        smtpHost: GREENMAIL_HOST, smtpPort: GREENMAIL_SMTP_PORT, smtpSecure: false, smtpUsername: GREENMAIL_USER, smtpPassword: GREENMAIL_PASSWORD,
+      },
+    });
+    expect(acc.status).toBe(201);
+
+    const emails = await api("GET", `/api/accounts/${encodeURIComponent(MAILBOX_EMAIL)}/emails?folder=INBOX`, { token });
+    const target = emails.json.find((e: { subject: string }) => e.subject === "Diagnostic search target");
+    expect(target).toBeDefined();
+    expect(target.messageId).toBeTruthy();
+
+    const found = await api(
+      "GET",
+      `/api/accounts/${encodeURIComponent(untouched)}/folders/INBOX/find-message-id?id=${encodeURIComponent(target.messageId)}`,
+      { token }
+    );
+    expect(found.status).toBe(200);
+    expect(found.json.found).toHaveLength(1);
+    expect(found.json.found[0]).toMatchObject({ subject: "Diagnostic search target" });
+    expect(found.json.found[0].uid).toBeGreaterThan(0);
+
+    // Nothing was downloaded or stored for the untouched account — this is read-only, on the server only.
+    const untouchedEmails = await api("GET", `/api/accounts/${encodeURIComponent(untouched)}/emails?folder=INBOX`, { token });
+    expect(untouchedEmails.json).toEqual([]);
+
+    const missing = await api(
+      "GET",
+      `/api/accounts/${encodeURIComponent(untouched)}/folders/INBOX/find-message-id?id=${encodeURIComponent("<nothing-like-this@example.com>")}`,
+      { token }
+    );
+    expect(missing.json.found).toEqual([]);
+  });
 });

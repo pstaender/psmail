@@ -190,6 +190,14 @@ export class ApiClient {
     }>("GET", `/api/accounts/${encodeURIComponent(accountEmail)}/emails/${emailId}/imbox`);
   }
 
+  /** Diagnostic: does the server really have a message with this Message-ID, in `folder`, and under what UID — see the server's own doc comment (routes/folders.ts). */
+  findMessageId(accountEmail: string, folder: string, messageId: string) {
+    return this.request<{ found: { uid: number; subject: string | null; date: string | null; size: number }[] }>(
+      "GET",
+      `/api/accounts/${encodeURIComponent(accountEmail)}/folders/${encodeURIComponent(folder)}/find-message-id?id=${encodeURIComponent(messageId)}`
+    );
+  }
+
   triggerDownload(accountEmail: string, folder?: string) {
     return this.request<{ id: number; status: string; progressTotal: number }>(
       "POST",

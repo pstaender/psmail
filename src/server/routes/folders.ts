@@ -2,9 +2,10 @@ import type { Database } from "bun:sqlite";
 import { assertAccountEnabled, decryptAccountCredentials, getFoldersCache, learnSpecialFolders, setFoldersCache, type AccountRow } from "../models/accounts";
 import { getFolderCounts, type FolderCount } from "../models/emails";
 import { json, requireAuth, withErrorHandling } from "../http";
-import { applySpecialUseFallback, createFolder, describeImapError, FolderNameError, inboxFirst, listFolders, withImapClient, type ImapFolder } from "../services/imap";
+import { applySpecialUseFallback, createFolder, describeImapError, findByMessageId, FolderNameError, inboxFirst, listFolders, withImapClient, type ImapFolder } from "../services/imap";
 import { ApiError, ConflictError } from "../types";
 import { getOwnedAccountByEmailParam } from "./accounts";
+import { imapCredentialsFor } from "./emails";
 
 export interface FolderWithCounts extends ImapFolder {
   total: number;
@@ -155,6 +156,32 @@ export function foldersRoutes(db: Database) {
           return json(mergeFolderCounts(cached ?? [], counts), {
             headers: { "x-folders-source": "local", "x-folders-warning": encodeURIComponent(error.message) },
           });
+        }
+      }),
+    },
+    /**
+     * A diagnostic, not used by the webclient: is a message with this Message-ID really on the server, in this
+     * folder, and under what UID — the CLI's `imap find` command (see src/cli/index.ts). Useful when a message a
+     * user can see with another mail client never shows up here: a normal sync only ever asks for UIDs newer than
+     * the highest one already stored, so a message whose real UID turns out to be lower than that (an out-of-order
+     * append, among other causes) would never be found by it, however many times it runs — this bypasses that and
+     * asks the server directly. Read-only; nothing here is written to the local database.
+     */
+    "/api/accounts/:email/folders/:folder/find-message-id": {
+      GET: withErrorHandling(async req => {
+        const { session, encryptionKey } = requireAuth(req, db);
+        const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        const folder = decodeURIComponent(req.params.folder ?? "");
+        const messageId = new URL(req.url).searchParams.get("id")?.trim();
+        if (!folder) throw new ApiError(400, "folder is required");
+        if (!messageId) throw new ApiError(400, "id (the Message-ID to look for) is required");
+
+        const { imapPassword } = decryptAccountCredentials(account, encryptionKey);
+        try {
+          const found = await withImapClient(imapCredentialsFor(account, imapPassword), client => findByMessageId(client, folder, messageId));
+          return json({ found });
+        } catch (error) {
+          throw new ApiError(502, `Couldn't search "${folder}" on ${account.imap_host}: ${describeImapError(error)}`);
         }
       }),
     },
