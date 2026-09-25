@@ -1,3 +1,7 @@
+2026-09-25 - More menu: consistent icon alignment and new icons (cc5e9e0)
+Cosmetic fix: "Filter by date..." is now a check item like the others in the More menu (checked while a date filter is set), instead of a plain menu item -- which is also why its icon sat further left than "Filter by category..." before this (check items reserve extra space for the checkmark). Also added icons to Favorites (a star), Read (an open envelope) and Unread (a closed envelope), so every row in the menu now has one, aligned in the same column.
+Frontend 379 pass, build OK.
+
 2026-09-25 - List dates: weekday names, opt-in absolute dates; opt-in letter avatar (7c6c2d6)
 Message lists (folder, combined, search, the conversation bar) now show a weekday name ("Monday", ...) for the 5 days before "Yesterday", instead of falling straight to a short date. The full window is: today a time, yesterday "Yesterday", the 5 days before that a weekday name, further back a short date (with the year once it's not this year).
 New Settings -> UI options, both off by default:
