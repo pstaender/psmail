@@ -6,7 +6,7 @@ import { addAttachment, createEmail, deleteEmail, findEmailByUid, findSentPlaceh
 import { completeDownloadJob, failDownloadJob, startDownloadJob, updateDownloadProgress, updateDownloadTotal } from "../models/downloads";
 import { isAccountDisabled, learnSpecialFolders, type AccountRow } from "../models/accounts";
 import { isUidDeleted, listDeletedUids, maxDeletedUid, removeDeletedUids } from "../models/tombstones";
-import { getFolderUidValidity, setFolderUidValidity } from "../models/folderValidity";
+import { getFolderUidValidity, getHighestSyncedUid, setFolderUidValidity, setHighestSyncedUid } from "../models/folderValidity";
 import {
   fetchNewMessages,
   describeImapError,
@@ -209,13 +209,18 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
     // A UIDVALIDITY change makes every UID this app has stored for the folder unusable as a watermark too (they may
     // now belong to different messages, or nothing) — 0 asks for everything currently in the folder, fresh; already-
     // known messages (their real, current UID recognized) are simply skipped again by the loop below.
+    //
+    // The watermark itself is NOT "the highest UID any locally-stored message happens to have" — see the schema
+    // comment on folder_uid_validity for why that's unsafe: sending or moving a message writes its real server UID
+    // straight into the local row, without the folder ever actually having been walked that far. Trusting that as
+    // "already covered" is exactly how a message another mail client appended in between became permanently
+    // invisible — every later sync only ever asked for UIDs newer than a watermark that had silently jumped ahead
+    // of messages it had never actually looked at.
     let sinceUid = 0;
     if (!needsFullResync) {
-      const maxUidRow = db
-        .query<{ max_uid: number | null }, [number, string]>("SELECT MAX(uid) as max_uid FROM emails WHERE account_id = ? AND folder = ?")
-        .get(account.id, folderPath);
+      const highestSynced = getHighestSyncedUid(db, account.id, folderPath) ?? 0;
       // The watermark also counts tombstoned UIDs: deleting the newest message locally must not make it look "new" again.
-      sinceUid = Math.max(maxUidRow?.max_uid ?? 0, maxDeletedUid(db, account.id, folderPath));
+      sinceUid = Math.max(highestSynced, maxDeletedUid(db, account.id, folderPath));
     }
 
     stage = `${folderPath}: fetching messages newer than UID ${sinceUid}`;
@@ -308,6 +313,15 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
       updateDownloadProgress(db, downloadJobId, doneCurrent + downloaded);
       onProgress?.({ current: doneCurrent + downloaded, total: doneTotal + messages.length });
     }
+
+    // The walk finished without throwing: every UID from sinceUid+1 up to the highest one the server returned has
+    // now genuinely been examined (stored, or recognized as already known) — only now is it safe to move the
+    // watermark that far. A message with a real UID written straight into a local row by some other path (see
+    // above) never advances this on its own; the next sync still walks up to it for real, harmlessly finding it
+    // already there (see findEmailByUid) alongside anything else in between that a plain send or move would have
+    // silently skipped.
+    const highestFetched = messages.reduce((max, message) => Math.max(max, message.uid), sinceUid);
+    if (highestFetched > sinceUid || needsFullResync) setHighestSyncedUid(db, account.id, folderPath, highestFetched);
 
     doneTotal += messages.length;
     doneCurrent += messages.length;

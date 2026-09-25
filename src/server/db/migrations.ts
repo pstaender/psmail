@@ -37,6 +37,7 @@ const MIGRATIONS = [
     uid_validity INTEGER NOT NULL,
     PRIMARY KEY (account_id, folder)
   ) WITHOUT ROWID`,
+  "ALTER TABLE folder_uid_validity ADD COLUMN highest_synced_uid INTEGER",
 ];
 
 /** Indexes on columns the migrations above add, so they can only be created afterwards. */

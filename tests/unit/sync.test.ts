@@ -171,6 +171,62 @@ describe("runSync", () => {
     expect(findEmailByUid(db, account.id, "Sent", 2)?.id).toBe(placeholder.id);
   });
 
+  test("a message sent from this app doesn't inflate the sync watermark past mail another client appended in between — the real bug behind 'a message that's really on the server never syncs'", async () => {
+    const { db, user, account } = await setup();
+
+    // First, a normal sync: the folder is walked up through UID 3, and the watermark genuinely reflects that.
+    const job1 = createDownloadJob(db, account.id, "Sent");
+    await runSync({
+      db, account, username: user.username, folder: "Sent", downloadJobId: job1.id,
+      imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      fetchMessages: fakeFetchMessages, // FAKE_MESSAGES: uid 1, 2, 3
+      fetchRemoteFlags: fakeFetchRemoteFlagsNoop,
+    });
+    expect(listEmails(db, account.id, { folder: "Sent" })).toHaveLength(3);
+
+    // Now: this app sends a message. POST .../send writes the real server UID straight into the local row —
+    // here, UID 8 — WITHOUT the folder ever having actually been walked that far. On the real server, some OTHER
+    // client (Apple Mail, say) had already appended messages at UID 6 and 7 in the meantime; this app never saw them.
+    createEmail(db, account.id, { folder: "Sent", uid: 8, isDraft: false, messageId: "<sent-by-app@example.com>", subject: "Sent from this app" });
+    expect(listEmails(db, account.id, { folder: "Sent" })).toHaveLength(4); // shows up right away, same as today
+
+    // The next sync: the server has messages at 6, 7 (from Apple Mail) and 8 (this app's own send, already known).
+    const APPENDED_BY_OTHER_CLIENT = [6, 7, 8].map(uid => ({ uid, source: Buffer.from(rawMessage({ uid, subject: `Other-client ${uid}` })), size: 10 }));
+    const sinceUidsSeen: number[] = [];
+    const job2 = createDownloadJob(db, account.id, "Sent");
+    await runSync({
+      db, account, username: user.username, folder: "Sent", downloadJobId: job2.id,
+      imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      fetchMessages: async (_c, _f, sinceUid) => {
+        sinceUidsSeen.push(sinceUid);
+        return { messages: APPENDED_BY_OTHER_CLIENT.filter(m => m.uid > sinceUid) };
+      },
+      fetchRemoteFlags: fakeFetchRemoteFlagsNoop,
+    });
+
+    // The fix: sinceUid came from the watermark (3, from the last real walk), never from MAX(local uid) (which
+    // would have been 8, skipping 6 and 7 forever). UIDs 6 and 7 — genuinely new to this sync — got stored; UID 8
+    // was already known (this app's own send) and wasn't duplicated.
+    expect(sinceUidsSeen).toEqual([3]);
+    const afterSecondSync = listEmails(db, account.id, { folder: "Sent" });
+    expect(afterSecondSync).toHaveLength(6); // 3 + the app's own send + the two that would otherwise have been lost
+    expect(afterSecondSync.filter(e => e.uid === 6 || e.uid === 7).map(e => e.subject).sort()).toEqual(["Other-client 6", "Other-client 7"]);
+    expect(afterSecondSync.filter(e => e.uid === 8)).toHaveLength(1); // not duplicated
+
+    // The watermark is now 8 (the highest this sync actually confirmed) — a further, empty sync leaves it there.
+    const job3 = createDownloadJob(db, account.id, "Sent");
+    await runSync({
+      db, account, username: user.username, folder: "Sent", downloadJobId: job3.id,
+      imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      fetchMessages: async (_c, _f, sinceUid) => {
+        sinceUidsSeen.push(sinceUid);
+        return { messages: [] };
+      },
+      fetchRemoteFlags: fakeFetchRemoteFlagsNoop,
+    });
+    expect(sinceUidsSeen).toEqual([3, 8]);
+  });
+
   test("exposes download progress on the job row while messages are still being downloaded", async () => {
     const { db, user, account } = await setup();
     const job = createDownloadJob(db, account.id, "INBOX");

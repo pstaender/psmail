@@ -159,12 +159,19 @@ CREATE TABLE IF NOT EXISTS deleted_uids (
   PRIMARY KEY (account_id, folder, uid)
 ) WITHOUT ROWID;
 
--- The UIDVALIDITY last seen for a folder (see models/folderValidity.ts) — lets a sync notice when the server has
--- renumbered a folder from scratch, instead of silently deleting locally-stored mail whose old UID just isn't found.
+-- Per-folder sync bookkeeping a regular incremental sync needs and nothing else may touch (see models/folderValidity.ts):
+-- the UIDVALIDITY last seen (lets a sync notice when the server has renumbered a folder from scratch, instead of
+-- silently deleting locally-stored mail whose old UID just isn't found any more), and the highest UID confirmed by an
+-- actual, complete walk of the folder (NOT simply MAX(emails.uid) for it — a message can get its real UID written to
+-- the local row directly, by sending or moving it, without the folder having actually been walked that far; trusting
+-- that as the sync watermark anyway is how a message sitting between the old watermark and that UID — appended by
+-- another mail client in between — becomes permanently invisible to every later sync, since one only ever asks the
+-- server for UIDs newer than its watermark).
 CREATE TABLE IF NOT EXISTS folder_uid_validity (
   account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   folder TEXT NOT NULL,
   uid_validity INTEGER NOT NULL,
+  highest_synced_uid INTEGER,
   PRIMARY KEY (account_id, folder)
 ) WITHOUT ROWID;
 
