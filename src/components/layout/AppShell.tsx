@@ -1509,6 +1509,7 @@ export function AppShell() {
                 unifiedInboxUnread={unifiedInboxUnread}
                 syncJobs={syncJobs}
                 onSync={(email) => startSync(email)}
+                onSyncFolder={(email, folder) => startSync(email, { folder })}
                 unifiedView={unifiedView}
                 onSelectUnified={selectUnified}
                 showImbox={settings.imboxEnabled === true}

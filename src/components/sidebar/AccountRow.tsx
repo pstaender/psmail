@@ -93,6 +93,7 @@ export function AccountRow({
   sharedFolders,
   syncJob,
   onSync,
+  onSyncFolder,
 }: {
   account: Account;
   selected: { accountEmail: string; folder: string } | null;
@@ -103,6 +104,8 @@ export function AccountRow({
   /** This account's latest sync job, if any (see useSyncJobs). */
   syncJob: DownloadJob | undefined;
   onSync: (accountEmail: string) => void;
+  /** Syncs just this one folder (the sync button that shows on hovering a folder row). */
+  onSyncFolder: (accountEmail: string, folder: string) => void;
 }) {
   const { showUnreadBadges } = useUiSettings();
   // Collapsed until something in the account is selected (no account is, when the app has just loaded and
@@ -251,8 +254,12 @@ export function AccountRow({
             const isSelected = selected?.accountEmail === account.email && selected.folder === folder.path;
             const isOpen = openFolders.has(folder.path);
             const unread = folder.unread + (hasChildren && !isOpen ? hiddenUnread : 0); // a collapsed folder still shows what's unread inside it
+            const label = folder.name.toLowerCase() === "inbox" ? "Inbox" : folder.name;
+            // An account-wide sync ("Sync now", job.folder null) covers this folder too, but only gets its own spinner
+            // here when it's THIS folder specifically — the account-level spinner already says the rest is syncing.
+            const folderSyncing = isRunning && job?.folder === folder.path;
             return (
-              <div key={folder.path} className="flex items-center" style={depth > 0 ? { paddingLeft: `${depth * 0.75}rem` } : undefined}>
+              <div key={folder.path} className="group flex items-center" style={depth > 0 ? { paddingLeft: `${depth * 0.75}rem` } : undefined}>
                 {/* Folders with subfolders start collapsed; the arrow (or a click on the folder) opens them. */}
                 {hasChildren ? (
                   <button
@@ -278,13 +285,30 @@ export function AccountRow({
                   )}
                 >
                   <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="flex-1 truncate">{folder.name.toLowerCase() === 'inbox' ? 'Inbox' : folder.name}</span>
+                  <span className="flex-1 truncate">{label}</span>
                   {showUnreadBadges && unread > 0 && (
                     <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
                       {unread}
                     </Badge>
                   )}
                 </button>
+                {!account.disabled && (
+                  <span title={folderSyncing ? syncLabel : undefined} className={cn("shrink-0", folderSyncing && "cursor-progress")}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={cn("size-6", folderSyncing ? "pointer-events-none opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100")}
+                      disabled={isRunning}
+                      title={folderSyncing ? undefined : `Sync ${label}`}
+                      onClick={e => {
+                        e.stopPropagation();
+                        onSyncFolder(account.email, folder.path);
+                      }}
+                    >
+                      {folderSyncing ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+                    </Button>
+                  </span>
+                )}
               </div>
             );
           })}

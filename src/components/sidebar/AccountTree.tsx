@@ -28,6 +28,7 @@ export function AccountTree({
   syncingAccounts,
   syncJobs,
   onSync,
+  onSyncFolder,
 }: {
   accounts: Account[];
   loading: boolean;
@@ -59,6 +60,8 @@ export function AccountTree({
   syncingAccounts: number;
   syncJobs: Record<string, DownloadJob>;
   onSync: (accountEmail: string) => void;
+  /** Syncs just one folder (the sync button that shows on hovering a folder row). */
+  onSyncFolder: (accountEmail: string, folder: string) => void;
 }) {
   const { showUnreadBadges } = useUiSettings();
   return (
@@ -145,6 +148,7 @@ export function AccountTree({
               sharedFolders={sharedFolders}
               syncJob={syncJobs[account.email]}
               onSync={onSync}
+              onSyncFolder={onSyncFolder}
             />
           ))}
         </div>

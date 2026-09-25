@@ -172,6 +172,8 @@ let capturedAccountPatch: Record<string, unknown> | null = null;
 // Bodies of POST .../downloads (sync) calls, and how often the folder list / unread count were fetched.
 const downloadPosts: Record<string, unknown>[] = [];
 const downloadAccounts: string[] = []; // the account of each of those POSTs
+// The folder the most recent POST .../downloads asked for (undefined = every folder) — echoed back by the GET status mocks below.
+let lastSyncFolder: string | undefined;
 // Bodies of PATCH .../emails/20 (the combined Sent list's message).
 const capturedResultPatches: Record<string, unknown>[] = [];
 // Bodies of POST /api/auth/change-password.
@@ -279,6 +281,7 @@ function installMockFetch(
   capturedAccountPatch = null;
   downloadPosts.length = 0;
   downloadAccounts.length = 0;
+  lastSyncFolder = undefined;
   capturedResultPatches.length = 0;
   passwordChanges.length = 0;
   imboxMarks = [];
@@ -391,14 +394,15 @@ function installMockFetch(
       const body = init?.body ? JSON.parse(init.body as string) : {};
       downloadPosts.push(body);
       downloadAccounts.push(decodeURIComponent(downloadPost[1]!));
-      return jsonResponse(SYNC_JOB("running"), 202);
+      lastSyncFolder = body.folder;
+      return jsonResponse({ ...SYNC_JOB("running"), folder: lastSyncFolder ?? null }, 202);
     }
     if (method === "GET" && /^\/api\/accounts\/[^/]+\/downloads$/.test(path)) {
       if (!opts.earlierSyncJob) return jsonResponse([]);
       return jsonResponse([{ ...SYNC_JOB(opts.earlierSyncJob), progressCurrent: 5, progressTotal: 10 }]);
     }
     if (method === "GET" && /^\/api\/accounts\/[^/]+\/downloads\/1$/.test(path)) {
-      return jsonResponse(opts.syncStaysRunning ? { ...SYNC_JOB("running"), progressCurrent: 12, progressTotal: 340 } : SYNC_JOB("completed"));
+      return jsonResponse(opts.syncStaysRunning ? { ...SYNC_JOB("running"), folder: lastSyncFolder ?? null, progressCurrent: 12, progressTotal: 340 } : { ...SYNC_JOB("completed"), folder: lastSyncFolder ?? null });
     }
     if (method === "GET" && path === "/api/unified/inbox/new") {
       const afterId = new URL(url, "http://localhost").searchParams.get("afterId");
@@ -2727,6 +2731,29 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(screen.getByText("Hello there")).toBeTruthy();
   });
 
+  test("Sync now refreshes the currently open list, without needing to click the folder again", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+    await screen.findByText("Hello there");
+    const listRequestsBefore = listRequests.filter(r => r.list === "folder").length;
+
+    await userEvent.click(screen.getByTitle("Sync now"));
+    await waitFor(() => expect(downloadPosts).toEqual([{}]));
+    await waitFor(() => expect(listRequests.filter(r => r.list === "folder").length).toBeGreaterThan(listRequestsBefore));
+  });
+
+  test("Sync now also refreshes the combined Inbox when that's the open view, not just a folder list", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await screen.findByText("Unified hello"); // the app opens on the combined Inbox
+    const inboxRequestsBefore = listRequests.filter(r => r.list === "inbox").length;
+
+    await userEvent.click(screen.getByTitle("Sync now"));
+    await waitFor(() => expect(downloadPosts).toEqual([{}]));
+    await waitFor(() => expect(listRequests.filter(r => r.list === "inbox").length).toBeGreaterThan(inboxRequestsBefore));
+  });
+
   test("starred messages show a star in result lists, and the reading pane shows a star instead of a 'Flagged' badge", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
@@ -3314,6 +3341,42 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect(spinner.querySelector(".animate-spin")).toBeTruthy();
     expect(screen.queryByTitle("Sync now")).toBeNull(); // it's the progress tooltip now, not the button hint
     expect(screen.queryByText(/^Syncing/)).toBeNull(); // no extra text block
+  });
+
+  test("each folder row has its own sync button; clicking it syncs just that folder and refreshes the open list", async () => {
+    installMockFetch();
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+    await screen.findByText("Hello there");
+    const listRequestsBefore = listRequests.filter(r => r.list === "folder").length;
+
+    await userEvent.click(screen.getByTitle("Sync Entwürfe"));
+    await waitFor(() => expect(downloadPosts.at(-1)).toEqual({ folder: "Entwürfe" })); // just this one folder, not every folder
+    // The currently open list (INBOX, unrelated to the synced folder) still refreshes — sync completing
+    // always re-reads whatever's on screen, not only the folder that was actually synced.
+    await waitFor(() => expect(listRequests.filter(r => r.list === "folder").length).toBeGreaterThan(listRequestsBefore));
+  });
+
+  test("while a folder sync is running, only that folder's button shows a spinner — other folders are disabled but stay plain", async () => {
+    installMockFetch({ syncStaysRunning: true });
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+
+    await userEvent.click(screen.getByTitle("Sync Entwürfe"));
+    await waitFor(() => expect(screen.queryByTitle("Sync Entwürfe")).toBeNull()); // it's the progress tooltip now
+    const entwuerfeRow = screen.getByText("Entwürfe").closest("div")!;
+    const entwuerfeSpinner = within(entwuerfeRow).getByTitle("Syncing 12/340…");
+    expect(entwuerfeSpinner.querySelector(".animate-spin")).toBeTruthy();
+
+    // INBOX's own button is disabled too (the server allows one job per account at a time), but it isn't
+    // the one syncing, so it stays a plain hover button, no spinner (its title disappears while disabled,
+    // same as the account-level button already does).
+    const inboxRow = screen.getAllByText("Inbox", { selector: "span" }).at(-1)!.closest("div")!; // the account's own Inbox folder row, not the combined one
+    const inboxSyncButton = within(inboxRow).getAllByRole("button").at(-1)!;
+    expect(inboxSyncButton.hasAttribute("disabled")).toBe(true);
+    expect(inboxSyncButton.querySelector(".animate-spin")).toBeNull();
   });
 
   test("Reply all appears only after the pointer or focus reaches Reply, and replies to everyone", async () => {
