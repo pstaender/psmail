@@ -1,3 +1,10 @@
+2026-09-25 - List dates: weekday names, opt-in absolute dates; opt-in letter avatar (7c6c2d6)
+Message lists (folder, combined, search, the conversation bar) now show a weekday name ("Monday", ...) for the 5 days before "Yesterday", instead of falling straight to a short date. The full window is: today a time, yesterday "Yesterday", the 5 days before that a weekday name, further back a short date (with the year once it's not this year).
+New Settings -> UI options, both off by default:
+- "Display dates instead of time expressions" -- message lists always show the absolute date, skipping the time/Yesterday/weekday forms for anyone who'd rather see the actual date.
+- "Display letter avatar" -- the sender's initials in a circle at the top of the reading pane; hidden by default now.
+New tests/frontend/formatListDate.test.ts covers the date logic directly (today, yesterday, each of the 5 weekday days, the 7+ day fallback, the year boundary, forceDate). Backend 510 pass, frontend 379 pass, build OK.
+
 2026-09-25 - Folder sync button: repositioned, and hidden elsewhere while syncing (e286bb8)
 Two changes to the per-folder sync button added last time: it now sits left of the folder's unread count, matching the combined Inbox's own sync button, instead of after everything. And while a sync is running for the account (this button, "Sync now", or the periodic auto-sync), every other folder's sync button disappears outright instead of sitting there disabled on hover -- only the folder actually syncing shows anything (its spinner).
 Backend 510 pass, frontend 369 pass, build OK.
