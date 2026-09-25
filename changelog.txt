@@ -1,3 +1,7 @@
+2026-09-25 - More menu: move checkmark to the right of filter items (edfaef3)
+Follow-up to the two gutter fixes: shrinking the reserved left-side space (8da8405) still left a visible gap before the icons, since a shadcn check item always reserves that column for its checkmark. Moved the checkmark to the right side instead for these items (Filter by date/category, Favorites, Read, Unread), so the row now reads icon, text, check with nothing reserved on the left. DropdownMenuCheckboxItem gained an indicatorAlign prop ("left" default, unchanged everywhere else; "right" for these) rather than hard-coding the new layout.
+Verified against a real running instance. Frontend 379 pass, backend 510 pass, build OK.
+
 2026-09-25 - More menu: tighter left margin on the filter icons (8da8405)
 Follow-up to the icon-alignment fix: the check items (Filter by date/category, Favorites, Read, Unread) still had a wide reserved gutter to the left of their icons -- the shadcn checkbox-item default (32px, room for a checkmark that isn't drawn when unchecked). Narrowed it (24px) for these items, verified against a real running instance via a screenshot. The checkmark still fits without overlapping the icon.
 Frontend unaffected (CSS-only), build OK.
