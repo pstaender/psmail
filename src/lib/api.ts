@@ -62,6 +62,10 @@ export interface UserSettings {
   showCategories?: boolean;
   showUnreadBadges?: boolean;
   textViewOnly?: boolean;
+  /** Opt-in: message lists always show absolute dates, never "14:32" / "Yesterday" / a weekday name. */
+  showAbsoluteDates?: boolean;
+  /** Opt-in: the sender's letter avatar in the reading pane header. */
+  showLetterAvatar?: boolean;
 }
 
 /** What narrows a message list (folder, combined or search): a date window, categories, only favorites, only read / only unread. */

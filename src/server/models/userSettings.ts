@@ -29,10 +29,14 @@ export interface UserSettings {
   showCategories?: boolean;
   showUnreadBadges?: boolean;
   textViewOnly?: boolean;
+  /** Opt-in: message lists show absolute dates always, instead of "14:32" / "Yesterday" / a weekday name. */
+  showAbsoluteDates?: boolean;
+  /** Opt-in: the sender's letter avatar in the reading pane header. */
+  showLetterAvatar?: boolean;
 }
 
 /** The interface options (Settings → UI): all off unless the user turns them on. */
-export const UI_FLAGS = ["showConversations", "showCategories", "showUnreadBadges", "textViewOnly"] as const;
+export const UI_FLAGS = ["showConversations", "showCategories", "showUnreadBadges", "textViewOnly", "showAbsoluteDates", "showLetterAvatar"] as const;
 
 export const MAX_SYNC_INTERVAL_MINUTES = 24 * 60;
 

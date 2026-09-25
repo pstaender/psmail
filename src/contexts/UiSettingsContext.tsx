@@ -6,9 +6,18 @@ export interface UiSettings {
   showCategories: boolean;
   showUnreadBadges: boolean;
   textViewOnly: boolean;
+  showAbsoluteDates: boolean;
+  showLetterAvatar: boolean;
 }
 
-export const PLAIN_UI: UiSettings = { showConversations: false, showCategories: false, showUnreadBadges: false, textViewOnly: false };
+export const PLAIN_UI: UiSettings = {
+  showConversations: false,
+  showCategories: false,
+  showUnreadBadges: false,
+  textViewOnly: false,
+  showAbsoluteDates: false,
+  showLetterAvatar: false,
+};
 
 export const UiSettingsContext = createContext<UiSettings>(PLAIN_UI);
 

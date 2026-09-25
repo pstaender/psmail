@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { formatListDate } from "@/lib/time";
 import { cn } from "@/lib/utils";
+import { useUiSettings } from "@/contexts/UiSettingsContext";
 import type { Conversation, ConversationMessage } from "../../server/models/conversations";
 
 const who = (message: ConversationMessage) => (message.own ? "You" : message.from?.name || message.from?.address || "(unknown)");
@@ -21,6 +22,7 @@ export function ConversationBar({
   conversation: Conversation | null;
   onOpen: (message: ConversationMessage) => void;
 }) {
+  const { showAbsoluteDates } = useUiSettings();
   const [open, setOpen] = useState(false);
   if (!conversation || conversation.messages.length < 2) return null;
 
@@ -60,7 +62,7 @@ export function ConversationBar({
                 )}
               >
                 <span className="w-28 shrink-0 truncate">{who(message)}</span>
-                <span className="w-16 shrink-0 text-muted-foreground">{formatListDate(message.date)}</span>
+                <span className="w-16 shrink-0 text-muted-foreground">{formatListDate(message.date, { forceDate: showAbsoluteDates })}</span>
                 <span className="min-w-0 flex-1 truncate text-muted-foreground">{message.snippet || message.subject || "(no text)"}</span>
                 {message.forwarded && <Forward aria-label="Forwarded" className="size-3 shrink-0 self-center text-muted-foreground/70" />}
                 {!message.isRead && !message.own && <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-label="Unread" />}

@@ -51,7 +51,7 @@ export function SearchResultList({
   /** A date filter is on: an empty list means nothing in that period. */
   filtered?: boolean;
 }) {
-  const { showConversations, showCategories } = useUiSettings();
+  const { showConversations, showCategories, showAbsoluteDates } = useUiSettings();
   const sentinelRef = useRef<HTMLLIElement>(null);
   const onLoadMoreRef = useRef(onLoadMore);
   onLoadMoreRef.current = onLoadMore;
@@ -99,7 +99,7 @@ export function SearchResultList({
               <div className="flex items-center gap-2">
                 {!result.isRead && <span className="size-1.5 shrink-0 rounded-full bg-primary" />}
                 <span className={cn("flex-1 truncate text-sm", !result.isRead && "font-semibold")}>{participantLabel(result, showRecipient)}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">{formatListDate(result.date)}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{formatListDate(result.date, { forceDate: showAbsoluteDates })}</span>
                 <span
                   role="button"
                   tabIndex={0}

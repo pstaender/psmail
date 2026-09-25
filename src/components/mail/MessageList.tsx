@@ -53,7 +53,7 @@ export function MessageList({
   /** A date filter is on: an empty list means nothing in that period, not an empty folder. */
   filtered?: boolean;
 }) {
-  const { showConversations, showCategories } = useUiSettings();
+  const { showConversations, showCategories, showAbsoluteDates } = useUiSettings();
   const sentinelRef = useRef<HTMLLIElement>(null);
   const onLoadMoreRef = useRef(onLoadMore);
   onLoadMoreRef.current = onLoadMore;
@@ -105,7 +105,7 @@ export function MessageList({
                 <span className={cn("flex-1 truncate text-sm", !email.isRead && "font-semibold")}>
                   {participantLabel(email, folder)}
                 </span>
-                <span className="shrink-0 text-xs text-muted-foreground">{formatListDate(email.date)}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{formatListDate(email.date, { forceDate: showAbsoluteDates })}</span>
                 <span
                   role="button"
                   tabIndex={0}

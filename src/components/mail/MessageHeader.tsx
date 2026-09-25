@@ -49,7 +49,7 @@ export function MessageHeader({
   replyMessage?: ConversationMessage | null;
   onOpenReply?: (message: ConversationMessage) => void;
 }) {
-  const { showConversations } = useUiSettings();
+  const { showConversations, showLetterAvatar } = useUiSettings();
   const [expanded, setExpanded] = useState(false);
   // "Expand all details": Cc/Bcc (and To) unclamped, plus the message id, which is hidden otherwise.
   const [allDetails, setAllDetails] = useState(false);
@@ -110,9 +110,11 @@ export function MessageHeader({
       )}
 
       <div className="flex items-start gap-3">
-        <Avatar className="size-9 shrink-0">
-          <AvatarFallback>{(from?.name || from?.address || "?").slice(0, 2).toUpperCase()}</AvatarFallback>
-        </Avatar>
+        {showLetterAvatar && (
+          <Avatar className="size-9 shrink-0">
+            <AvatarFallback>{(from?.name || from?.address || "?").slice(0, 2).toUpperCase()}</AvatarFallback>
+          </Avatar>
+        )}
 
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-baseline justify-between gap-2">

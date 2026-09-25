@@ -127,7 +127,20 @@ const DRAFT_EMAIL = {
 };
 
 // What the Settings dialog saves when only the fields a test touches were changed.
-const DEFAULT_PATCH = { syncIntervalMinutes: null, combinedInboxIncludesFolders: false, imboxEnabled: false, notifyBrowser: false, notifyToast: false, notificationSound: "crystal_clear", showConversations: true, showCategories: true, showUnreadBadges: true, textViewOnly: false };
+const DEFAULT_PATCH = {
+  syncIntervalMinutes: null,
+  combinedInboxIncludesFolders: false,
+  imboxEnabled: false,
+  notifyBrowser: false,
+  notifyToast: false,
+  notificationSound: "crystal_clear",
+  showConversations: true,
+  showCategories: true,
+  showUnreadBadges: true,
+  textViewOnly: false,
+  showAbsoluteDates: false,
+  showLetterAvatar: false,
+};
 
 const SYNC_JOB = (status: string) => ({
   id: 1, accountId: 1, folder: null, status, progressCurrent: 0, progressTotal: 0, error: null, startedAt: NOW, finishedAt: null, createdAt: NOW,
@@ -217,6 +230,8 @@ function installMockFetch(
       showCategories?: boolean;
       showUnreadBadges?: boolean;
       textViewOnly?: boolean;
+      showAbsoluteDates?: boolean;
+      showLetterAvatar?: boolean;
       bodyView?: string;
       syncIntervalMinutes?: number;
       combinedInboxIncludesFolders?: boolean;
@@ -258,6 +273,8 @@ function installMockFetch(
     imboxUnread?: number;
     /** The imbox verdict the opened message (id 10) has: true / false / null (not classified). */
     emailImbox?: boolean | null;
+    /** Overrides the opened message's (id 10) date — for testing how the list/header formats it. */
+    emailDate?: string;
     /** Makes POST /api/auth/change-username answer with this error (status 409) instead of succeeding. */
     changeUsernameError?: string;
     /** Makes POST /api/auth/change-password answer with this error (status 401) instead of succeeding. */
@@ -432,7 +449,7 @@ function installMockFetch(
         pagedRequests.push({ limit, offset });
         return jsonResponse(all.slice(offset, offset + limit));
       }
-      return jsonResponse([EMAIL, SECOND_EMAIL, THIRD_EMAIL, DRAFT_EMAIL]);
+      return jsonResponse([opts.emailDate ? { ...EMAIL, date: opts.emailDate } : EMAIL, SECOND_EMAIL, THIRD_EMAIL, DRAFT_EMAIL]);
     }
     if (method === "POST" && path === "/api/auth/change-username") {
       const body = JSON.parse(init!.body as string) as { username: string };
@@ -561,7 +578,7 @@ function installMockFetch(
       imboxUnreadRequests += 1;
       return jsonResponse({ count: opts.imboxUnread ?? 0 });
     }
-    if (method === "GET" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse({ ...EMAIL, imbox: opts.emailImbox ?? null });
+    if (method === "GET" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse({ ...EMAIL, imbox: opts.emailImbox ?? null, date: opts.emailDate ?? EMAIL.date });
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse(SECOND_EMAIL);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/12") return jsonResponse(THIRD_EMAIL);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/13") return jsonResponse(DRAFT_EMAIL);
@@ -5227,20 +5244,60 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(screen.getByRole("tab", { name: "Text" })).toBeTruthy();
     });
 
-    test("the UI tab lists the four options, off by default, and saves them", async () => {
+    test("the UI tab lists all six options, off by default, and saves them", async () => {
       installMockFetch({ settings: PLAIN });
       render(<App />);
       await userEvent.click(await screen.findByText("default"));
       await openAccountInbox();
       await userEvent.click(screen.getByTitle("Settings"));
       await userEvent.click(await screen.findByRole("tab", { name: "UI" }));
-      for (const name of ["Show conversations", "Show categories", "Show unread badges", "Always show the text view"])
+      for (const name of [
+        "Show conversations",
+        "Show categories",
+        "Show unread badges",
+        "Always show the text view",
+        "Display dates instead of time expressions",
+        "Display letter avatar",
+      ])
         expect(screen.getByLabelText(name).getAttribute("aria-checked")).toBe("false");
 
       await userEvent.click(screen.getByLabelText("Show unread badges"));
       await userEvent.click(screen.getByLabelText("Always show the text view"));
+      await userEvent.click(screen.getByLabelText("Display dates instead of time expressions"));
+      await userEvent.click(screen.getByLabelText("Display letter avatar"));
       await userEvent.click(screen.getByRole("button", { name: "Save" }));
-      await waitFor(() => expect(capturedSettingsPatches).toEqual([{ ...DEFAULT_PATCH, ...PLAIN, showUnreadBadges: true, textViewOnly: true }]));
+      await waitFor(() =>
+        expect(capturedSettingsPatches).toEqual([{ ...DEFAULT_PATCH, ...PLAIN, showUnreadBadges: true, textViewOnly: true, showAbsoluteDates: true, showLetterAvatar: true }])
+      );
+    });
+
+    test("Display letter avatar: off by default, no avatar in the reading pane", async () => {
+      await openHello({});
+      expect(screen.queryByText("AL")).toBeNull(); // EMAIL's sender is "Alice" — the fallback would be her initials, "AL"
+    });
+
+    test("Display letter avatar: turned on, shows the sender's initials in the reading pane", async () => {
+      await openHello({ settings: { showLetterAvatar: true } });
+      expect(screen.getByText("AL")).toBeTruthy();
+    });
+
+    test("Display dates instead of time expressions: today's message shows a date, not a time, in the list", async () => {
+      const now = new Date();
+      installMockFetch({ emailDate: now.toISOString() });
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+      // Off by default: today's message shows a time (HH:MM), not a date, in its list row.
+      const row = () => screen.getByText("Hello there").closest("li")!;
+      expect(within(row()).getByText(/^\d{1,2}:\d{2}/)).toBeTruthy();
+      cleanup();
+
+      installMockFetch({ settings: { showAbsoluteDates: true }, emailDate: now.toISOString() });
+      render(<App />); // still signed in from above
+      await openAccountInbox();
+      expect(within(row()).queryByText(/^\d{1,2}:\d{2}/)).toBeNull();
+      const expectedDate = now.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      expect(within(row()).getByText(expectedDate)).toBeTruthy();
     });
   });
 });

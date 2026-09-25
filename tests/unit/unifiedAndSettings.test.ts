@@ -396,15 +396,30 @@ describe("user settings: notifications", () => {
   test("the interface options are off unless set, accept true/false/null and reject anything else", async () => {
     const { db, user } = await setup([]);
     expect(getUserSettings(db, user.id)).toEqual({});
-    expect(updateUserSettings(db, user.id, { showConversations: true, showCategories: true, showUnreadBadges: false, textViewOnly: true })).toEqual({
+    expect(
+      updateUserSettings(db, user.id, {
+        showConversations: true,
+        showCategories: true,
+        showUnreadBadges: false,
+        textViewOnly: true,
+        showAbsoluteDates: true,
+        showLetterAvatar: true,
+      })
+    ).toEqual({
       showConversations: true,
       showCategories: true,
       showUnreadBadges: false,
       textViewOnly: true,
+      showAbsoluteDates: true,
+      showLetterAvatar: true,
     });
-    expect(updateUserSettings(db, user.id, { showConversations: null, showCategories: null, showUnreadBadges: null })).toEqual({ textViewOnly: true });
+    expect(
+      updateUserSettings(db, user.id, { showConversations: null, showCategories: null, showUnreadBadges: null, showAbsoluteDates: null, showLetterAvatar: null })
+    ).toEqual({ textViewOnly: true });
     expect(() => updateUserSettings(db, user.id, { showCategories: "yes" })).toThrow(/showCategories must be true or false/);
     expect(() => updateUserSettings(db, user.id, { textViewOnly: 1 })).toThrow(/textViewOnly must be true or false/);
+    expect(() => updateUserSettings(db, user.id, { showAbsoluteDates: "x" })).toThrow(/showAbsoluteDates must be true or false/);
+    expect(() => updateUserSettings(db, user.id, { showLetterAvatar: "x" })).toThrow(/showLetterAvatar must be true or false/);
   });
 });
 

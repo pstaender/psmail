@@ -477,8 +477,17 @@ export function AppShell() {
       showCategories: settings.showCategories === true,
       showUnreadBadges: settings.showUnreadBadges === true,
       textViewOnly: settings.textViewOnly === true,
+      showAbsoluteDates: settings.showAbsoluteDates === true,
+      showLetterAvatar: settings.showLetterAvatar === true,
     }),
-    [settings.showConversations, settings.showCategories, settings.showUnreadBadges, settings.textViewOnly],
+    [
+      settings.showConversations,
+      settings.showCategories,
+      settings.showUnreadBadges,
+      settings.textViewOnly,
+      settings.showAbsoluteDates,
+      settings.showLetterAvatar,
+    ],
   );
   const refreshImboxUnread = useCallback(() => {
     if (!token || !imboxOn) return;

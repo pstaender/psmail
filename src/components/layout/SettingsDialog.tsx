@@ -26,14 +26,18 @@ export interface SettingsPatch {
   showCategories: boolean;
   showUnreadBadges: boolean;
   textViewOnly: boolean;
+  showAbsoluteDates: boolean;
+  showLetterAvatar: boolean;
 }
 
 /** The interface options, in the order the UI tab lists them. */
-const UI_OPTIONS: { key: "showConversations" | "showCategories" | "showUnreadBadges" | "textViewOnly"; title: string; text: string }[] = [
+const UI_OPTIONS: { key: "showConversations" | "showCategories" | "showUnreadBadges" | "textViewOnly" | "showAbsoluteDates" | "showLetterAvatar"; title: string; text: string }[] = [
   { key: "showConversations", title: "Show conversations", text: "Marks messages that belong to a conversation or were replied to, offers \"See your reply\" and a bar to jump to the earlier and later messages of the conversation." },
   { key: "showCategories", title: "Show categories", text: "Shows the AI categories of a message as chips in the message list, and offers filtering the list by category." },
   { key: "showUnreadBadges", title: "Show unread badges", text: "Shows the number of unread messages next to the Inbox, Imbox and each folder." },
   { key: "textViewOnly", title: "Always show the text view", text: "Reads every message as text: MD, Plain, Safe HTML and HTML are not offered." },
+  { key: "showAbsoluteDates", title: "Display dates instead of time expressions", text: "Message lists always show an absolute date (\"23 Sep\", or \"23 Sep 2025\" for an older year) instead of \"14:32\" for today, \"Yesterday\", or a weekday name for the 5 days before that." },
+  { key: "showLetterAvatar", title: "Display letter avatar", text: "Shows the sender's initials in a circle at the top of the reading pane." },
 ];
 
 /** Per-user preferences, stored on the server (so they follow the user across browsers). */
@@ -62,7 +66,14 @@ export function SettingsDialog({
   const [notifyBrowser, setNotifyBrowser] = useState(false);
   const [notifyToast, setNotifyToast] = useState(false);
   const [sound, setSound] = useState<SettingsPatch["notificationSound"]>(DEFAULT_NOTIFICATION_SOUND);
-  const [ui, setUi] = useState({ showConversations: false, showCategories: false, showUnreadBadges: false, textViewOnly: false });
+  const [ui, setUi] = useState({
+    showConversations: false,
+    showCategories: false,
+    showUnreadBadges: false,
+    textViewOnly: false,
+    showAbsoluteDates: false,
+    showLetterAvatar: false,
+  });
   const [tab, setTab] = useState("inboxes");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +92,8 @@ export function SettingsDialog({
         showCategories: settings.showCategories === true,
         showUnreadBadges: settings.showUnreadBadges === true,
         textViewOnly: settings.textViewOnly === true,
+        showAbsoluteDates: settings.showAbsoluteDates === true,
+        showLetterAvatar: settings.showLetterAvatar === true,
       });
       setError(null);
       setTab("inboxes");
