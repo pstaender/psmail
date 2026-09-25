@@ -28,7 +28,10 @@ function raw(opts: { uid: number; from: string; subject: string; body: string; h
   );
 }
 
-const noFlags = async (_c: unknown, _f: string, uids: number[]) => new Map<number, RemoteFlagState>(uids.map(uid => [uid, { seen: false, flagged: false }]));
+const noFlags = async (_c: unknown, _f: string, uids: number[]) => ({
+  uidValidity: 1,
+  flags: new Map<number, RemoteFlagState>(uids.map(uid => [uid, { seen: false, flagged: false }])),
+});
 
 describe("new mail is classified for the imbox as it is synced", () => {
   let configDir: string;

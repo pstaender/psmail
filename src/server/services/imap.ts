@@ -316,27 +316,34 @@ export interface RemoteFlagState {
   forwarded?: boolean;
 }
 
+export interface RemoteFlagsResult {
+  /** The folder's UIDVALIDITY as of this open — see models/folderValidity.ts for why the caller needs it. */
+  uidValidity: number;
+  /** A UID missing from this map is no longer in `folder` on the server — deleted, expunged, or moved elsewhere by
+   * another client — which the caller treats as "gone", but ONLY once it has confirmed UIDVALIDITY hasn't changed. */
+  flags: Map<number, RemoteFlagState>;
+}
+
 /**
  * Fetches the current \Seen/\Flagged state of exactly the given UIDs, for reconciling local
- * flags with changes made by other IMAP clients (two-way sync). A UID missing from the
- * returned map is no longer in `folder` on the server — deleted, expunged, or moved elsewhere
- * by another client — which the caller treats as "gone".
+ * flags with changes made by other IMAP clients (two-way sync).
  */
-export async function fetchRemoteFlags(client: ImapFlow, folder: string, uids: number[]): Promise<Map<number, RemoteFlagState>> {
-  const result = new Map<number, RemoteFlagState>();
-  if (uids.length === 0) return result;
+export async function fetchRemoteFlags(client: ImapFlow, folder: string, uids: number[]): Promise<RemoteFlagsResult> {
+  const mailbox = await client.mailboxOpen(folder);
+  const uidValidity = Number(mailbox.uidValidity);
+  const flags = new Map<number, RemoteFlagState>();
+  if (uids.length === 0) return { uidValidity, flags };
 
-  await client.mailboxOpen(folder);
   // A single min:max range string (not `{ uid: ... }`, which imapflow treats as a search whose
   // hits get listed in the UID FETCH) — a list of thousands of UIDs makes servers reject the
   // command ("Too long argument"). Extra UIDs inside the range
   // that we don't track are harmless — the caller only looks up the UIDs it asked about.
   const range = `${Math.min(...uids)}:${Math.max(...uids)}`;
   for await (const message of client.fetch(range, { uid: true, flags: true }, { uid: true })) {
-    const flags = message.flags ?? new Set<string>();
-    result.set(message.uid, { seen: flags.has("\\Seen"), flagged: flags.has("\\Flagged"), forwarded: flags.has("$Forwarded") });
+    const messageFlags = message.flags ?? new Set<string>();
+    flags.set(message.uid, { seen: messageFlags.has("\\Seen"), flagged: messageFlags.has("\\Flagged"), forwarded: messageFlags.has("$Forwarded") });
   }
-  return result;
+  return { uidValidity, flags };
 }
 
 export interface AppendResult {

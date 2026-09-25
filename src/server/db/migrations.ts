@@ -31,6 +31,12 @@ const MIGRATIONS = [
   "ALTER TABLE ai_apis ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE ai_apis ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE users ADD COLUMN settings TEXT NOT NULL DEFAULT '{}'",
+  `CREATE TABLE IF NOT EXISTS folder_uid_validity (
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    folder TEXT NOT NULL,
+    uid_validity INTEGER NOT NULL,
+    PRIMARY KEY (account_id, folder)
+  ) WITHOUT ROWID`,
 ];
 
 /** Indexes on columns the migrations above add, so they can only be created afterwards. */

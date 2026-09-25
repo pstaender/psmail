@@ -61,6 +61,7 @@ function createFakeClient(
     capabilities?: Map<string, boolean | number>;
     fetchResults?: { uid: number; flags: Set<string> }[];
     list?: unknown[];
+    uidValidity?: number;
   } = {}
 ) {
   const calls: { method: string; args: unknown[] }[] = [];
@@ -72,7 +73,7 @@ function createFakeClient(
     },
     mailboxOpen: async (...args: unknown[]) => {
       calls.push({ method: "mailboxOpen", args });
-      return {};
+      return { uidValidity: BigInt(overrides.uidValidity ?? 1) };
     },
     messageFlagsAdd: async (...args: unknown[]) => {
       calls.push({ method: "messageFlagsAdd", args });
@@ -289,7 +290,8 @@ describe("fetchRemoteFlags", () => {
       { method: "mailboxOpen", args: ["INBOX"] },
       { method: "fetch", args: ["1:3", { uid: true, flags: true }, { uid: true }] },
     ]);
-    expect(result).toEqual(
+    expect(result.uidValidity).toBe(1);
+    expect(result.flags).toEqual(
       new Map([
         [1, { seen: true, flagged: false, forwarded: false }],
         [3, { seen: true, flagged: true, forwarded: false }],
@@ -300,14 +302,15 @@ describe("fetchRemoteFlags", () => {
   test("a UID absent from the server's response is simply absent from the result", async () => {
     const { client } = createFakeClient({ fetchResults: [{ uid: 1, flags: new Set(["\\Seen"]) }] });
     const result = await fetchRemoteFlags(client, "INBOX", [1, 2]);
-    expect(result.has(2)).toBe(false);
+    expect(result.flags.has(2)).toBe(false);
   });
 
-  test("skips the network round-trip entirely for an empty UID list", async () => {
-    const { client, calls } = createFakeClient();
+  test("reports the folder's UIDVALIDITY even for an empty UID list — no flags are fetched, but the folder is still opened for it", async () => {
+    const { client, calls } = createFakeClient({ uidValidity: 42 });
     const result = await fetchRemoteFlags(client, "INBOX", []);
-    expect(calls).toEqual([]);
-    expect(result.size).toBe(0);
+    expect(calls).toEqual([{ method: "mailboxOpen", args: ["INBOX"] }]);
+    expect(result.uidValidity).toBe(42);
+    expect(result.flags.size).toBe(0);
   });
 });
 

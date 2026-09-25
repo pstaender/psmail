@@ -189,6 +189,38 @@ describe("P.S.Mail API", () => {
     expect(json.error).toMatch(/From address/);
   });
 
+  test("an SMTP failure is logged (not silent) and leaves the draft fully intact, not lost", async () => {
+    // A real From/To this time, so the draft gets as far as actually trying to send — the account's SMTP host
+    // (smtp.example.com, set up above) doesn't exist, so this fails at the network step, same as a real outage.
+    const draft = await api("POST", `/api/accounts/${encodeURIComponent(accountEmail)}/emails`, {
+      token,
+      body: { from: [{ address: accountEmail }], to: [{ address: "someone@example.org" }], subject: "Will not send", plainText: "content" },
+    });
+    expect(draft.status).toBe(201);
+
+    const logs: string[] = [];
+    const originalLog = console.log;
+    const originalError = console.error;
+    console.log = (...args: unknown[]) => logs.push(String(args[0]));
+    console.error = (...args: unknown[]) => logs.push(String(args[0]));
+    let sendResult: { status: number; json: any };
+    try {
+      sendResult = await api("POST", `/api/accounts/${encodeURIComponent(accountEmail)}/emails/${draft.json.id}/send`, { token });
+    } finally {
+      console.log = originalLog;
+      console.error = originalError;
+    }
+
+    expect(sendResult.status).toBe(500); // not silently "ok", and not mistaken for a validation error either
+    expect(logs.some(line => line.includes(`sending draft #${draft.json.id}`) && line.includes("someone@example.org"))).toBe(true);
+    expect(logs.some(line => line.includes("SMTP send failed") && line.includes(`#${draft.json.id}`))).toBe(true);
+
+    // Nothing was lost or half-applied: the draft is exactly as it was, still a draft, ready to retry.
+    const stillThere = await api("GET", `/api/accounts/${encodeURIComponent(accountEmail)}/emails/${draft.json.id}`, { token });
+    expect(stillThere.status).toBe(200);
+    expect(stillThere.json).toMatchObject({ isDraft: true, subject: "Will not send", plainText: "content", uid: null });
+  });
+
   test("attachments: upload, download, and delete", async () => {
     const form = new FormData();
     form.append("file", new File(["hello world"], "note.txt", { type: "text/plain" }));

@@ -49,10 +49,12 @@ const fakeFetchMessages = async (_creds: unknown, _folder: string, sinceUid: num
 // Matches what fakeFetchMessages' persisted rows actually have (createEmail always starts a
 // synced message as unread/unflagged) — a safe no-op default for tests that aren't specifically
 // exercising reconciliation, so it doesn't delete everything fakeFetchMessages just created.
+// A stand-in UIDVALIDITY: none of these tests are about it changing, so every fake reports the same one.
+const FAKE_UID_VALIDITY = 1;
 const fakeFetchRemoteFlagsNoop = async (_creds: unknown, _folder: string, uids: number[]) => {
   const map = new Map<number, RemoteFlagState>();
   for (const uid of uids) map.set(uid, { seen: false, flagged: false });
-  return map;
+  return { uidValidity: FAKE_UID_VALIDITY, flags: map };
 };
 
 describe("runSync", () => {
@@ -312,7 +314,7 @@ describe("runSync", () => {
       db, account: readOnly, username: user.username, folder: "INBOX", downloadJobId: job.id,
       imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
       fetchMessages: async () => ({ messages: [] }),
-      fetchRemoteFlags: async (_c, _f, uids) => new Map(uids.filter(uid => uid !== 3).map(uid => [uid, { seen: false, flagged: false }])),
+      fetchRemoteFlags: async (_c, _f, uids) => ({ uidValidity: FAKE_UID_VALIDITY, flags: new Map(uids.filter(uid => uid !== 3).map(uid => [uid, { seen: false, flagged: false }])) }),
     });
     expect(listDeletedUids(db, account.id, "INBOX")).toEqual([]);
   });
@@ -399,7 +401,7 @@ describe("runSync", () => {
     const fetchRemoteFlagsWithChange = async (_creds: unknown, _folder: string, uids: number[]) => {
       const map = new Map<number, RemoteFlagState>();
       for (const uid of uids) map.set(uid, uid === 2 ? { seen: true, flagged: true } : { seen: false, flagged: false });
-      return map;
+      return { uidValidity: FAKE_UID_VALIDITY, flags: map };
     };
 
     const job2 = createDownloadJob(db, account.id, "INBOX");
@@ -432,8 +434,10 @@ describe("runSync", () => {
         db, account, username: user.username, folder: "INBOX", downloadJobId: job.id,
         imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
         fetchMessages: fakeFetchMessages,
-        fetchRemoteFlags: async (_creds: unknown, _folder: string, uids: number[]) =>
-          new Map(uids.map(uid => [uid, { seen: false, flagged: false, forwarded: forwardedUids.includes(uid) }] as [number, RemoteFlagState])),
+        fetchRemoteFlags: async (_creds: unknown, _folder: string, uids: number[]) => ({
+          uidValidity: FAKE_UID_VALIDITY,
+          flags: new Map(uids.map(uid => [uid, { seen: false, flagged: false, forwarded: forwardedUids.includes(uid) }] as [number, RemoteFlagState])),
+        }),
       });
       return listEmails(db, account.id, { folder: "INBOX" }).map(e => getEmail(db, e.id));
     };
@@ -465,7 +469,7 @@ describe("runSync", () => {
     const fetchRemoteFlagsWithDeletion = async (_creds: unknown, _folder: string, uids: number[]) => {
       const map = new Map<number, RemoteFlagState>();
       for (const uid of uids) if (uid !== 2) map.set(uid, { seen: false, flagged: false });
-      return map;
+      return { uidValidity: FAKE_UID_VALIDITY, flags: map };
     };
 
     const job2 = createDownloadJob(db, account.id, "INBOX");
@@ -482,5 +486,64 @@ describe("runSync", () => {
 
     const remaining = listEmails(db, account.id, { folder: "INBOX" });
     expect(remaining.map(e => e.subject).sort()).toEqual(["First", "Third"]);
+  });
+
+  test("a UIDVALIDITY change never deletes what's already stored — it asks for a full resync instead, and settles once the new value repeats", async () => {
+    const { db, user, account } = await setup();
+
+    const job1 = createDownloadJob(db, account.id, "INBOX");
+    await runSync({
+      db, account, username: user.username, folder: "INBOX", downloadJobId: job1.id,
+      imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      fetchMessages: fakeFetchMessages,
+      fetchRemoteFlags: fakeFetchRemoteFlagsNoop,
+    });
+    expect(listEmails(db, account.id, { folder: "INBOX" })).toHaveLength(3);
+
+    // The server renumbered the folder from scratch (a rebuild/repair): a different UIDVALIDITY, and none of the
+    // old UIDs (1, 2, 3) resolve to anything any more — the same 3 messages are there, now under UIDs 101-103.
+    const RENUMBERED = FAKE_MESSAGES.map((m, i) => ({ ...m, uid: 101 + i }));
+    const sinceUidsRequested: number[] = [];
+    const fetchRenumbered = async (_creds: unknown, _folder: string, sinceUid: number) => {
+      sinceUidsRequested.push(sinceUid);
+      return { messages: RENUMBERED.filter(m => m.uid > sinceUid) };
+    };
+    const fetchRemoteFlagsNewValidity = async (_creds: unknown, _folder: string, _uids: number[]) => ({
+      uidValidity: FAKE_UID_VALIDITY + 1,
+      flags: new Map<number, RemoteFlagState>(), // none of the old UIDs found — but that must NOT read as "all gone"
+    });
+
+    const job2 = createDownloadJob(db, account.id, "INBOX");
+    await runSync({
+      db, account, username: user.username, folder: "INBOX", downloadJobId: job2.id,
+      imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      fetchMessages: fetchRenumbered,
+      fetchRemoteFlags: fetchRemoteFlagsNewValidity,
+    });
+    // Nothing lost: the 3 original rows (UIDs 1-3) are still there, plus the same 3 messages freshly discovered
+    // under their new UIDs (101-103) — a duplicate is far better than the old behavior, silent permanent deletion.
+    const afterRenumbering = listEmails(db, account.id, { folder: "INBOX" });
+    expect(afterRenumbering).toHaveLength(6);
+    expect(afterRenumbering.filter(e => (e.uid ?? 0) < 100).map(e => e.subject).sort()).toEqual(["First", "Second", "Third"]);
+    expect(afterRenumbering.filter(e => (e.uid ?? 0) >= 100).map(e => e.subject).sort()).toEqual(["First", "Second", "Third"]);
+    expect(sinceUidsRequested).toEqual([0]); // asked for everything — the old watermark (3) was unusable under the new UIDVALIDITY
+
+    // The new UIDVALIDITY is now the recorded baseline: a THIRD sync reporting the same one again, with UID 102
+    // genuinely missing, deletes it normally — reconciliation works again as soon as things are stable.
+    const fetchRemoteFlagsStable = async (_creds: unknown, _folder: string, uids: number[]) => {
+      const map = new Map<number, RemoteFlagState>();
+      for (const uid of uids) if (uid !== 102) map.set(uid, { seen: false, flagged: false });
+      return { uidValidity: FAKE_UID_VALIDITY + 1, flags: map };
+    };
+    const job3 = createDownloadJob(db, account.id, "INBOX");
+    await runSync({
+      db, account, username: user.username, folder: "INBOX", downloadJobId: job3.id,
+      imapCredentials: { host: "x", port: 993, secure: true, username: "x", password: "x" },
+      fetchMessages: async () => ({ messages: [] }),
+      fetchRemoteFlags: fetchRemoteFlagsStable,
+    });
+    const finalState = listEmails(db, account.id, { folder: "INBOX" });
+    expect(finalState.some(e => e.uid === 102)).toBe(false); // deleted, now that the UIDVALIDITY is confirmed stable
+    expect(finalState).toHaveLength(5);
   });
 });

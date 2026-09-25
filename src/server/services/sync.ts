@@ -6,6 +6,7 @@ import { addAttachment, createEmail, deleteEmail, findEmailByUid, findSentPlaceh
 import { completeDownloadJob, failDownloadJob, startDownloadJob, updateDownloadProgress, updateDownloadTotal } from "../models/downloads";
 import { isAccountDisabled, learnSpecialFolders, type AccountRow } from "../models/accounts";
 import { isUidDeleted, listDeletedUids, maxDeletedUid, removeDeletedUids } from "../models/tombstones";
+import { getFolderUidValidity, setFolderUidValidity } from "../models/folderValidity";
 import {
   fetchNewMessages,
   describeImapError,
@@ -16,7 +17,7 @@ import {
   withImapClient,
   type FetchedMessage,
   type ImapCredentials,
-  type RemoteFlagState,
+  type RemoteFlagsResult,
 } from "./imap";
 import { parseMessage } from "./messageParser";
 
@@ -47,17 +48,13 @@ async function defaultFetchMessages(
   });
 }
 
-/** The real IMAP flag lookup — connects and reads the current \Seen/\Flagged state of the given UIDs. */
-async function defaultFetchRemoteFlags(
-  creds: ImapCredentials,
-  folder: string,
-  uids: number[]
-): Promise<Map<number, RemoteFlagState>> {
+/** The real IMAP flag lookup — connects and reads the current \Seen/\Flagged state of the given UIDs, plus the folder's UIDVALIDITY. */
+async function defaultFetchRemoteFlags(creds: ImapCredentials, folder: string, uids: number[]): Promise<RemoteFlagsResult> {
   return withImapClient(creds, client => fetchRemoteFlagsFromServer(client, folder, uids));
 }
 
 type FetchMessagesFn = (creds: ImapCredentials, folder: string, sinceUid: number, hooks?: FetchHooks) => Promise<{ messages: FetchedMessage[] }>;
-type FetchRemoteFlagsFn = (creds: ImapCredentials, folder: string, uids: number[]) => Promise<Map<number, RemoteFlagState>>;
+type FetchRemoteFlagsFn = (creds: ImapCredentials, folder: string, uids: number[]) => Promise<RemoteFlagsResult>;
 
 export interface RunSyncOptions {
   db: Database;
@@ -89,6 +86,17 @@ export interface RunSyncOptions {
  * client is mirrored onto the local row; a UID no longer present on the server (deleted,
  * expunged, or moved elsewhere by another client) is removed locally too, so the folder view
  * doesn't keep showing something that's gone.
+ *
+ * A UID only means anything within the folder's current UIDVALIDITY — if the server has renumbered the folder from
+ * scratch since the last time this ran (rare: a rebuild, a repair, certain migrations), every UID stored here may
+ * now name a different message or nothing at all. Trusting them anyway is exactly what could make a message that
+ * is still genuinely on the server look "gone" and get deleted here, permanently, for good — so a *change* from a
+ * previously-recorded UIDVALIDITY skips reconciling by UID entirely for this run (nothing here is treated as
+ * missing, nothing here has its flags "corrected" from what could be a completely unrelated message) and asks the
+ * caller for a full resync instead, so the folder's current messages get discovered fresh, under their real UIDs.
+ * The very first time a folder is seen (no UIDVALIDITY recorded yet, e.g. an install from before this existed) is
+ * NOT treated as a change — there is nothing to compare against, and treating it as one would force a needless full
+ * re-download of every already-known message on the next sync of every account's every folder.
  */
 async function reconcileExisting(
   db: Database,
@@ -96,14 +104,24 @@ async function reconcileExisting(
   folder: string,
   imapCredentials: ImapCredentials,
   fetchRemoteFlags: FetchRemoteFlagsFn
-): Promise<void> {
+): Promise<{ needsFullResync: boolean }> {
   const refs = listSyncedRefs(db, accountId, folder);
   // UIDs deleted locally only (read-only accounts) are checked too, so their tombstones can be
   // dropped once the server itself no longer has the message.
   const tombstones = listDeletedUids(db, accountId, folder);
-  if (refs.length === 0 && tombstones.length === 0) return;
 
-  const remote = await fetchRemoteFlags(imapCredentials, folder, [...refs.map(ref => ref.uid), ...tombstones]);
+  // The UIDVALIDITY is read (and recorded) every run, even with nothing yet to reconcile by UID — a folder's first
+  // sync would otherwise leave no baseline at all, and a change right after that could go undetected the next time
+  // there IS something to check (nothing to compare the new value against would look exactly like "no change").
+  const { uidValidity, flags: remote } = await fetchRemoteFlags(imapCredentials, folder, [...refs.map(ref => ref.uid), ...tombstones]);
+  const storedValidity = getFolderUidValidity(db, accountId, folder);
+  setFolderUidValidity(db, accountId, folder, uidValidity);
+  if (refs.length === 0 && tombstones.length === 0) return { needsFullResync: false };
+  if (storedValidity !== null && storedValidity !== uidValidity) {
+    syncLog(`${folder}: UIDVALIDITY changed (${storedValidity} -> ${uidValidity}) — not trusting stored UIDs this run, asking for a full resync`);
+    return { needsFullResync: true };
+  }
+
   removeDeletedUids(db, accountId, folder, tombstones.filter(uid => !remote.has(uid)));
 
   for (const ref of refs) {
@@ -118,6 +136,7 @@ async function reconcileExisting(
       updateEmail(db, ref.id, { isRead: state.seen, isFlagged: state.flagged, ...(newlyForwarded ? { isForwarded: true } : {}) });
     }
   }
+  return { needsFullResync: false };
 }
 
 /** Folders that hold no real mail of their own: unselectable containers, and Gmail-style virtual views that would just duplicate everything. */
@@ -185,15 +204,19 @@ export async function runSync(options: RunSyncOptions): Promise<{ downloaded: nu
     const tag = `${jobTag}/${folderPath}`;
     if (isAccountDisabled(db, account.id)) throw new Error("The account was disabled during the sync");
     stage = `${folderPath}: reconciling existing messages`;
-    await reconcileExisting(db, account.id, folderPath, imapCredentials, fetchRemoteFlags);
+    const { needsFullResync } = await reconcileExisting(db, account.id, folderPath, imapCredentials, fetchRemoteFlags);
 
-    const maxUidRow = db
-      .query<{ max_uid: number | null }, [number, string]>(
-        "SELECT MAX(uid) as max_uid FROM emails WHERE account_id = ? AND folder = ?"
-      )
-      .get(account.id, folderPath);
-    // The watermark also counts tombstoned UIDs: deleting the newest message locally must not make it look "new" again.
-    const sinceUid = Math.max(maxUidRow?.max_uid ?? 0, maxDeletedUid(db, account.id, folderPath));
+    // A UIDVALIDITY change makes every UID this app has stored for the folder unusable as a watermark too (they may
+    // now belong to different messages, or nothing) — 0 asks for everything currently in the folder, fresh; already-
+    // known messages (their real, current UID recognized) are simply skipped again by the loop below.
+    let sinceUid = 0;
+    if (!needsFullResync) {
+      const maxUidRow = db
+        .query<{ max_uid: number | null }, [number, string]>("SELECT MAX(uid) as max_uid FROM emails WHERE account_id = ? AND folder = ?")
+        .get(account.id, folderPath);
+      // The watermark also counts tombstoned UIDs: deleting the newest message locally must not make it look "new" again.
+      sinceUid = Math.max(maxUidRow?.max_uid ?? 0, maxDeletedUid(db, account.id, folderPath));
+    }
 
     stage = `${folderPath}: fetching messages newer than UID ${sinceUid}`;
     syncLog(`${tag}: ${stage}`);

@@ -460,17 +460,28 @@ export function emailsRoutes(db: Database) {
           })
         );
 
-        const composed = await sendDraftEmail(
-          {
-            host: account.smtp_host,
-            port: account.smtp_port,
-            secure: !!account.smtp_secure,
-            username: account.smtp_username,
-            password: smtpPassword,
-          },
-          draft,
-          attachmentsWithData
-        );
+        // Logged before AND on failure: unlike the Sent-folder append below, a failure here was previously silent —
+        // nothing said an attempt had even been made, so if SMTP actually delivered the message before throwing
+        // (e.g. the connection closing oddly right after the server accepted it), there was no trail to go on.
+        console.log(`[send] ${account.email}: sending draft #${emailId} to ${[...draft.to, ...draft.cc, ...draft.bcc].map(a => a.address).join(", ")}`);
+        let composed: Awaited<ReturnType<typeof sendDraftEmail>>;
+        try {
+          composed = await sendDraftEmail(
+            {
+              host: account.smtp_host,
+              port: account.smtp_port,
+              secure: !!account.smtp_secure,
+              username: account.smtp_username,
+              password: smtpPassword,
+            },
+            draft,
+            attachmentsWithData
+          );
+        } catch (error) {
+          console.error(`[send] ${account.email}: SMTP send failed for draft #${emailId}:`, error instanceof Error ? error.message : error);
+          throw error;
+        }
+        console.log(`[send] ${account.email}: SMTP accepted draft #${emailId} (Message-ID ${composed.messageId})`);
 
         // Best-effort: SMTP has already irrevocably delivered the message by this point, so a
         // failure here (bad connection, server rejects the write, ...) must not fail the request

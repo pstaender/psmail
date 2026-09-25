@@ -159,6 +159,15 @@ CREATE TABLE IF NOT EXISTS deleted_uids (
   PRIMARY KEY (account_id, folder, uid)
 ) WITHOUT ROWID;
 
+-- The UIDVALIDITY last seen for a folder (see models/folderValidity.ts) — lets a sync notice when the server has
+-- renumbered a folder from scratch, instead of silently deleting locally-stored mail whose old UID just isn't found.
+CREATE TABLE IF NOT EXISTS folder_uid_validity (
+  account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  folder TEXT NOT NULL,
+  uid_validity INTEGER NOT NULL,
+  PRIMARY KEY (account_id, folder)
+) WITHOUT ROWID;
+
 -- AI providers a user has set up. The key is encrypted with the user's key, like the account passwords.
 CREATE TABLE IF NOT EXISTS ai_apis (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
