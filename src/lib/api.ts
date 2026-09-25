@@ -190,6 +190,13 @@ export const api = {
       body: { name, parent: parent ?? undefined },
     }),
 
+  /** Renames a folder on the account's IMAP server, keeping it in the same place in the hierarchy, and returns the new folder list. */
+  renameFolder: (token: string, accountEmail: string, folder: string, name: string) =>
+    request<{ path: string; folders: FolderInfo[] }>("PATCH", `/api/accounts/${enc(accountEmail)}/folders/${enc(folder)}`, {
+      token,
+      body: { name },
+    }),
+
   listEmails: (token: string, accountEmail: string, folder: string, opts: ListQuery & { limit?: number; offset?: number } = {}) => {
     const params = new URLSearchParams({ folder });
     appendListQuery(params, opts);

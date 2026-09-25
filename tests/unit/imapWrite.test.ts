@@ -10,6 +10,8 @@ import {
   FolderNameError,
   moveMessage,
   newFolderPath,
+  renameFolder,
+  renameFolderPath,
   runWithTeardown,
   setMessageFlags,
 } from "../../src/server/services/imap";
@@ -525,6 +527,66 @@ describe("creating folders", () => {
 
     const refusing = { ...base, mailboxCreate: async () => Promise.reject(new Error("NO [NOPERM]")) } as unknown as ImapFlow;
     await expect(createFolder(refusing, "B", null)).rejects.toThrow("NOPERM");
+  });
+});
+
+describe("renaming folders", () => {
+  const folder = (path: string, specialUse: string | null = null, delimiter = "/") => ({ path, name: path.split(delimiter).pop()!, delimiter, specialUse, flags: [] as string[] });
+  const existing = [folder("INBOX", "\\Inbox"), folder("Sent", "\\Sent"), folder("Work"), folder("Work/2024", null)];
+
+  test("keeps the folder in the same place; only its own name changes", () => {
+    expect(renameFolderPath(existing, folder("Work"), "Projects")).toBe("Projects");
+    expect(renameFolderPath(existing, folder("Work/2024"), "2025")).toBe("Work/2025");
+    expect(renameFolderPath(existing, folder("Work"), "  Projects  ")).toBe("Projects");
+  });
+
+  test("bad names are refused before anything is sent", () => {
+    for (const name of ["", "   ", "a/b", "a*", "a%", "..", "tab\tname", "x".repeat(101)]) {
+      expect(() => renameFolderPath(existing, folder("Work"), name)).toThrow(FolderNameError);
+    }
+  });
+
+  test("a name already used by another folder (any case) is refused, but the folder's own current name isn't", () => {
+    expect(() => renameFolderPath(existing, folder("Work"), "sent")).toThrow(expect.objectContaining({ kind: "exists" }));
+    expect(renameFolderPath(existing, folder("Work"), "Work")).toBe("Work");
+  });
+
+  test("renameFolder renames on the server and returns the new path and the server's list afterwards", async () => {
+    const calls: string[] = [];
+    let listed = existing;
+    const client = {
+      list: async () => listed,
+      mailboxRename: async (from: string, to: string) => {
+        calls.push(`rename ${from} -> ${to}`);
+        listed = listed.map(f => (f.path === from ? folder(to) : f));
+      },
+    } as unknown as ImapFlow;
+
+    const result = await renameFolder(client, "Work", "Projects");
+    expect(calls).toEqual(["rename Work -> Projects"]);
+    expect(result.path).toBe("Projects");
+    expect(result.folders.map(f => f.path)).toContain("Projects");
+    expect(result.folders.map(f => f.path)).not.toContain("Work");
+  });
+
+  test("renaming to the same name is a no-op — no server round trip", async () => {
+    const client = {
+      list: async () => existing,
+      mailboxRename: async () => {
+        throw new Error("should not be called");
+      },
+    } as unknown as ImapFlow;
+
+    const result = await renameFolder(client, "Work", "Work");
+    expect(result.path).toBe("Work");
+  });
+
+  test("a missing folder and a server refusal are both passed on", async () => {
+    const client = { list: async () => existing } as unknown as ImapFlow;
+    await expect(renameFolder(client, "Nope", "Anything")).rejects.toThrow(expect.objectContaining({ kind: "missing-parent" }));
+
+    const refusing = { list: async () => existing, mailboxRename: async () => Promise.reject(new Error("NO [NOPERM]")) } as unknown as ImapFlow;
+    await expect(renameFolder(refusing, "Work", "Projects")).rejects.toThrow("NOPERM");
   });
 });
 

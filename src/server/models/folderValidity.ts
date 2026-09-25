@@ -44,3 +44,12 @@ export function setHighestSyncedUid(db: Database, accountId: number, folder: str
      ON CONFLICT (account_id, folder) DO UPDATE SET highest_synced_uid = excluded.highest_synced_uid`
   ).run(accountId, folder, uid);
 }
+
+/**
+ * A rename on the server keeps UIDVALIDITY and every UID as they were — only the path changes — so the watermark
+ * is carried over under the new path instead of starting the folder over from a blank one. Only called right
+ * after a folder rename actually succeeds on the server (see routes/folders.ts).
+ */
+export function renameFolderValidity(db: Database, accountId: number, oldFolder: string, newFolder: string): void {
+  db.query("UPDATE folder_uid_validity SET folder = ? WHERE account_id = ? AND folder = ?").run(newFolder, accountId, oldFolder);
+}

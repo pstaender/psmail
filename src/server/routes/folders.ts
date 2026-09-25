@@ -1,8 +1,9 @@
 import type { Database } from "bun:sqlite";
 import { assertAccountEnabled, decryptAccountCredentials, getFoldersCache, learnSpecialFolders, setFoldersCache, type AccountRow } from "../models/accounts";
-import { getFolderCounts, type FolderCount } from "../models/emails";
+import { getFolderCounts, renameEmailsFolder, type FolderCount } from "../models/emails";
+import { renameFolderValidity } from "../models/folderValidity";
 import { json, requireAuth, withErrorHandling } from "../http";
-import { applySpecialUseFallback, createFolder, describeImapError, findByMessageId, FolderNameError, inboxFirst, listFolders, withImapClient, type ImapFolder } from "../services/imap";
+import { applySpecialUseFallback, createFolder, describeImapError, findByMessageId, FolderNameError, inboxFirst, listFolders, renameFolder, withImapClient, type ImapFolder } from "../services/imap";
 import { ApiError, ConflictError } from "../types";
 import { getOwnedAccountByEmailParam } from "./accounts";
 import { imapCredentialsFor } from "./emails";
@@ -157,6 +158,41 @@ export function foldersRoutes(db: Database) {
             headers: { "x-folders-source": "local", "x-folders-warning": encodeURIComponent(error.message) },
           });
         }
+      }),
+    },
+    "/api/accounts/:email/folders/:folder": {
+      // Renames a folder on the IMAP server, keeping it in the same place in the hierarchy. Body: { name } (the new last path segment, not a full path).
+      PATCH: withErrorHandling(async req => {
+        const { session, encryptionKey } = requireAuth(req, db);
+        const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        assertAccountEnabled(account);
+        if (account.read_only) throw new ConflictError(`Account "${account.email}" is read-only, so no folder can be renamed on its server.`);
+
+        const folder = decodeURIComponent(req.params.folder ?? "");
+        if (!folder) throw new ApiError(400, "folder is required");
+
+        const body = (await req.json().catch(() => null)) as { name?: unknown } | null;
+        if (!body || typeof body.name !== "string") throw new ApiError(400, "Missing new folder name");
+
+        const { imapPassword } = decryptAccountCredentials(account, encryptionKey);
+        let result;
+        try {
+          result = await withImapClient(
+            { host: account.imap_host, port: account.imap_port, secure: !!account.imap_secure, username: account.imap_username, password: imapPassword },
+            client => renameFolder(client, folder, body.name as string)
+          );
+        } catch (error) {
+          if (error instanceof FolderNameError) throw error.kind === "exists" ? new ConflictError(error.message) : new ApiError(error.kind === "missing-parent" ? 404 : 400, error.message);
+          throw new ApiError(502, `Couldn't rename the folder on ${account.imap_host}: ${describeImapError(error)}`);
+        }
+
+        if (result.path !== folder) {
+          renameEmailsFolder(db, account.id, folder, result.path);
+          renameFolderValidity(db, account.id, folder, result.path);
+        }
+        learnSpecialFolders(db, account.id, result.folders);
+        setFoldersCache(db, account.id, result.folders);
+        return json({ path: result.path, folders: mergeFolderCounts(result.folders, getFolderCounts(db, account.id)) });
       }),
     },
     /**

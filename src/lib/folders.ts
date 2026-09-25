@@ -19,3 +19,12 @@ export interface SpecialUseFolder {
 export function resolveSpecialFolder<T extends SpecialUseFolder>(folders: T[], specialUse: string, fallback: string): string {
   return folders.find(f => f.specialUse === specialUse)?.path ?? fallback;
 }
+
+/**
+ * True for a folder with a recognized special role (Inbox, Sent, Trash, Junk/Spam, Drafts, Archive, ...) — the
+ * ones a mail client shouldn't let you rename, since other code (or the server itself) finds them by that role
+ * rather than by name.
+ */
+export function isSpecialFolder(folder: SpecialUseFolder): boolean {
+  return folder.specialUse !== null;
+}

@@ -7,6 +7,7 @@ import { App } from "../../src/App";
 import { MessageHeader } from "../../src/components/mail/MessageHeader";
 import { EventsButton } from "../../src/components/mail/EventsButton";
 import { MessageList } from "../../src/components/mail/MessageList";
+import { MessageContextMenu } from "../../src/components/mail/MessageContextMenu";
 import { ConversationBar } from "../../src/components/mail/ConversationBar";
 import { MessageToolbar } from "../../src/components/mail/MessageToolbar";
 import { installFakeAuthenticator, type FakeAuthenticator } from "../helpers/fakeAuthenticator";
@@ -174,6 +175,9 @@ let messageDownloads: { account: string; ids: number[] }[] = [];
 let listRequests: { list: "folder" | "inbox" | "imbox" | "sent" | "search"; params: URLSearchParams }[] = [];
 let createFolderPosts: { name: string; parent?: string }[] = [];
 let createFolderError: string | null = null;
+/** [folder, body] of every PATCH .../folders/:folder (rename) call, and how the mock server answers it. */
+let renameFolderPosts: [string, { name: string }][] = [];
+let renameFolderError: string | null = null;
 // Same, for PATCH .../emails/13 (DRAFT_EMAIL) — asserts that editing an existing draft updates
 // it in place instead of creating a new one.
 let capturedUpdateDraftBody: Record<string, unknown> | null = null;
@@ -203,6 +207,8 @@ const contactRequests: (string | null)[] = [];
 const aiRequests: [string, string, any][] = [];
 // Paths of every PATCH .../emails/:id (flags, read state, ...).
 const emailPatches: string[] = [];
+// [id, folder] of every single-message PATCH .../emails/:id/move/:folder (the reading pane / context menu's Move).
+const singleMoveRequests: [number, string][] = [];
 // [path, body] of the same.
 const emailPatchBodies: [string, any][] = [];
 // Bodies of POST /api/auth/login.
@@ -291,6 +297,8 @@ function installMockFetch(
   messageDownloads = [];
   listRequests = [];
   createFolderError = null;
+  renameFolderPosts = [];
+  renameFolderError = null;
   const createdFolders: Record<string, unknown>[] = [...(opts.extraFolders ?? [])];
   capturedUpdateDraftBody = null;
   pagedRequests.length = 0;
@@ -308,6 +316,7 @@ function installMockFetch(
   loginPosts.length = 0;
   emailPatches.length = 0;
   emailPatchBodies.length = 0;
+  singleMoveRequests.length = 0;
   aiRequests.length = 0;
   let currentAiApis = [...(opts.aiApis ?? [])];
   // "summarize" or "summarize:Short" (a skill with a name of its own; unnamed ones are named after their category, like the server does).
@@ -391,6 +400,21 @@ function installMockFetch(
       const folderPath = body.parent ? `${body.parent}/${body.name}` : body.name;
       createdFolders.push({ path: folderPath, name: body.name, delimiter: "/", specialUse: null, flags: [], total: 0, unread: 0 });
       return jsonResponse({ path: folderPath, folders: [...FOLDERS, ...createdFolders] }, 201);
+    }
+    const renameFolderMatch = /^\/api\/accounts\/me%40example\.com\/folders\/([^/]+)$/.exec(path);
+    if (method === "PATCH" && renameFolderMatch) {
+      const oldPath = decodeURIComponent(renameFolderMatch[1]!);
+      const body = JSON.parse(init!.body as string) as { name: string };
+      renameFolderPosts.push([oldPath, body]);
+      if (renameFolderError) return jsonResponse({ error: renameFolderError }, 409);
+      const newPath = oldPath.includes("/") ? `${oldPath.slice(0, oldPath.lastIndexOf("/"))}/${body.name}` : body.name;
+      const rename = (f: Record<string, unknown>) => (f.path === oldPath ? { ...f, path: newPath, name: body.name } : f);
+      const already = createdFolders.some(f => f.path === oldPath);
+      if (already) {
+        const idx = createdFolders.findIndex(f => f.path === oldPath);
+        createdFolders[idx] = rename(createdFolders[idx]!);
+      }
+      return jsonResponse({ path: newPath, folders: [...FOLDERS, ...createdFolders].map(f => (already ? f : rename(f))) });
     }
     if (method === "GET" && path === "/api/accounts/me%40example.com/folders" && url.includes("live=1")) {
       liveFolderRequests += 1;
@@ -586,6 +610,15 @@ function installMockFetch(
       capturedResultPatches.push(init?.body ? JSON.parse(init.body as string) : {});
       return jsonResponse({ ...EMAIL, id: 20, ...(init?.body ? JSON.parse(init.body as string) : {}) });
     }
+    // A single message's Move (the reading pane's/context menu's Move to folder — distinct from the
+    // bulk .../emails/bulk/move/:folder route above): PATCH .../emails/:id/move/:folder, no body.
+    const singleMove = /^\/api\/accounts\/me%40example\.com\/emails\/(\d+)\/move\/(.+)$/.exec(path);
+    if (method === "PATCH" && singleMove) {
+      const id = Number(singleMove[1]);
+      const folder = decodeURIComponent(singleMove[2]!);
+      singleMoveRequests.push([id, folder]);
+      return jsonResponse({ ...EMAIL, id, folder });
+    }
     if (method === "PATCH" && path.startsWith("/api/accounts/me%40example.com/emails/")) {
       emailPatches.push(path);
       emailPatchBodies.push([path, init?.body ? JSON.parse(init.body as string) : {}]);
@@ -698,6 +731,104 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       render(<App />);
       const dialog = await openNewFolderDialog();
       expect(dialog.getByRole("button", { name: "Create folder" }).hasAttribute("disabled")).toBe(true);
+    });
+  });
+
+  describe("folder context menu", () => {
+    const nonSpecial = [{ path: "Work", name: "Work", delimiter: "/", specialUse: null, flags: [], total: 0, unread: 0 }];
+
+    async function openTree() {
+      installMockFetch({ extraFolders: nonSpecial });
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+      await screen.findByText("Work");
+    }
+
+    test("a regular folder offers Sync and Rename…; a special one (Inbox) only offers Sync", async () => {
+      await openTree();
+
+      fireEvent.contextMenu(screen.getByText("Work"));
+      expect(await screen.findByRole("menuitem", { name: "Sync" })).toBeTruthy();
+      expect(screen.getByRole("menuitem", { name: "Rename…" })).toBeTruthy();
+      await userEvent.keyboard("{Escape}");
+
+      fireEvent.contextMenu(screen.getAllByText("Inbox")[1]!); // [0] is the combined Inbox row
+      expect(await screen.findByRole("menuitem", { name: "Sync" })).toBeTruthy();
+      expect(screen.queryByRole("menuitem", { name: "Rename…" })).toBeNull();
+    });
+
+    test("Sync syncs just that folder", async () => {
+      await openTree();
+      fireEvent.contextMenu(screen.getByText("Work"));
+      await userEvent.click(await screen.findByRole("menuitem", { name: "Sync" }));
+      await waitFor(() => expect(lastSyncFolder).toBe("Work"));
+    });
+
+    test("Rename… opens a dialog with Cancel focused (not the name field), prefilled with the current name", async () => {
+      await openTree();
+      fireEvent.contextMenu(screen.getByText("Work"));
+      await userEvent.click(await screen.findByRole("menuitem", { name: "Rename…" }));
+
+      const dialog = within(await screen.findByRole("dialog"));
+      expect(dialog.getByText("Rename folder")).toBeTruthy();
+      expect(dialog.getByLabelText("Name")).toHaveProperty("value", "Work");
+      await waitFor(() => expect(document.activeElement).toBe(dialog.getByRole("button", { name: "Cancel" })));
+    });
+
+    test("renaming updates the tree and shows a toast", async () => {
+      await openTree();
+      fireEvent.contextMenu(screen.getByText("Work"));
+      await userEvent.click(await screen.findByRole("menuitem", { name: "Rename…" }));
+      const dialog = within(await screen.findByRole("dialog"));
+
+      await userEvent.clear(dialog.getByLabelText("Name"));
+      await userEvent.type(dialog.getByLabelText("Name"), "Projects");
+      await userEvent.click(dialog.getByRole("button", { name: "Rename" }));
+
+      await waitFor(() => expect(renameFolderPosts).toEqual([["Work", { name: "Projects" }]]));
+      expect(await screen.findByText("Projects")).toBeTruthy();
+      expect(screen.queryByText("Work")).toBeNull();
+      expect((await screen.findAllByText(/renamed to "Projects"/)).length).toBeGreaterThan(0);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    test("the server's refusal is shown in the dialog, which stays open", async () => {
+      await openTree();
+      renameFolderError = 'A folder "Sent" already exists.';
+      fireEvent.contextMenu(screen.getByText("Work"));
+      await userEvent.click(await screen.findByRole("menuitem", { name: "Rename…" }));
+      const dialog = within(await screen.findByRole("dialog"));
+
+      await userEvent.clear(dialog.getByLabelText("Name"));
+      await userEvent.type(dialog.getByLabelText("Name"), "Sent");
+      await userEvent.click(dialog.getByRole("button", { name: "Rename" }));
+
+      expect(await screen.findByText(/already exists/)).toBeTruthy();
+      expect(screen.getByText("Rename folder")).toBeTruthy();
+    });
+
+    test("Cancel closes the dialog without renaming", async () => {
+      await openTree();
+      fireEvent.contextMenu(screen.getByText("Work"));
+      await userEvent.click(await screen.findByRole("menuitem", { name: "Rename…" }));
+      const dialog = within(await screen.findByRole("dialog"));
+
+      await userEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(renameFolderPosts).toEqual([]);
+    });
+
+    test("a read-only or disabled account offers no Rename…", async () => {
+      installMockFetch({ extraFolders: nonSpecial, accountOverrides: { readOnly: true } });
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+      await screen.findByText("Work");
+
+      fireEvent.contextMenu(screen.getByText("Work"));
+      expect(await screen.findByRole("menuitem", { name: "Sync" })).toBeTruthy();
+      expect(screen.queryByRole("menuitem", { name: "Rename…" })).toBeNull();
     });
   });
 
@@ -5165,6 +5296,154 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       await userEvent.click(screen.getByRole("combobox", { name: /move/i }));
       await userEvent.type(await screen.findByPlaceholderText("Find a folder…"), "zzz");
       expect(await screen.findByText("No folder found.")).toBeTruthy();
+    });
+  });
+
+  describe("message context menu (standalone)", () => {
+    const folders = ["INBOX", "Archive", "Work"].map(path => ({ path, name: path, delimiter: "/", specialUse: null, flags: [], total: 0, unread: 0 }));
+
+    function renderMenu(props: Partial<Parameters<typeof MessageContextMenu>[0]> = {}) {
+      // Radix's onSelect calls back with a live Event (circular refs to the whole document) — recorded
+      // as a plain call count, never the event itself, so a deep-equal assertion never has to walk it.
+      const calls: Record<string, number> = {};
+      const spy = (name: string) => () => {
+        calls[name] = (calls[name] ?? 0) + 1;
+      };
+      render(
+        <MessageContextMenu
+          isRead={false}
+          isFlagged={false}
+          folder="INBOX"
+          folders={folders}
+          onOpen={spy("open")}
+          onReply={spy("reply")}
+          onReplyAll={spy("replyAll")}
+          onForward={spy("forward")}
+          onToggleFlag={spy("toggleFlag")}
+          onToggleRead={spy("toggleRead")}
+          onDelete={spy("delete")}
+          onMove={spy("move")}
+          {...props}
+        >
+          <button>row</button>
+        </MessageContextMenu>
+      );
+      return calls;
+    }
+
+    // "Reply" carries a trailing shortcut ("Ctrl+R"/"⌘R"), folded into its accessible name — and
+    // "Reply all" would otherwise also match a plain /^Reply/, so each item gets its own precise matcher.
+    const REPLY = /^Reply (Ctrl\+R|⌘R)$/;
+    const REPLY_ALL = "Reply all";
+    const FORWARD = "Forward";
+    const STAR = /^(Star|Unstar)$/;
+    const MARK_READ = /^Mark as (read|unread)$/;
+    const DELETE = "Delete ⌫";
+
+    test("opening the menu selects the row, before any item is chosen", async () => {
+      const calls = renderMenu();
+      fireEvent.contextMenu(screen.getByText("row"));
+      await screen.findByRole("menuitem", { name: REPLY });
+      expect(calls.open).toBe(1);
+    });
+
+    test("lists every action from icon to text to a trailing shortcut, where one exists", async () => {
+      renderMenu();
+      fireEvent.contextMenu(screen.getByText("row"));
+      for (const name of [REPLY, REPLY_ALL, FORWARD, STAR, MARK_READ, DELETE]) {
+        expect(await screen.findByRole("menuitem", { name })).toBeTruthy();
+      }
+      expect(screen.getByRole("menuitem", { name: REPLY_ALL }).textContent).not.toMatch(/⌘|Ctrl/); // no shortcut for this one
+    });
+
+    test("Star / Mark as read flip label with the message's current state", async () => {
+      renderMenu({ isFlagged: true, isRead: true });
+      fireEvent.contextMenu(screen.getByText("row"));
+      expect(await screen.findByRole("menuitem", { name: "Unstar" })).toBeTruthy();
+      expect(screen.getByRole("menuitem", { name: "Mark as unread" })).toBeTruthy();
+    });
+
+    test("Move to folder lists every other folder, not the message's own", async () => {
+      renderMenu({ folder: "Archive" });
+      fireEvent.contextMenu(screen.getByText("row"));
+      await userEvent.click(await screen.findByRole("menuitem", { name: /Move to folder/ }));
+      expect(await screen.findByRole("menuitem", { name: "Inbox" })).toBeTruthy();
+      expect(screen.getByRole("menuitem", { name: "Work" })).toBeTruthy();
+      expect(screen.queryByRole("menuitem", { name: "Archive" })).toBeNull();
+
+      await userEvent.click(screen.getByRole("menuitem", { name: "Work" }));
+    });
+
+    test("each item calls its own callback", async () => {
+      for (const [name, key] of [[REPLY, "reply"], [REPLY_ALL, "replyAll"], [FORWARD, "forward"], [STAR, "toggleFlag"], [MARK_READ, "toggleRead"], [DELETE, "delete"]] as const) {
+        cleanup();
+        const calls = renderMenu();
+        fireEvent.contextMenu(screen.getByText("row"));
+        await userEvent.click(await screen.findByRole("menuitem", { name }));
+        expect(calls[key]).toBe(1);
+      }
+    });
+
+    test("no Move to folder submenu when there's nowhere else to move to", async () => {
+      renderMenu({ folders: [{ path: "INBOX", name: "INBOX", delimiter: "/", specialUse: null, flags: [], total: 0, unread: 0 }] });
+      fireEvent.contextMenu(screen.getByText("row"));
+      await screen.findByRole("menuitem", { name: REPLY });
+      expect(screen.queryByText(/Move to folder/)).toBeNull();
+    });
+  });
+
+  describe("message context menu (in the message list)", () => {
+    const REPLY = /^Reply (Ctrl\+R|⌘R)$/;
+
+    test("right-clicking a row that isn't open yet still replies to it — the row is selected first", async () => {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+
+      fireEvent.contextMenu(await screen.findByText("Third message"));
+      await userEvent.click(await screen.findByRole("menuitem", { name: REPLY }));
+
+      const composeDialog = (await screen.findByText("New message")).closest('[role="dialog"]') as HTMLElement;
+      expect((within(composeDialog).getByLabelText("Subject") as HTMLInputElement).value).toBe("Re: Third message");
+    });
+
+    test("Delete asks for confirmation, like every other way to delete, and removes the right row", async () => {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+
+      fireEvent.contextMenu(await screen.findByText("Second message"));
+      await userEvent.click(await screen.findByRole("menuitem", { name: "Delete ⌫" }));
+
+      const dialog = await screen.findByRole("alertdialog");
+      await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+      await waitFor(() => expect(screen.queryByText("Second message")).toBeNull());
+      expect(screen.getByText("Hello there")).toBeTruthy(); // its neighbor is untouched
+    });
+
+    test("Mark as unread / Mark as read toggles the right row's state", async () => {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+
+      // Third message starts unread (the fixture default) — Star's row shows the unread dot.
+      fireEvent.contextMenu(await screen.findByText("Third message"));
+      await userEvent.click(await screen.findByRole("menuitem", { name: "Mark as read" }));
+      await waitFor(() => expect(emailPatchBodies.some(([path, body]) => path === "/api/accounts/me%40example.com/emails/12" && body.isRead === true)).toBe(true));
+    });
+
+    test("Move to folder moves the right row", async () => {
+      render(<App />);
+      await userEvent.click(await screen.findByText("default"));
+      await openAccountInbox();
+
+      fireEvent.contextMenu(await screen.findByText("Second message"));
+      await userEvent.click(await screen.findByRole("menuitem", { name: /Move to folder/ }));
+      await userEvent.click(await screen.findByRole("menuitem", { name: "Entwürfe" }));
+
+      await waitFor(() => expect(singleMoveRequests).toEqual([[11, "Entwürfe"]]));
+      await waitFor(() => expect(screen.queryByText("Second message")).toBeNull());
     });
   });
 

@@ -436,6 +436,11 @@ export function deleteEmail(db: Database, id: number): void {
   if (result.changes === 0) throw new NotFoundError(`Email ${id} not found`);
 }
 
+/** A folder rename on the server (see routes/folders.ts): every locally stored message that was filed under the old path moves to the new one. */
+export function renameEmailsFolder(db: Database, accountId: number, oldFolder: string, newFolder: string): void {
+  db.query(`UPDATE emails SET folder = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE account_id = ? AND folder = ?`).run(newFolder, accountId, oldFolder);
+}
+
 export function addAttachment(
   db: Database,
   emailId: number,

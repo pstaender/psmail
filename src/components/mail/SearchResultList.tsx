@@ -4,10 +4,12 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { formatListDate } from "@/lib/time";
 import type { SearchResult } from "../../server/models/search";
+import type { FolderInfo } from "@/lib/api";
 import { EmptyState } from "./EmptyState";
 import { CategoryChips } from "./CategoryChips";
 import { useUiSettings } from "@/contexts/UiSettingsContext";
 import { ConversationMarks } from "./ConversationMarks";
+import { MessageContextMenu } from "./MessageContextMenu";
 
 function participantLabel(result: SearchResult, showRecipient: boolean): string {
   const list = showRecipient && result.to ? result.to : result.from;
@@ -30,6 +32,13 @@ export function SearchResultList({
   onSelect,
   onOpen = () => {},
   filtered = false,
+  folders = [],
+  onReply = () => {},
+  onReplyAll = () => {},
+  onForward = () => {},
+  onToggleRead = () => {},
+  onDelete = () => {},
+  onMove = () => {},
 }: {
   results: SearchResult[];
   loading: boolean;
@@ -50,6 +59,15 @@ export function SearchResultList({
   onOpen?: (result: SearchResult) => void;
   /** A date filter is on: an empty list means nothing in that period. */
   filtered?: boolean;
+  /** The open message's account's folders, for the right-click menu's "Move to folder" submenu. */
+  folders?: FolderInfo[];
+  /** Right-click menu actions — all act on the row that was right-clicked, which is selected into the reading pane first. */
+  onReply?: (result: SearchResult) => void;
+  onReplyAll?: (result: SearchResult) => void;
+  onForward?: (result: SearchResult) => void;
+  onToggleRead?: (result: SearchResult) => void;
+  onDelete?: (result: SearchResult) => void;
+  onMove?: (result: SearchResult, folder: string) => void;
 }) {
   const { showConversations, showCategories, showAbsoluteDates } = useUiSettings();
   const sentinelRef = useRef<HTMLLIElement>(null);
@@ -84,59 +102,75 @@ export function SearchResultList({
     <ScrollArea className="h-full">
       <ul className="divide-y">
         {results.map(result => (
-          <li key={`${result.accountEmail}:${result.id}`} data-row-id={result.id}>
-            <button
-              onClick={e => onSelect(result, e)}
-              onDoubleClick={e => {
-                if (!e.shiftKey && !e.metaKey && !e.ctrlKey) onOpen(result);
-              }}
-              className={cn(
-                "group flex w-full flex-col gap-0.5 px-3 py-2.5 text-left hover:bg-accent/60 transition-colors",
-                selectedId === result.id && "bg-accent",
-                selectedIds.has(result.id) && "bg-primary/10 ring-1 ring-inset ring-primary/50"
-              )}
-            >
-              <div className="flex items-center gap-2">
-                {!result.isRead && <span className="size-1.5 shrink-0 rounded-full bg-primary" />}
-                <span className={cn("flex-1 truncate text-sm", !result.isRead && "font-semibold")}>{participantLabel(result, showRecipient)}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">{formatListDate(result.date, { forceDate: showAbsoluteDates })}</span>
-                <span
-                  role="button"
-                  tabIndex={0}
-                  title={result.isFlagged ? "Remove star" : "Add star"}
-                  onClick={e => {
-                    e.stopPropagation();
-                    onToggleFlag?.(result);
-                  }}
-                  onKeyDown={e => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
+          <MessageContextMenu
+            key={`${result.accountEmail}:${result.id}`}
+            isRead={result.isRead}
+            isFlagged={result.isFlagged}
+            folder={result.folder}
+            folders={folders}
+            onOpen={() => onSelect(result, { shiftKey: false, metaKey: false, ctrlKey: false } as React.MouseEvent)}
+            onReply={() => onReply(result)}
+            onReplyAll={() => onReplyAll(result)}
+            onForward={() => onForward(result)}
+            onToggleFlag={() => onToggleFlag?.(result)}
+            onToggleRead={() => onToggleRead(result)}
+            onDelete={() => onDelete(result)}
+            onMove={folder => onMove(result, folder)}
+          >
+            <li data-row-id={result.id}>
+              <button
+                onClick={e => onSelect(result, e)}
+                onDoubleClick={e => {
+                  if (!e.shiftKey && !e.metaKey && !e.ctrlKey) onOpen(result);
+                }}
+                className={cn(
+                  "group flex w-full flex-col gap-0.5 px-3 py-2.5 text-left hover:bg-accent/60 transition-colors",
+                  selectedId === result.id && "bg-accent",
+                  selectedIds.has(result.id) && "bg-primary/10 ring-1 ring-inset ring-primary/50"
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  {!result.isRead && <span className="size-1.5 shrink-0 rounded-full bg-primary" />}
+                  <span className={cn("flex-1 truncate text-sm", !result.isRead && "font-semibold")}>{participantLabel(result, showRecipient)}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{formatListDate(result.date, { forceDate: showAbsoluteDates })}</span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    title={result.isFlagged ? "Remove star" : "Add star"}
+                    onClick={e => {
                       e.stopPropagation();
                       onToggleFlag?.(result);
-                    }
-                  }}
-                  className="shrink-0"
-                >
-                  <Star
-                    aria-label={result.isFlagged ? "Starred" : undefined}
-                    className={cn(
-                      "size-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-yellow-500",
-                      result.isFlagged && "fill-yellow-400 text-yellow-500 opacity-100"
-                    )}
-                  />
-                </span>
-              </div>
-              <div className={cn("flex items-center gap-1.5 text-sm", !result.isRead && "font-medium")}>
-                <span className="flex-1 truncate">{result.subject || "(no subject)"}</span>
-                {showConversations && <ConversationMarks conversation={result.conversation} />}
-                {result.hasAttachments && <Paperclip aria-label="Has attachments" className="size-3.5 shrink-0 text-muted-foreground" />}
-              </div>
-              {showCategories && <CategoryChips labels={result.taxonomyList} />}
-              <p className="truncate text-xs text-muted-foreground">
-                {result.accountEmail} · {result.folder}
-              </p>
-            </button>
-          </li>
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onToggleFlag?.(result);
+                      }
+                    }}
+                    className="shrink-0"
+                  >
+                    <Star
+                      aria-label={result.isFlagged ? "Starred" : undefined}
+                      className={cn(
+                        "size-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-yellow-500",
+                        result.isFlagged && "fill-yellow-400 text-yellow-500 opacity-100"
+                      )}
+                    />
+                  </span>
+                </div>
+                <div className={cn("flex items-center gap-1.5 text-sm", !result.isRead && "font-medium")}>
+                  <span className="flex-1 truncate">{result.subject || "(no subject)"}</span>
+                  {showConversations && <ConversationMarks conversation={result.conversation} />}
+                  {result.hasAttachments && <Paperclip aria-label="Has attachments" className="size-3.5 shrink-0 text-muted-foreground" />}
+                </div>
+                {showCategories && <CategoryChips labels={result.taxonomyList} />}
+                <p className="truncate text-xs text-muted-foreground">
+                  {result.accountEmail} · {result.folder}
+                </p>
+              </button>
+            </li>
+          </MessageContextMenu>
         ))}
         {hasMore && (
           <li ref={sentinelRef} className="flex h-10 items-center justify-center text-muted-foreground">

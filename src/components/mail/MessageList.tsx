@@ -4,10 +4,12 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { formatListDate } from "@/lib/time";
 import type { EmailRecord } from "../../server/types";
+import type { FolderInfo } from "@/lib/api";
 import { CategoryChips } from "./CategoryChips";
 import { useUiSettings } from "@/contexts/UiSettingsContext";
 import { ConversationMarks } from "./ConversationMarks";
 import { EmptyState } from "./EmptyState";
+import { MessageContextMenu } from "./MessageContextMenu";
 
 function participantLabel(email: EmailRecord, folder: string): string {
   const list = folder === "Sent" || folder === "Drafts" ? email.to : email.from;
@@ -31,6 +33,13 @@ export function MessageList({
   onEditDraft,
   onOpen = () => {},
   filtered = false,
+  folders = [],
+  onReply = () => {},
+  onReplyAll = () => {},
+  onForward = () => {},
+  onToggleRead = () => {},
+  onDelete = () => {},
+  onMove = () => {},
 }: {
   emails: EmailRecord[];
   loading: boolean;
@@ -52,6 +61,15 @@ export function MessageList({
   onOpen?: (email: EmailRecord) => void;
   /** A date filter is on: an empty list means nothing in that period, not an empty folder. */
   filtered?: boolean;
+  /** This account's folders, for the right-click menu's "Move to folder" submenu. */
+  folders?: FolderInfo[];
+  /** Right-click menu actions — all act on the row that was right-clicked, which is selected into the reading pane first. */
+  onReply?: (email: EmailRecord) => void;
+  onReplyAll?: (email: EmailRecord) => void;
+  onForward?: (email: EmailRecord) => void;
+  onToggleRead?: (email: EmailRecord) => void;
+  onDelete?: (email: EmailRecord) => void;
+  onMove?: (email: EmailRecord, folder: string) => void;
 }) {
   const { showConversations, showCategories, showAbsoluteDates } = useUiSettings();
   const sentinelRef = useRef<HTMLLIElement>(null);
@@ -87,55 +105,71 @@ export function MessageList({
     <ScrollArea className="h-full">
       <ul className="divide-y">
         {emails.map(email => (
-          <li key={email.id} data-row-id={email.id}>
-            <button
-              onClick={e => onSelect(email, e)}
-              onDoubleClick={e => {
-                if (email.isDraft) onEditDraft(email);
-                else if (!e.shiftKey && !e.metaKey && !e.ctrlKey) onOpen(email);
-              }}
-              className={cn(
-                "group flex w-full flex-col gap-0.5 px-3 py-2.5 text-left hover:bg-accent/60 transition-colors",
-                selectedId === email.id && "bg-accent",
-                selectedIds.has(email.id) && "bg-primary/10 ring-1 ring-inset ring-primary/50"
-              )}
-            >
-              <div className="flex items-center gap-2">
-                {!email.isRead && <span className="size-1.5 shrink-0 rounded-full bg-primary" />}
-                <span className={cn("flex-1 truncate text-sm", !email.isRead && "font-semibold")}>
-                  {participantLabel(email, folder)}
-                </span>
-                <span className="shrink-0 text-xs text-muted-foreground">{formatListDate(email.date, { forceDate: showAbsoluteDates })}</span>
-                <span
-                  role="button"
-                  tabIndex={0}
-                  onClick={e => {
-                    e.stopPropagation();
-                    onToggleFlag(email);
-                  }}
-                  className="shrink-0"
-                >
-                  <Star
-                    className={cn(
-                      "size-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-yellow-500",
-                      email.isFlagged && "fill-yellow-400 text-yellow-500 opacity-100"
-                    )}
-                  />
-                </span>
-              </div>
-              <div className={cn("flex items-center gap-1.5 truncate text-sm", !email.isRead && "font-medium")}>
-                <span className="flex-1 truncate">{email.subject || "(no subject)"}</span>
-                {showConversations && <ConversationMarks conversation={email.conversation} />}
-                {((email.attachmentCount ?? email.attachments?.length) ?? 0) > 0 && (
-                  <Paperclip aria-label="Has attachments" className="size-3.5 shrink-0 text-muted-foreground" />
+          <MessageContextMenu
+            key={email.id}
+            isRead={email.isRead}
+            isFlagged={email.isFlagged}
+            folder={email.folder}
+            folders={folders}
+            onOpen={() => onSelect(email, { shiftKey: false, metaKey: false, ctrlKey: false } as React.MouseEvent)}
+            onReply={() => onReply(email)}
+            onReplyAll={() => onReplyAll(email)}
+            onForward={() => onForward(email)}
+            onToggleFlag={() => onToggleFlag(email)}
+            onToggleRead={() => onToggleRead(email)}
+            onDelete={() => onDelete(email)}
+            onMove={folder => onMove(email, folder)}
+          >
+            <li data-row-id={email.id}>
+              <button
+                onClick={e => onSelect(email, e)}
+                onDoubleClick={e => {
+                  if (email.isDraft) onEditDraft(email);
+                  else if (!e.shiftKey && !e.metaKey && !e.ctrlKey) onOpen(email);
+                }}
+                className={cn(
+                  "group flex w-full flex-col gap-0.5 px-3 py-2.5 text-left hover:bg-accent/60 transition-colors",
+                  selectedId === email.id && "bg-accent",
+                  selectedIds.has(email.id) && "bg-primary/10 ring-1 ring-inset ring-primary/50"
                 )}
-              </div>
-              {email.plainText && (
-                <p className="truncate text-xs text-muted-foreground">{email.plainText.replace(/\s+/g, " ").trim()}</p>
-              )}
-              {showCategories && <CategoryChips labels={email.taxonomyList} />}
-            </button>
-          </li>
+              >
+                <div className="flex items-center gap-2">
+                  {!email.isRead && <span className="size-1.5 shrink-0 rounded-full bg-primary" />}
+                  <span className={cn("flex-1 truncate text-sm", !email.isRead && "font-semibold")}>
+                    {participantLabel(email, folder)}
+                  </span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{formatListDate(email.date, { forceDate: showAbsoluteDates })}</span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={e => {
+                      e.stopPropagation();
+                      onToggleFlag(email);
+                    }}
+                    className="shrink-0"
+                  >
+                    <Star
+                      className={cn(
+                        "size-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-yellow-500",
+                        email.isFlagged && "fill-yellow-400 text-yellow-500 opacity-100"
+                      )}
+                    />
+                  </span>
+                </div>
+                <div className={cn("flex items-center gap-1.5 truncate text-sm", !email.isRead && "font-medium")}>
+                  <span className="flex-1 truncate">{email.subject || "(no subject)"}</span>
+                  {showConversations && <ConversationMarks conversation={email.conversation} />}
+                  {((email.attachmentCount ?? email.attachments?.length) ?? 0) > 0 && (
+                    <Paperclip aria-label="Has attachments" className="size-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                </div>
+                {email.plainText && (
+                  <p className="truncate text-xs text-muted-foreground">{email.plainText.replace(/\s+/g, " ").trim()}</p>
+                )}
+                {showCategories && <CategoryChips labels={email.taxonomyList} />}
+              </button>
+            </li>
+          </MessageContextMenu>
         ))}
         {hasMore && (
           <li ref={sentinelRef} className="flex h-10 items-center justify-center text-muted-foreground">

@@ -160,6 +160,41 @@ export async function createFolder(client: ImapFlow, name: string, parent: strin
   return { path, folders: await listFolders(client) };
 }
 
+/** Where a rename lands: same parent as `folder`, just the last path segment swapped for the new name — the same validation as a new folder's name, minus the collision check against `folder` itself. */
+export function renameFolderPath(existing: ImapFolder[], folder: ImapFolder, newName: string): string {
+  const trimmed = newName.trim();
+  if (!trimmed) throw new FolderNameError("A folder needs a name.", "invalid");
+  if (trimmed.length > 100) throw new FolderNameError("The folder name is too long (100 characters at most).", "invalid");
+  if (trimmed === "." || trimmed === ".." || FORBIDDEN_IN_FOLDER_NAME.test(trimmed) || (folder.delimiter && trimmed.includes(folder.delimiter))) {
+    throw new FolderNameError(`A folder name can't contain "${folder.delimiter}", "*", "%" or control characters.`, "invalid");
+  }
+
+  const lastDelimiter = folder.delimiter ? folder.path.lastIndexOf(folder.delimiter) : -1;
+  const prefix = lastDelimiter >= 0 ? folder.path.slice(0, lastDelimiter + 1) : "";
+  const path = prefix + trimmed;
+  if (existing.some(f => f.path !== folder.path && f.path.toLowerCase() === path.toLowerCase())) {
+    throw new FolderNameError(`A folder "${path}" already exists.`, "exists");
+  }
+  return path;
+}
+
+/**
+ * Renames a folder on the server, keeping it in the same place in the hierarchy (only its own name changes).
+ * A no-op (no server round trip) when the new name resolves to the folder's current path. Returns the (possibly
+ * unchanged) path and the server's folder list afterwards.
+ */
+export async function renameFolder(client: ImapFlow, path: string, newName: string): Promise<{ path: string; folders: ImapFolder[] }> {
+  const existing = await listFolders(client);
+  const folder = existing.find(f => f.path === path);
+  if (!folder) throw new FolderNameError(`The folder "${path}" doesn't exist.`, "missing-parent");
+
+  const newPath = renameFolderPath(existing, folder, newName);
+  if (newPath === path) return { path, folders: existing };
+
+  await client.mailboxRename(path, newPath);
+  return { path: newPath, folders: await listFolders(client) };
+}
+
 /**
  * Servers that don't flag their Inbox/Sent folders (no \Inbox / \Sent special-use) usually still name them that way:
  * when no folder carries the flag, a folder called "inbox" / "sent" (any case) is taken for it. A real flag always wins.

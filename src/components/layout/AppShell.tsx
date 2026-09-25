@@ -702,7 +702,7 @@ export function AppShell() {
       if (mod && key === "r") {
         if (!selectedEmail) return;
         e.preventDefault();
-        openCompose(replyDraft(selectedEmail));
+        reply();
         return;
       }
 
@@ -976,6 +976,23 @@ export function AppShell() {
       setSelectedEmailDetail({ ...selectedEmail, isRead: previousIsRead });
       toast.error(errorMessage(err, "Failed to update read status"));
     }
+  }
+
+  // Reply/reply all/forward for the open message — shared by the reading pane's toolbar, the
+  // Cmd/Ctrl+R shortcut and the message-list right-click menu.
+  function reply() {
+    if (!selectedEmail) return;
+    openCompose(replyDraft(selectedEmail));
+  }
+
+  function replyAll() {
+    if (!selectedEmail || !messageAccountEmail) return;
+    openCompose(replyAllDraft(selectedEmail, messageAccountEmail));
+  }
+
+  function forward() {
+    if (!selectedEmail || !messageAccountEmail) return;
+    openCompose({ ...forwardDraft(selectedEmail), forwardOf: { accountEmail: messageAccountEmail, id: selectedEmail.id } });
   }
 
   /**
@@ -1790,6 +1807,13 @@ export function AppShell() {
                   onSelect={selectResult}
                   onOpen={() => setListCollapsed(true)}
                   filtered={filtering}
+                  folders={folders}
+                  onReply={reply}
+                  onReplyAll={replyAll}
+                  onForward={forward}
+                  onToggleRead={toggleRead}
+                  onDelete={requestDelete}
+                  onMove={(_result, folder) => handleMove(folder)}
                 />
               ) : messageAccountEmail && selectedFolder ? (
                 <MessageList
@@ -1806,6 +1830,13 @@ export function AppShell() {
                   onEditDraft={(email) => openCompose(editDraft(email))}
                   onOpen={() => setListCollapsed(true)}
                   filtered={filtering}
+                  folders={folders}
+                  onReply={reply}
+                  onReplyAll={replyAll}
+                  onForward={forward}
+                  onToggleRead={toggleRead}
+                  onDelete={requestDelete}
+                  onMove={(_email, folder) => handleMove(folder)}
                 />
               ) : (
                 <EmptyState
@@ -1829,11 +1860,9 @@ export function AppShell() {
               folders={folders}
               preferredView={preferredBodyView}
               onViewChange={pickBodyView}
-              onReply={() => openCompose(replyDraft(selectedEmail))}
-              onReplyAll={() =>
-                openCompose(replyAllDraft(selectedEmail, messageAccountEmail))
-              }
-              onForward={() => openCompose({ ...forwardDraft(selectedEmail), forwardOf: { accountEmail: messageAccountEmail, id: selectedEmail.id } })}
+              onReply={reply}
+              onReplyAll={replyAll}
+              onForward={forward}
               onDelete={requestDelete}
               onMove={handleMove}
               onDownload={() =>

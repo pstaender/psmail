@@ -10,6 +10,7 @@ import {
   Loader2,
   Lock,
   MoreVertical,
+  Pencil,
   RefreshCw,
   Send,
   Settings,
@@ -20,12 +21,15 @@ import { Badge } from "@/components/ui/badge";
 import { useUiSettings } from "@/contexts/UiSettingsContext";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { isSpecialFolder } from "@/lib/folders";
 import { useFolders } from "@/hooks/useFolders";
 import type { Account, DownloadJob } from "../../server/types";
 import type { FolderInfo } from "@/lib/api";
 import { NewFolderDialog } from "./NewFolderDialog";
+import { RenameFolderDialog } from "./RenameFolderDialog";
 import { toast } from "sonner";
 
 interface FolderNode {
@@ -122,6 +126,7 @@ export function AccountRow({
   const own = useFolders(usingShared ? null : expanded ? account.email : null);
   const { folders, loading, error, warning, refresh } = usingShared ? sharedFolders : own;
   const [newFolderOpen, setNewFolderOpen] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<FolderInfo | null>(null);
   // Folders whose subfolders are showing; every folder starts collapsed.
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const setFolderOpen = (path: string, open: boolean) =>
@@ -235,6 +240,21 @@ export function AccountRow({
         }}
       />
 
+      <RenameFolderDialog
+        accountEmail={account.email}
+        folder={renameTarget}
+        open={renameTarget !== null}
+        onOpenChange={open => {
+          if (!open) setRenameTarget(null);
+        }}
+        onRenamed={(renamed, path) => {
+          const ancestors = buildFolderTree(renamed).find(node => node.folder.path === path)?.ancestors ?? [];
+          if (ancestors.length > 0) setOpenFolders(prev => new Set([...prev, ...ancestors]));
+          refresh();
+          toast.success(`Folder renamed to "${path}".`);
+        }}
+      />
+
       <CollapsibleContent className="pl-4">
         {/* Only the first load blanks the tree; a refresh (e.g. after a sync) keeps the folders on screen. */}
         {loading && folders.length === 0 && (
@@ -258,61 +278,79 @@ export function AccountRow({
             // An account-wide sync ("Sync now", job.folder null) covers this folder too, but only gets its own spinner
             // here when it's THIS folder specifically — the account-level spinner already says the rest is syncing.
             const folderSyncing = isRunning && job?.folder === folder.path;
-            return (
-              <div key={folder.path} className="group flex items-center gap-1 pr-1.5" style={depth > 0 ? { paddingLeft: `${depth * 0.75}rem` } : undefined}>
-                {/* Folders with subfolders start collapsed; the arrow (or a click on the folder) opens them. */}
-                {hasChildren ? (
-                  <button
-                    type="button"
-                    className="flex size-5 shrink-0 items-center justify-center text-muted-foreground"
-                    aria-label={`${isOpen ? "Collapse" : "Expand"} ${folder.name}`}
-                    aria-expanded={isOpen}
-                    onClick={() => toggleFolder(folder.path)}
-                  >
-                    <ChevronRight className={cn("size-3 transition-transform", isOpen && "rotate-90")} />
-                  </button>
-                ) : (
-                  <span className="size-5 shrink-0" /> // keeps the names aligned
-                )}
-                <button
-                  onClick={() => {
-                    if (hasChildren) setFolderOpen(folder.path, true);
-                    onSelectFolder(account.email, folder.path);
-                  }}
-                  className={cn(
-                    "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left text-sm truncate hover:bg-accent",
-                    isSelected && "bg-accent font-medium"
-                  )}
-                >
-                  <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="flex-1 truncate">{label}</span>
-                </button>
-                {/* Left of the unread count, like the combined Inbox's own sync button. While another folder (or the
-                    whole account) is syncing, this one stays hidden rather than sitting there disabled — only the
-                    folder actually syncing shows anything here. */}
-                {!account.disabled && (!isRunning || folderSyncing) && (
-                  <span title={folderSyncing ? syncLabel : undefined} className={cn("shrink-0", folderSyncing && "cursor-progress")}>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className={cn("size-6", folderSyncing ? "pointer-events-none opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100")}
-                      disabled={folderSyncing}
-                      title={folderSyncing ? undefined : `Sync ${label}`}
-                      onClick={e => {
-                        e.stopPropagation();
-                        onSyncFolder(account.email, folder.path);
+            const canRename = !account.disabled && !account.readOnly && !isSpecialFolder(folder);
+            // A disabled account can neither sync nor rename its folders — no context menu, rather than one with nothing in it.
+            const row = (
+                  <div key={folder.path} className="group flex items-center gap-1 pr-1.5" style={depth > 0 ? { paddingLeft: `${depth * 0.75}rem` } : undefined}>
+                    {/* Folders with subfolders start collapsed; the arrow (or a click on the folder) opens them. */}
+                    {hasChildren ? (
+                      <button
+                        type="button"
+                        className="flex size-5 shrink-0 items-center justify-center text-muted-foreground"
+                        aria-label={`${isOpen ? "Collapse" : "Expand"} ${folder.name}`}
+                        aria-expanded={isOpen}
+                        onClick={() => toggleFolder(folder.path)}
+                      >
+                        <ChevronRight className={cn("size-3 transition-transform", isOpen && "rotate-90")} />
+                      </button>
+                    ) : (
+                      <span className="size-5 shrink-0" /> // keeps the names aligned
+                    )}
+                    <button
+                      onClick={() => {
+                        if (hasChildren) setFolderOpen(folder.path, true);
+                        onSelectFolder(account.email, folder.path);
                       }}
+                      className={cn(
+                        "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left text-sm truncate hover:bg-accent",
+                        isSelected && "bg-accent font-medium"
+                      )}
                     >
-                      {folderSyncing ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
-                    </Button>
-                  </span>
-                )}
-                {showUnreadBadges && unread > 0 && (
-                  <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[10px]">
-                    {unread}
-                  </Badge>
-                )}
-              </div>
+                      <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                      <span className="flex-1 truncate">{label}</span>
+                    </button>
+                    {/* Left of the unread count, like the combined Inbox's own sync button. While another folder (or the
+                        whole account) is syncing, this one stays hidden rather than sitting there disabled — only the
+                        folder actually syncing shows anything here. */}
+                    {!account.disabled && (!isRunning || folderSyncing) && (
+                      <span title={folderSyncing ? syncLabel : undefined} className={cn("shrink-0", folderSyncing && "cursor-progress")}>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={cn("size-6", folderSyncing ? "pointer-events-none opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100")}
+                          disabled={folderSyncing}
+                          title={folderSyncing ? undefined : `Sync ${label}`}
+                          onClick={e => {
+                            e.stopPropagation();
+                            onSyncFolder(account.email, folder.path);
+                          }}
+                        >
+                          {folderSyncing ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+                        </Button>
+                      </span>
+                    )}
+                    {showUnreadBadges && unread > 0 && (
+                      <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[10px]">
+                        {unread}
+                      </Badge>
+                    )}
+                  </div>
+            );
+            if (account.disabled) return row;
+            return (
+              <ContextMenu key={folder.path}>
+                <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ContextMenuItem onSelect={() => onSyncFolder(account.email, folder.path)}>
+                    <RefreshCw /> Sync
+                  </ContextMenuItem>
+                  {canRename && (
+                    <ContextMenuItem onSelect={() => setRenameTarget(folder)}>
+                      <Pencil /> Rename…
+                    </ContextMenuItem>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>
             );
           })}
       </CollapsibleContent>
