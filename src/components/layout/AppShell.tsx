@@ -996,6 +996,22 @@ export function AppShell() {
   }
 
   /**
+   * Double-clicking a draft in the folder list edits it, but the list only ever holds the
+   * 200-character list-row snippet of the body (see LIST_COLUMNS in server/models/emails.ts) — so
+   * unlike the reading pane's own "Edit draft" (which already has the fully-loaded message), this
+   * has to fetch the full record first, or the compose window would open with the body cut off.
+   */
+  async function editDraftFromList(email: EmailRecord) {
+    if (!token || !messageAccountEmail) return;
+    try {
+      const full = await api.getEmail(token, messageAccountEmail, email.id);
+      openCompose(editDraft(full));
+    } catch (err) {
+      toast.error(errorMessage(err, "Couldn't open that draft"));
+    }
+  }
+
+  /**
    * The user's own verdict on the open message, from the small mark in its header: the imbox learns from it for this sender
    * (see setImboxByHand on the server), so what arrives from them later follows.
    */
@@ -1827,7 +1843,7 @@ export function AppShell() {
                   folder={selectedFolder}
                   onSelect={selectEmail}
                   onToggleFlag={toggleFlag}
-                  onEditDraft={(email) => openCompose(editDraft(email))}
+                  onEditDraft={(email) => editDraftFromList(email)}
                   onOpen={() => setListCollapsed(true)}
                   filtered={filtering}
                   folders={folders}

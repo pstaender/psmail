@@ -189,6 +189,10 @@ export function ComposeDialog({
         subject,
         plainText: body,
         inReplyTo: initial?.inReplyTo ?? null,
+        // Without this the draft's date stays null (it only otherwise gets one from actually being
+        // sent, or synced from IMAP) — which pushed it to the very end of the Drafts list (NULL
+        // sorts last in `ORDER BY date DESC`) instead of near the top, by when it was last saved.
+        date: new Date().toISOString(),
       };
 
       const draft: EmailRecord = isEditing

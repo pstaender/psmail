@@ -281,6 +281,9 @@ function installMockFetch(
     emailImbox?: boolean | null;
     /** Overrides the opened message's (id 10) date — for testing how the list/header formats it. */
     emailDate?: string;
+    /** The draft's (id 13) full body: GET .../emails/13 answers with all of it, but the folder list's
+     * GET .../emails only ever gets the first 200 characters, like the real API's list snippet. */
+    draftFullBody?: string;
     /** Makes POST /api/auth/change-username answer with this error (status 409) instead of succeeding. */
     changeUsernameError?: string;
     /** Makes POST /api/auth/change-password answer with this error (status 401) instead of succeeding. */
@@ -473,7 +476,8 @@ function installMockFetch(
         pagedRequests.push({ limit, offset });
         return jsonResponse(all.slice(offset, offset + limit));
       }
-      return jsonResponse([opts.emailDate ? { ...EMAIL, date: opts.emailDate } : EMAIL, SECOND_EMAIL, THIRD_EMAIL, DRAFT_EMAIL]);
+      const draftRow = opts.draftFullBody ? { ...DRAFT_EMAIL, plainText: opts.draftFullBody.slice(0, 200) } : DRAFT_EMAIL;
+      return jsonResponse([opts.emailDate ? { ...EMAIL, date: opts.emailDate } : EMAIL, SECOND_EMAIL, THIRD_EMAIL, draftRow]);
     }
     if (method === "POST" && path === "/api/auth/change-username") {
       const body = JSON.parse(init!.body as string) as { username: string };
@@ -605,7 +609,7 @@ function installMockFetch(
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/10") return jsonResponse({ ...EMAIL, imbox: opts.emailImbox ?? null, date: opts.emailDate ?? EMAIL.date });
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/11") return jsonResponse(SECOND_EMAIL);
     if (method === "GET" && path === "/api/accounts/me%40example.com/emails/12") return jsonResponse(THIRD_EMAIL);
-    if (method === "GET" && path === "/api/accounts/me%40example.com/emails/13") return jsonResponse(DRAFT_EMAIL);
+    if (method === "GET" && path === "/api/accounts/me%40example.com/emails/13") return jsonResponse(opts.draftFullBody ? { ...DRAFT_EMAIL, plainText: opts.draftFullBody } : DRAFT_EMAIL);
     if (method === "PATCH" && path === "/api/accounts/me%40example.com/emails/20") {
       capturedResultPatches.push(init?.body ? JSON.parse(init.body as string) : {});
       return jsonResponse({ ...EMAIL, id: 20, ...(init?.body ? JSON.parse(init.body as string) : {}) });
@@ -1280,6 +1284,26 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await waitFor(() =>
       expect(capturedCreateDraftBody?.from).toEqual([{ address: "me@example.com", name: "Alice Example" }])
     );
+  });
+
+  test("saving a draft stamps it with the current date, new or edited — otherwise it sorts to the very end of the list", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+
+    const before = Date.now();
+
+    await userEvent.click(screen.getByRole("button", { name: /new/i }));
+    await userEvent.click(screen.getByRole("button", { name: /save draft/i }));
+    await waitFor(() => expect(capturedCreateDraftBody?.date).toBeTruthy());
+    expect(Math.abs(Date.parse(capturedCreateDraftBody!.date as string) - before)).toBeLessThan(10_000);
+
+    await userEvent.click(await screen.findByText("Unfinished draft"));
+    await userEvent.click(await screen.findByRole("button", { name: /edit draft/i }));
+    await screen.findByText("Edit draft", { selector: "[data-slot=dialog-title]" });
+    await userEvent.click(screen.getByRole("button", { name: /save draft/i }));
+    await waitFor(() => expect(capturedUpdateDraftBody?.date).toBeTruthy());
+    expect(Math.abs(Date.parse(capturedUpdateDraftBody!.date as string) - before)).toBeLessThan(10_000);
   });
 
   test("sending a message shows an \"E-Mail sent\" toast, distinct from just saving a draft", async () => {
@@ -2168,6 +2192,22 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.dblClick(await screen.findByText("Unfinished draft"));
     await screen.findByText("Edit draft", { selector: "[data-slot=dialog-title]" });
     expect(screen.queryByTitle("Show the message list")).toBeNull();
+  });
+
+  test("double-clicking a draft in the list edits its full body, not the list row's 200-character snippet", async () => {
+    const fullBody = "A".repeat(50) + " middle " + "B".repeat(200); // well past the list snippet's 200-character cutoff
+    installMockFetch({ draftFullBody: fullBody });
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+
+    await userEvent.dblClick(await screen.findByText("Unfinished draft"));
+    const dialog = (await screen.findByText("Edit draft", { selector: "[data-slot=dialog-title]" })).closest('[role="dialog"]') as HTMLElement;
+    await waitFor(() => {
+      const text = dialog.querySelector(".psmail-markdown-editor .TinyMDE")!.textContent!;
+      expect(text).toContain("middle");
+      expect(text).toContain("B".repeat(200)); // the tail past character 200 — cut off before the fix
+    });
   });
 
   test("the collapsed list comes back when there is nothing to read, or a search is typed", async () => {
