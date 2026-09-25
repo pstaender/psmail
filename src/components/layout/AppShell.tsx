@@ -1609,6 +1609,7 @@ export function AppShell() {
                       <DropdownMenuCheckboxItem
                         checked={dateFilter !== null}
                         onSelect={() => setDateFilterOpen(true)}
+                        className="pl-6"
                       >
                         <CalendarDays className="size-4" /> Filter by date…
                       </DropdownMenuCheckboxItem>
@@ -1616,6 +1617,7 @@ export function AppShell() {
                         <DropdownMenuCheckboxItem
                           checked={categoryFilter.length > 0}
                           onSelect={() => setCategoryFilterOpen(true)}
+                          className="pl-6"
                         >
                           <Tags className="size-4" /> Filter by category…
                         </DropdownMenuCheckboxItem>
@@ -1624,18 +1626,21 @@ export function AppShell() {
                       <DropdownMenuCheckboxItem
                         checked={favsOnly}
                         onCheckedChange={setFavsOnly}
+                        className="pl-6"
                       >
                         <Star className="size-4" /> Favorites
                       </DropdownMenuCheckboxItem>
                       <DropdownMenuCheckboxItem
                         checked={readOn}
                         onCheckedChange={setReadOn}
+                        className="pl-6"
                       >
                         <MailOpen className="size-4" /> Read
                       </DropdownMenuCheckboxItem>
                       <DropdownMenuCheckboxItem
                         checked={unreadOn}
                         onCheckedChange={setUnreadOn}
+                        className="pl-6"
                       >
                         <Mail className="size-4" /> Unread
                       </DropdownMenuCheckboxItem>
