@@ -1,3 +1,7 @@
+2026-09-25 - More menu: tighter left margin on the filter icons (8da8405)
+Follow-up to the icon-alignment fix: the check items (Filter by date/category, Favorites, Read, Unread) still had a wide reserved gutter to the left of their icons -- the shadcn checkbox-item default (32px, room for a checkmark that isn't drawn when unchecked). Narrowed it (24px) for these items, verified against a real running instance via a screenshot. The checkmark still fits without overlapping the icon.
+Frontend unaffected (CSS-only), build OK.
+
 2026-09-25 - More menu: consistent icon alignment and new icons (cc5e9e0)
 Cosmetic fix: "Filter by date..." is now a check item like the others in the More menu (checked while a date filter is set), instead of a plain menu item -- which is also why its icon sat further left than "Filter by category..." before this (check items reserve extra space for the checkmark). Also added icons to Favorites (a star), Read (an open envelope) and Unread (a closed envelope), so every row in the menu now has one, aligned in the same column.
 Frontend 379 pass, build OK.
