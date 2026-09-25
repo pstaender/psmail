@@ -1609,7 +1609,7 @@ export function AppShell() {
                       <DropdownMenuCheckboxItem
                         checked={dateFilter !== null}
                         onSelect={() => setDateFilterOpen(true)}
-                        className="pl-6"
+                        indicatorAlign="right"
                       >
                         <CalendarDays className="size-4" /> Filter by date…
                       </DropdownMenuCheckboxItem>
@@ -1617,7 +1617,7 @@ export function AppShell() {
                         <DropdownMenuCheckboxItem
                           checked={categoryFilter.length > 0}
                           onSelect={() => setCategoryFilterOpen(true)}
-                          className="pl-6"
+                          indicatorAlign="right"
                         >
                           <Tags className="size-4" /> Filter by category…
                         </DropdownMenuCheckboxItem>
@@ -1626,21 +1626,21 @@ export function AppShell() {
                       <DropdownMenuCheckboxItem
                         checked={favsOnly}
                         onCheckedChange={setFavsOnly}
-                        className="pl-6"
+                        indicatorAlign="right"
                       >
                         <Star className="size-4" /> Favorites
                       </DropdownMenuCheckboxItem>
                       <DropdownMenuCheckboxItem
                         checked={readOn}
                         onCheckedChange={setReadOn}
-                        className="pl-6"
+                        indicatorAlign="right"
                       >
                         <MailOpen className="size-4" /> Read
                       </DropdownMenuCheckboxItem>
                       <DropdownMenuCheckboxItem
                         checked={unreadOn}
                         onCheckedChange={setUnreadOn}
-                        className="pl-6"
+                        indicatorAlign="right"
                       >
                         <Mail className="size-4" /> Unread
                       </DropdownMenuCheckboxItem>
