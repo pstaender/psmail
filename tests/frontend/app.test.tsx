@@ -730,10 +730,10 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       render(<App />);
       await openTree();
 
-      const work = (await screen.findByText("Work")).closest("button")!;
-      expect(work.textContent).toContain("2");
+      const workRow = (await screen.findByText("Work")).closest("div")!;
+      expect(workRow.textContent).toContain("2");
       await userEvent.click(screen.getByLabelText("Expand Work"));
-      expect((await screen.findByText("Work")).closest("button")!.textContent).not.toContain("2"); // now the subfolder shows it
+      expect((await screen.findByText("Work")).closest("div")!.textContent).not.toContain("2"); // now the subfolder shows it
     });
 
     test("the selected folder is never hidden in a collapsed parent (a link to it opens its parents)", async () => {
@@ -3358,7 +3358,20 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await waitFor(() => expect(listRequests.filter(r => r.list === "folder").length).toBeGreaterThan(listRequestsBefore));
   });
 
-  test("while a folder sync is running, only that folder's button shows a spinner — other folders are disabled but stay plain", async () => {
+  test("the folder sync button sits left of the unread count, like the combined Inbox's own sync button", async () => {
+    installMockFetch();
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+
+    // INBOX has 1 unread in the mock — its row shows the sync button, then the badge, in that order.
+    const inboxRow = screen.getAllByText("Inbox", { selector: "span" }).at(-1)!.closest("div")!;
+    const syncButton = within(inboxRow).getByTitle("Sync Inbox");
+    const badge = within(inboxRow).getByText("1");
+    expect(syncButton.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // sync button, then the badge
+  });
+
+  test("while a folder sync is running, only that folder's button shows a spinner — other folders show no sync button at all", async () => {
     installMockFetch({ syncStaysRunning: true });
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
@@ -3370,13 +3383,12 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     const entwuerfeSpinner = within(entwuerfeRow).getByTitle("Syncing 12/340…");
     expect(entwuerfeSpinner.querySelector(".animate-spin")).toBeTruthy();
 
-    // INBOX's own button is disabled too (the server allows one job per account at a time), but it isn't
-    // the one syncing, so it stays a plain hover button, no spinner (its title disappears while disabled,
-    // same as the account-level button already does).
+    // INBOX's own sync button isn't just disabled — it's gone entirely (not even a hover reveal) while
+    // Entwürfe is the one actually syncing, the same way "Sync now" already disappears during a sync.
     const inboxRow = screen.getAllByText("Inbox", { selector: "span" }).at(-1)!.closest("div")!; // the account's own Inbox folder row, not the combined one
-    const inboxSyncButton = within(inboxRow).getAllByRole("button").at(-1)!;
-    expect(inboxSyncButton.hasAttribute("disabled")).toBe(true);
-    expect(inboxSyncButton.querySelector(".animate-spin")).toBeNull();
+    expect(within(inboxRow).queryByTitle("Sync Inbox")).toBeNull();
+    expect(within(inboxRow).queryByTitle(/^Syncing/)).toBeNull();
+    expect(within(inboxRow).getAllByRole("button")).toHaveLength(1); // just the folder-name button
   });
 
   test("Reply all appears only after the pointer or focus reaches Reply, and replies to everyone", async () => {

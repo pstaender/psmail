@@ -259,7 +259,7 @@ export function AccountRow({
             // here when it's THIS folder specifically — the account-level spinner already says the rest is syncing.
             const folderSyncing = isRunning && job?.folder === folder.path;
             return (
-              <div key={folder.path} className="group flex items-center" style={depth > 0 ? { paddingLeft: `${depth * 0.75}rem` } : undefined}>
+              <div key={folder.path} className="group flex items-center gap-1 pr-1.5" style={depth > 0 ? { paddingLeft: `${depth * 0.75}rem` } : undefined}>
                 {/* Folders with subfolders start collapsed; the arrow (or a click on the folder) opens them. */}
                 {hasChildren ? (
                   <button
@@ -286,19 +286,17 @@ export function AccountRow({
                 >
                   <Icon className="size-3.5 shrink-0 text-muted-foreground" />
                   <span className="flex-1 truncate">{label}</span>
-                  {showUnreadBadges && unread > 0 && (
-                    <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                      {unread}
-                    </Badge>
-                  )}
                 </button>
-                {!account.disabled && (
+                {/* Left of the unread count, like the combined Inbox's own sync button. While another folder (or the
+                    whole account) is syncing, this one stays hidden rather than sitting there disabled — only the
+                    folder actually syncing shows anything here. */}
+                {!account.disabled && (!isRunning || folderSyncing) && (
                   <span title={folderSyncing ? syncLabel : undefined} className={cn("shrink-0", folderSyncing && "cursor-progress")}>
                     <Button
                       variant="ghost"
                       size="icon"
                       className={cn("size-6", folderSyncing ? "pointer-events-none opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100")}
-                      disabled={isRunning}
+                      disabled={folderSyncing}
                       title={folderSyncing ? undefined : `Sync ${label}`}
                       onClick={e => {
                         e.stopPropagation();
@@ -308,6 +306,11 @@ export function AccountRow({
                       {folderSyncing ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
                     </Button>
                   </span>
+                )}
+                {showUnreadBadges && unread > 0 && (
+                  <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[10px]">
+                    {unread}
+                  </Badge>
                 )}
               </div>
             );
