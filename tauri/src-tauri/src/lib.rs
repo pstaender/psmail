@@ -52,13 +52,19 @@ fn read_server_address() -> (String, u16) {
     )
 }
 
-/// The address the *webview* should load: "0.0.0.0" (a valid bind address, meaning "every interface")
-/// isn't a valid address to connect *to* — loopback reaches the same server.
+/// The address the *webview* should load — not always the same as what the server binds to:
+/// - "0.0.0.0" (every interface) isn't a valid address to connect *to*; loopback reaches the same server.
+/// - A loopback IP literal ("127.0.0.1"/"::1") is a valid address to connect to, but not a valid WebAuthn
+///   relying-party ID — passkey unlock (src/lib/passkeyVault.ts, defaults `rp.id` to the page's own
+///   hostname) fails immediately with a SecurityError ("This is an invalid domain") on one, since the
+///   WebAuthn spec requires the RP ID to be a real domain string, IP addresses excluded. "localhost" reaches
+///   the exact same server (it's just another name for loopback) and *is* accepted as a domain, so it's
+///   used for anything that resolves to loopback, matching what a browser tab opened at the documented
+///   http://localhost:<port> already gets.
 fn browsable_host(hostname: &str) -> &str {
-    if hostname == "0.0.0.0" {
-        "127.0.0.1"
-    } else {
-        hostname
+    match hostname {
+        "0.0.0.0" | "127.0.0.1" | "::1" => "localhost",
+        other => other,
     }
 }
 
