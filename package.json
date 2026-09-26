@@ -1,8 +1,12 @@
 {
-  "name": "bun-react-template",
-  "version": "0.1.0",
-  "private": true,
+  "name": "psmail",
+  "author": {
+    "name": "Philipp Staender",
+    "email": "philipp.staender@gmail.com"
+  },
+  "version": "0.0.4",
   "type": "module",
+  "license": "MIT",
   "scripts": {
     "dev": "bun --hot src/server/main.ts",
     "start": "NODE_ENV=production bun src/server/main.ts",
