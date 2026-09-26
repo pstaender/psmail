@@ -301,6 +301,8 @@ A read-only account never tells the IMAP server about a delete (or move), so the
 
 After a server restart or when a session expires you have to sign in again. To make that a touch instead of typing, the sign-in screen can keep your password **on this device, encrypted, unlockable only with a passkey / Touch ID / security key**: switch on "Remember on this device" when signing in (only offered when the browser supports passkeys), and the next time the profile shows "Unlock with passkey". It is client-side only (`src/lib/passkeyVault.ts`); the server knows nothing about it.
 
+Not offered in the [desktop app](#desktop-app) on macOS: Touch ID there is gated by Apple's Associated Domains entitlement (a real HTTPS domain the app is provisioned for), which a page served from the app's own local sidecar can never satisfy — it would just fail every time. A security key (YubiKey etc.) still works there, since that's a separate path. Windows/Linux builds of the app aren't affected.
+
 Is this sensible security? Yes — *in this form*, and only then:
 - The key is derived by the authenticator itself with the WebAuthn **PRF extension** (FIDO2 `hmac-secret`), and only after user verification (fingerprint, face, PIN or touch). It never exists in the page beforehand, so localStorage holds just ciphertext (AES-GCM, bound to the profile name) that is useless without the authenticator.
 - What it does *not* protect against: someone who has the unlocked device **and** can pass the passkey check; and script running in the page (XSS) can still trigger the passkey prompt — but cannot decrypt anything without you passing it. That is strictly better than remembering the password in plain localStorage, and about as good as a browser's own password manager.

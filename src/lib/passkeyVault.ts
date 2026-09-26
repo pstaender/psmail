@@ -82,10 +82,35 @@ function writeEntries(username: string, entries: VaultEntry[]): void {
   else localStorage.setItem(storageKey(username), JSON.stringify({ v: 2, entries } satisfies StoredVault));
 }
 
+/** True inside the Tauri desktop app's own webview: `window.__TAURI_INTERNALS__` is the same global
+ * `@tauri-apps/api`'s own `isTauri()` checks for — present whether or not the app opts into the full
+ * `window.__TAURI__` JS API, which this one doesn't. */
+function inTauriApp(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+/**
+ * The desktop app's webview is macOS's WKWebView on macOS specifically, where the platform
+ * authenticator (Touch ID) is gated by Apple's Associated Domains entitlement — one tied to a real
+ * HTTPS domain the app is provisioned for, meaningless for a page served from this app's own local
+ * sidecar — so it always fails, right at credential creation, with a domain or "not allowed" error.
+ * Windows/Linux builds of the app aren't affected (WebView2/WebKitGTK don't gate it the same way), so
+ * this only disables it there rather than for the desktop app as a whole.
+ */
+function isMacTauriApp(): boolean {
+  return inTauriApp() && /mac/i.test(navigator.platform || navigator.userAgent);
+}
+
 /** Whether this browser can do passkeys at all (a necessary, not sufficient, condition: PRF support is only known once an authenticator is asked). */
 export function passkeysAvailable(): boolean {
   try {
-    return typeof window !== "undefined" && !!window.PublicKeyCredential && !!navigator.credentials?.create && !!globalThis.crypto?.subtle;
+    return (
+      typeof window !== "undefined" &&
+      !isMacTauriApp() &&
+      !!window.PublicKeyCredential &&
+      !!navigator.credentials?.create &&
+      !!globalThis.crypto?.subtle
+    );
   } catch {
     return false;
   }

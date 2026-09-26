@@ -5098,6 +5098,42 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
       expect(screen.queryByRole("button", { name: /unlock with passkey/i })).toBeNull();
     });
 
+    describe("inside the Tauri desktop app on macOS", () => {
+      // Touch ID there is gated by Apple's Associated Domains entitlement, which a page served from
+      // the app's own local sidecar can never satisfy — so the option is hidden rather than offered
+      // and then always failing. `window.__TAURI_INTERNALS__` is the same global @tauri-apps/api's
+      // own isTauri() checks for.
+      let originalPlatform: PropertyDescriptor | undefined;
+      beforeEach(() => {
+        (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {};
+        originalPlatform = Object.getOwnPropertyDescriptor(window.navigator, "platform");
+        Object.defineProperty(window.navigator, "platform", { value: "MacIntel", configurable: true });
+      });
+      afterEach(() => {
+        delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+        if (originalPlatform) Object.defineProperty(window.navigator, "platform", originalPlatform);
+      });
+
+      test("the sign-in form offers nothing extra, even with a real authenticator available", async () => {
+        authenticator = installFakeAuthenticator();
+        await pickSecure();
+        expect(screen.queryByLabelText("Remember on this device")).toBeNull();
+        expect(screen.queryByRole("button", { name: /unlock with passkey/i })).toBeNull();
+      });
+
+      test("Settings → Credentials shows nothing about passkeys either", async () => {
+        authenticator = installFakeAuthenticator();
+        await pickSecure();
+        await userEvent.type(screen.getByPlaceholderText("Password"), "secret123");
+        await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+        await openAccountInbox();
+        await userEvent.click(screen.getByTitle("Settings"));
+        await userEvent.click(await screen.findByRole("tab", { name: "Credentials" }));
+        expect(screen.queryByText(/Passkey unlock/)).toBeNull();
+        expect(screen.queryByRole("button", { name: /add another passkey/i })).toBeNull();
+      });
+    });
+
     test("signing in with 'Remember' stores the password encrypted, protected by a passkey", async () => {
       authenticator = installFakeAuthenticator();
       await signInAndRemember();
