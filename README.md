@@ -19,7 +19,7 @@ bun run dev     # webclient + API, with --hot reload
 bun run start   # production
 ```
 
-Open `http://localhost:3001` (configurable, see [Configuration](#configuration)). On first boot the server creates a default user (`username: default`, empty password) — pick it on the login screen to get in immediately.
+Open `http://localhost:5387` (configurable, see [Configuration](#configuration)). On first boot the server creates a default user (`username: default`, empty password) — pick it on the login screen to get in immediately.
 
 To keep it running as a background service (auto-restart on crash, start on boot), use [pm2](https://pm2.keymetrics.io) with the bundled `ecosystem.config.cjs`:
 
@@ -30,6 +30,17 @@ pm2 save && pm2 startup          # keep it running across reboots
 ```
 
 It runs `bun src/server/main.ts` with `NODE_ENV=production`, one instance (the sqlite database is a single file — no cluster mode), and writes its logs to `logs/` (gitignored). Its port and other settings come from its own `settings.json`, not from pm2 — see [Configuration](#configuration).
+
+## Desktop app
+
+A native desktop wrapper ([Tauri](https://v2.tauri.app)), all under `tauri/` — the psmail server itself is unchanged, just packaged as the app's sidecar (compiled to one self-contained executable with `bun build --compile`, embedded frontend and all) and pointed at from a native window. Its own version always matches the root `package.json`'s (synced before every build/dev run).
+
+```bash
+bun run tauri:dev     # runs it locally, rebuilding the sidecar first
+bun run tauri:build   # builds the installable app (tauri/src-tauri/target/release/bundle/)
+```
+
+The app menu (**P.S.Mail**) has **Open Settings** (opens `settings.json` in its default editor) and **Open Settings Folder** (opens the [config directory](#configuration) in Finder/Explorer/the file manager) — the same file and folder the CLI and a manual `bun run start` use, so there's exactly one settings.json regardless of how you run psmail. First run needs a Rust toolchain (e.g. via [rustup](https://rustup.rs)); `tauri/scripts/build-sidecar.ts` only ever builds for the machine it runs on, so ship a build made on each platform you're targeting, not a cross-compile.
 
 ## Webclient
 
@@ -81,7 +92,7 @@ Override with `PSMAIL_CONFIG_DIR` (used by the test suite to avoid touching your
 
 ```json
 {
-  "port": 3001,
+  "port": 5387,
   "hostname": "127.0.0.1",
   "sessionTtlSeconds": 43200
 }
@@ -264,7 +275,7 @@ It's skipped by default.
 
 ## Stack
 
-Bun, React 19, TypeScript, shadcn/Tailwind, `bun:sqlite`, [imapflow](https://github.com/postalsys/imapflow), [nodemailer](https://nodemailer.com/), [mailparser](https://nodemailer.com/extras/mailparser/), [DOMPurify](https://github.com/cure53/DOMPurify). See `CLAUDE.md` for conventions.
+Bun, React 19, TypeScript, shadcn/Tailwind, `bun:sqlite`, [imapflow](https://github.com/postalsys/imapflow), [nodemailer](https://nodemailer.com/), [mailparser](https://nodemailer.com/extras/mailparser/), [DOMPurify](https://github.com/cure53/DOMPurify). The desktop app (`tauri/`) adds [Tauri](https://v2.tauri.app) (Rust). See `CLAUDE.md` for conventions.
 
 ## Local testing
 

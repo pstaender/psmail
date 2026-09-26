@@ -1,0 +1,8 @@
+{
+  "name": "psmail-tauri",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.5"
+  }
+}

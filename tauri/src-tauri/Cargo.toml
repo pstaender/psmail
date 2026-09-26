@@ -1,0 +1,33 @@
+[package]
+name = "psmail"
+# Kept in sync with the root package.json's "version" by tauri/scripts/sync-version.ts, run before every build.
+version = "0.0.4"
+description = "P.S.Mail desktop app"
+authors = ["Philipp Staender"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.77.2"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "psmail_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.11.6", features = [] }
+tauri-plugin-log = "2"
+tauri-plugin-shell = "2.3.6"
+# Resolves the OS config directory exactly like src/server/config/paths.ts (getConfigDir): Application
+# Support on macOS, %APPDATA% on Windows, $XDG_CONFIG_HOME/~/.config on Linux.
+dirs = "7.0.0"
+# Opens settings.json / the settings folder in the OS's own default app (TextEdit, Explorer, ...) for the
+# "Open Settings" / "Open Settings Folder" menu items — a plain cross-platform "open path" call, native-side
+# only, so it doesn't need routing through Tauri's invoke/capability system at all.
+open = "5.4.4"

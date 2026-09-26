@@ -1,0 +1,31 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "P.S.Mail",
+  "version": "0.0.4",
+  "identifier": "com.psmail.desktop",
+  "build": {
+    "frontendDist": "../placeholder-frontend",
+    "beforeDevCommand": "bun run scripts/build-sidecar.ts",
+    "beforeBuildCommand": "bun run scripts/build-sidecar.ts"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/psmail-server"
+    ]
+  }
+}

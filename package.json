@@ -16,7 +16,9 @@
     "test": "bun test tests/unit tests/integration",
     "test:frontend": "bun test --preload ./tests/setup/happydom.ts tests/frontend",
     "test:all": "bun run test && bun run test:frontend",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "tauri:build": "bun run tauri/build.ts",
+    "tauri:dev": "bun run tauri/dev.ts"
   },
   "dependencies": {
     "@radix-ui/react-label": "^2.1.7",

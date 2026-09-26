@@ -115,6 +115,10 @@ For more information, read the Bun API docs in `node_modules/bun-types/docs/**.m
 
 When adding a context menu, give each item an icon, and show the existing keyboard shortcut for that action (if one exists) as a trailing shortcut hint.
 
+## Desktop app (Tauri)
+
+Everything for the native desktop wrapper lives under `tauri/` (Rust/Cargo project, icons, and the `bun` scripts that drive it) — never scatter Tauri config at the repo root. It packages the *existing* psmail server as its sidecar (`bun build --compile`, see `tauri/scripts/build-sidecar.ts`) and points a native window at it; it doesn't have, and shouldn't need, any frontend code of its own. `bun run tauri:dev` / `bun run tauri:build` from the repo root. Its version is synced from the root `package.json` before every build (`tauri/scripts/sync-version.ts`) — never hand-edit the version in `tauri/src-tauri/tauri.conf.json` or `Cargo.toml`.
+
 ## Changelog
 
 `changelog.txt` records the summary given after each piece of work. After every git commit, add the summary you write for the user (what changed and why, in the same words) to `changelog.txt` as a new entry at the top, headed `YYYY-MM-DD - <short title> (<commit hash>)`, and include the changelog update in a follow-up commit (do not amend the commit the summary describes).
