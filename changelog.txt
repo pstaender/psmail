@@ -1,3 +1,6 @@
+2026-09-27 - Change the default port from 3001 to 5387 (9014918)
+3001 is a very commonly used port and tends to collide with other local dev servers. Updated the server's own default (settings.ts) and the matching fallbacks in the CLI and scripts; the two test fixtures that used 3001 as an arbitrary value (not the real default) are untouched.
+
 2026-09-25 - Fix two draft bugs: missing date, and body cut off on double-click (d8c6346)
 Saving a draft never sent a date to the server, so it was stored as NULL -- pushing the draft to the very end of the Drafts list, since ORDER BY date DESC sorts NULL last. ComposeDialog now stamps every save (new or edited) with the current time, like most mail clients' "last saved" ordering.
 Double-clicking a draft in the message list opened it for editing with its body cut off after 200 characters, while the reading pane's "Edit draft" button didn't. The list only ever loads a 200-character snippet per row for performance (the full body comes from a separate per-message fetch) -- the reading pane's button already had the full record loaded, but double-click was handing the truncated list row straight to the compose editor. It now fetches the full message first.
