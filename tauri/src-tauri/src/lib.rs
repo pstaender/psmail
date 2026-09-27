@@ -102,6 +102,7 @@ fn open_settings_folder() {
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(BackendProcess(Mutex::new(None)))
         .setup(|app| {
             if cfg!(debug_assertions) {

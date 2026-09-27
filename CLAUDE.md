@@ -117,7 +117,9 @@ When adding a context menu, give each item an icon, and show the existing keyboa
 
 ## Desktop app (Tauri)
 
-Everything for the native desktop wrapper lives under `tauri/` (Rust/Cargo project, icons, and the `bun` scripts that drive it) — never scatter Tauri config at the repo root. It packages the *existing* psmail server as its sidecar (`bun build --compile`, see `tauri/scripts/build-sidecar.ts`) and points a native window at it; it doesn't have, and shouldn't need, any frontend code of its own. `bun run tauri:dev` / `bun run tauri:build` from the repo root. Its version is synced from the root `package.json` before every build (`tauri/scripts/sync-version.ts`) — never hand-edit the version in `tauri/src-tauri/tauri.conf.json` or `Cargo.toml`.
+Everything for the native desktop wrapper lives under `tauri/` (Rust/Cargo project, icons, and the `bun` scripts that drive it) — never scatter Tauri config at the repo root. It packages the *existing* psmail server as its sidecar (`bun build --compile`, see `tauri/scripts/build-sidecar.ts`) and points a native window at it; it doesn't have, and mostly shouldn't need, any frontend code of its own. `bun run tauri:dev` / `bun run tauri:build` from the repo root. Its version is synced from the root `package.json` before every build (`tauri/scripts/sync-version.ts`) — never hand-edit the version in `tauri/src-tauri/tauri.conf.json` or `Cargo.toml`.
+
+The one exception is behavior a Tauri plugin needs a JS-side call for (e.g. `@tauri-apps/plugin-opener`, used by `src/lib/externalLinks.ts` to open links in the system browser): that lives in the main app's own `src/`, gated behind `isTauriApp()` (`src/lib/platform.ts`, checks for `window.__TAURI_INTERNALS__`) so it's a no-op in a regular browser. Keep this to the minimum a plugin actually requires — prefer handling things entirely on the Rust side (as the "Open Settings"/"Open Settings Folder" menu items do, via the `open` crate directly) whenever a plugin's Rust API alone is enough.
 
 ## Changelog
 

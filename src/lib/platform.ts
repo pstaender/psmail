@@ -9,3 +9,10 @@ export function isMac(): boolean {
 export function modKey(key: string): string {
   return isMac() ? `⌘${key}` : `Ctrl+${key}`;
 }
+
+/** True inside the Tauri desktop app's own webview: `window.__TAURI_INTERNALS__` is the same global
+ * `@tauri-apps/api`'s own `isTauri()` checks for — present whether or not the app opts into the full
+ * `window.__TAURI__` JS API, which this one doesn't. */
+export function isTauriApp(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}

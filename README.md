@@ -42,6 +42,8 @@ bun run tauri:build   # builds the installable app (tauri/src-tauri/target/relea
 
 The app menu (**P.S.Mail**) has **Open Settings** (opens `settings.json` in its default editor) and **Open Settings Folder** (opens the [config directory](#configuration) in Finder/Explorer/the file manager) — the same file and folder the CLI and a manual `bun run start` use, so there's exactly one settings.json regardless of how you run psmail. First run needs a Rust toolchain (e.g. via [rustup](https://rustup.rs)); `tauri/scripts/build-sidecar.ts` only ever builds for the machine it runs on, so ship a build made on each platform you're targeting, not a cross-compile.
 
+A link clicked anywhere in the app (a message body most commonly) opens in the OS's default browser/mail/phone app ([`@tauri-apps/plugin-opener`](https://v2.tauri.app/plugin/opener/)), instead of the desktop app's own window trying and failing to navigate there — the one bit of Tauri-aware frontend code this app has (`src/lib/externalLinks.ts`), a no-op everywhere else.
+
 ## Webclient
 
 The app opens on the combined Inbox (all accounts' Inboxes) with every account collapsed in the sidebar (nothing is selected yet, and a collapsed account's folders aren't even fetched); expand an account and pick a folder to see its mail. A sync that was already running when the page loads (started in an earlier visit, another tab, or another browser's automatic sync) is picked up from the account's job history: its spinner and progress show, and the app refreshes when it ends.

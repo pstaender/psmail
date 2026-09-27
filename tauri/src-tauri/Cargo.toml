@@ -24,6 +24,9 @@ log = "0.4"
 tauri = { version = "2.11.6", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2.3.6"
+# Opens links clicked inside a message (mailto:/tel:/http(s):) in the system's default browser/app instead
+# of navigating this app's own window there — the frontend calls this via @tauri-apps/plugin-opener.
+tauri-plugin-opener = "2.6.0"
 # Resolves the OS config directory exactly like src/server/config/paths.ts (getConfigDir): Application
 # Support on macOS, %APPDATA% on Windows, $XDG_CONFIG_HOME/~/.config on Linux.
 dirs = "7.0.0"

@@ -12,6 +12,8 @@
  * sits in localStorage behind a passkey prompt would be theatre, so there is deliberately no such fallback.
  */
 
+import { isMac, isTauriApp } from "./platform";
+
 const STORAGE_PREFIX = "psmail.passkeyVault.";
 const HKDF_INFO = new TextEncoder().encode("psmail passkey vault v1");
 
@@ -82,13 +84,6 @@ function writeEntries(username: string, entries: VaultEntry[]): void {
   else localStorage.setItem(storageKey(username), JSON.stringify({ v: 2, entries } satisfies StoredVault));
 }
 
-/** True inside the Tauri desktop app's own webview: `window.__TAURI_INTERNALS__` is the same global
- * `@tauri-apps/api`'s own `isTauri()` checks for — present whether or not the app opts into the full
- * `window.__TAURI__` JS API, which this one doesn't. */
-function inTauriApp(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
-
 /**
  * The desktop app's webview is macOS's WKWebView on macOS specifically, where the platform
  * authenticator (Touch ID) is gated by Apple's Associated Domains entitlement — one tied to a real
@@ -98,7 +93,7 @@ function inTauriApp(): boolean {
  * this only disables it there rather than for the desktop app as a whole.
  */
 function isMacTauriApp(): boolean {
-  return inTauriApp() && /mac/i.test(navigator.platform || navigator.userAgent);
+  return isTauriApp() && isMac();
 }
 
 /** Whether this browser can do passkeys at all (a necessary, not sufficient, condition: PRF support is only known once an authenticator is asked). */
