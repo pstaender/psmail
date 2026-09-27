@@ -31,6 +31,17 @@ pm2 save && pm2 startup          # keep it running across reboots
 
 It runs `bun src/server/main.ts` with `NODE_ENV=production`, one instance (the sqlite database is a single file — no cluster mode), and writes its logs to `logs/` (gitignored). Its port and other settings come from its own `settings.json`, not from pm2 — see [Configuration](#configuration).
 
+## Desktop app
+
+A native desktop wrapper ([Electron](https://electronjs.org)), all under `electronapp/` (its own `package.json`, dependencies and lockfile — a separate project, not mixed into the root one) — the psmail server itself is unchanged, just compiled to one self-contained executable (`bun build --compile`, embedded frontend and all) that the app spawns as a child process and points its window at. Its own version always matches the root `package.json`'s (synced before every build).
+
+```bash
+bun run electron:dev     # runs it locally, rebuilding the sidecar first
+bun run electron:build   # builds the installable app (electronapp/release/)
+```
+
+The app menu has **Open Settings** (opens `settings.json` in its default editor) and **Open Settings Folder** (opens the [config directory](#configuration) in Finder/Explorer/the file manager) — the same file and folder the CLI and a manual `bun run start` use. A link clicked anywhere in the app (a message body most commonly) opens in the OS's default browser/mail/phone app instead of this window trying to navigate there. First run needs the Electron/electron-builder dependencies installed (`bun install` inside `electronapp/`); `scripts/build-sidecar.ts` only ever builds for the machine it runs on, so ship a build made on each platform you're targeting, not a cross-compile.
+
 ## Webclient
 
 The app opens on the combined Inbox (all accounts' Inboxes) with every account collapsed in the sidebar (nothing is selected yet, and a collapsed account's folders aren't even fetched); expand an account and pick a folder to see its mail. A sync that was already running when the page loads (started in an earlier visit, another tab, or another browser's automatic sync) is picked up from the account's job history: its spinner and progress show, and the app refreshes when it ends.
@@ -264,7 +275,7 @@ It's skipped by default.
 
 ## Stack
 
-Bun, React 19, TypeScript, shadcn/Tailwind, `bun:sqlite`, [imapflow](https://github.com/postalsys/imapflow), [nodemailer](https://nodemailer.com/), [mailparser](https://nodemailer.com/extras/mailparser/), [DOMPurify](https://github.com/cure53/DOMPurify). See `CLAUDE.md` for conventions.
+Bun, React 19, TypeScript, shadcn/Tailwind, `bun:sqlite`, [imapflow](https://github.com/postalsys/imapflow), [nodemailer](https://nodemailer.com/), [mailparser](https://nodemailer.com/extras/mailparser/), [DOMPurify](https://github.com/cure53/DOMPurify). The desktop app (`electronapp/`) adds [Electron](https://electronjs.org). See `CLAUDE.md` for conventions.
 
 ## Local testing
 

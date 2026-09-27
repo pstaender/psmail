@@ -1,0 +1,31 @@
+appId: com.psmail.desktop
+productName: P.S.Mail
+copyright: Copyright © Philipp Staender
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - src/**/*
+  - package.json
+
+# The compiled sidecar (see scripts/build-sidecar.ts) is a native executable, not JS to bundle into
+# the app.asar — it has to be a plain file on disk so the main process can spawn it as a child
+# process. Only one of psmail-server / psmail-server.exe exists on a given build machine.
+extraResources:
+  - from: build
+    to: .
+    filter:
+      - psmail-server*
+
+mac:
+  category: public.app-category.productivity
+  target: dmg
+
+win:
+  target: nsis
+
+linux:
+  category: Network
+  target: AppImage

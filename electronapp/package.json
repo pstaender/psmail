@@ -1,0 +1,20 @@
+{
+  "name": "psmail-electron",
+  "private": true,
+  "version": "0.0.4",
+  "description": "P.S.Mail desktop app",
+  "main": "src/main.js",
+  "author": {
+    "name": "Philipp Staender",
+    "email": "philipp.staender@gmail.com"
+  },
+  "license": "MIT",
+  "scripts": {
+    "dev": "bun run scripts/build-sidecar.ts && electron .",
+    "build": "bun run build.ts"
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
+  }
+}

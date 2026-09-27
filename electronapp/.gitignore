@@ -1,0 +1,4 @@
+node_modules
+release
+build/psmail-server
+build/psmail-server.exe
