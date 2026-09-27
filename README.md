@@ -19,7 +19,7 @@ bun run dev     # webclient + API, with --hot reload
 bun run start   # production
 ```
 
-Open `http://localhost:3001` (configurable, see [Configuration](#configuration)). On first boot the server creates a default user (`username: default`, empty password) — pick it on the login screen to get in immediately.
+Open `http://localhost:5387` (configurable, see [Configuration](#configuration)). On first boot the server creates a default user (`username: default`, empty password) — pick it on the login screen to get in immediately.
 
 To keep it running as a background service (auto-restart on crash, start on boot), use [pm2](https://pm2.keymetrics.io) with the bundled `ecosystem.config.cjs`:
 
@@ -81,7 +81,7 @@ Override with `PSMAIL_CONFIG_DIR` (used by the test suite to avoid touching your
 
 ```json
 {
-  "port": 3001,
+  "port": 5387,
   "hostname": "127.0.0.1",
   "sessionTtlSeconds": 43200
 }

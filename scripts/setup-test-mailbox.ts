@@ -9,7 +9,7 @@
  *
  * Usage:
  *   bun run scripts/setup-test-mailbox.ts [--reset] [--source testmails]
- *     [--account testmails@example.local] [--user default] [--url http://localhost:3001]
+ *     [--account testmails@example.local] [--user default] [--url http://localhost:5387]
  *
  * --reset also deletes the account (and its locally synced data) and empties
  * the IMAP folders first, so re-running the script gives a clean slate
@@ -47,7 +47,7 @@ function parseOptions(argv: string[]): Options {
     source: typeof flags.source === "string" ? flags.source : "testmails",
     accountEmail: typeof flags.account === "string" ? flags.account : "testmails@example.local",
     username: typeof flags.user === "string" ? flags.user : "default",
-    apiUrl: typeof flags.url === "string" ? flags.url : (process.env.PSMAIL_API_URL ?? "http://localhost:3001"),
+    apiUrl: typeof flags.url === "string" ? flags.url : (process.env.PSMAIL_API_URL ?? "http://localhost:5387"),
   };
 }
 

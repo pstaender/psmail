@@ -163,7 +163,7 @@ async function cmdImap(subcommand: string | undefined, argv: string[]) {
   }
 
   const username = await signInForAccounts(client, flags, [accountEmail]);
-  console.log(`Signed in to ${url ?? process.env.PSMAIL_API_URL ?? "http://localhost:3001"} as "${username}".`);
+  console.log(`Signed in to ${url ?? process.env.PSMAIL_API_URL ?? "http://localhost:5387"} as "${username}".`);
   console.log(`Searching "${folder}" on ${accountEmail} for Message-ID ${messageId} …`);
 
   const { found } = await client.findMessageId(accountEmail, folder, messageId);
@@ -189,7 +189,7 @@ async function cmdImbox(subcommand: string | undefined, argv: string[]) {
   // classify takes account addresses; explain takes one address followed by a message id.
   const wanted = subcommand === "explain" ? positionals.slice(0, 1) : subcommand === "classify" ? positionals : [];
   const username = await signInForAccounts(client, flags, wanted);
-  console.log(`Signed in to ${url ?? process.env.PSMAIL_API_URL ?? "http://localhost:3001"} as "${username}".`);
+  console.log(`Signed in to ${url ?? process.env.PSMAIL_API_URL ?? "http://localhost:5387"} as "${username}".`);
 
   if (subcommand === "classify") {
     await classifyCommand(client, positionals.length > 0 ? positionals : undefined, force, verbose);
@@ -337,7 +337,7 @@ async function cmdSummarize(argv: string[]) {
   const url = typeof flags.url === "string" ? flags.url : undefined;
   const client = new ApiClient(url);
   const username = await signInForAccounts(client, flags, positionals);
-  console.log(`Signed in to ${url ?? process.env.PSMAIL_API_URL ?? "http://localhost:3001"} as "${username}".`);
+  console.log(`Signed in to ${url ?? process.env.PSMAIL_API_URL ?? "http://localhost:5387"} as "${username}".`);
 
   const short = (text: string | null, length: number) => (text ?? "(no subject)").replace(/\s+/g, " ").slice(0, length);
   const tty = Boolean(process.stdout.isTTY);

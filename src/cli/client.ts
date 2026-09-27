@@ -40,7 +40,7 @@ export class ApiClient {
   private baseUrl: string;
   private token: string | null = null;
 
-  constructor(baseUrl = process.env.PSMAIL_API_URL ?? "http://localhost:3001") {
+  constructor(baseUrl = process.env.PSMAIL_API_URL ?? "http://localhost:5387") {
     this.baseUrl = baseUrl.replace(/\/$/, "");
   }
 

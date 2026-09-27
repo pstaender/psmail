@@ -17,7 +17,7 @@ export interface Settings {
 }
 
 const DEFAULT_SETTINGS: Settings = {
-  port: 3001,
+  port: 5387,
   sessionTtlSeconds: 60 * 60 * 12,
 };
 
