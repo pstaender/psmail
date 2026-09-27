@@ -26,6 +26,29 @@ describe("passkey vault", () => {
     expect(stored("alice")).toBeNull();
   });
 
+  test("not available in the Electron desktop app on macOS, even with a working authenticator", async () => {
+    authenticator = installFakeAuthenticator();
+    const originalUA = navigator.userAgent;
+    Object.defineProperty(navigator, "userAgent", { value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Electron/28.0.0", configurable: true });
+    try {
+      expect(passkeysAvailable()).toBe(false);
+      expect((await fail(savePassword("alice", "pw"))).kind).toBe("unsupported");
+    } finally {
+      Object.defineProperty(navigator, "userAgent", { value: originalUA, configurable: true });
+    }
+  });
+
+  test("Electron on a non-mac platform is unaffected", async () => {
+    authenticator = installFakeAuthenticator();
+    const originalUA = navigator.userAgent;
+    Object.defineProperty(navigator, "userAgent", { value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Electron/28.0.0", configurable: true });
+    try {
+      expect(passkeysAvailable()).toBe(true);
+    } finally {
+      Object.defineProperty(navigator, "userAgent", { value: originalUA, configurable: true });
+    }
+  });
+
   test("saves the password encrypted and unlocks it again with the same passkey", async () => {
     authenticator = installFakeAuthenticator();
     expect(passkeysAvailable()).toBe(true);

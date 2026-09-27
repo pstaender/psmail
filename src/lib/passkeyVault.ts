@@ -12,6 +12,8 @@
  * sits in localStorage behind a passkey prompt would be theatre, so there is deliberately no such fallback.
  */
 
+import { isElectron, isMac } from "@/lib/platform";
+
 const STORAGE_PREFIX = "psmail.passkeyVault.";
 const HKDF_INFO = new TextEncoder().encode("psmail passkey vault v1");
 
@@ -82,9 +84,16 @@ function writeEntries(username: string, entries: VaultEntry[]): void {
   else localStorage.setItem(storageKey(username), JSON.stringify({ v: 2, entries } satisfies StoredVault));
 }
 
-/** Whether this browser can do passkeys at all (a necessary, not sufficient, condition: PRF support is only known once an authenticator is asked). */
+/**
+ * Whether this browser can do passkeys at all (a necessary, not sufficient, condition: PRF support is only known
+ * once an authenticator is asked). False in the Electron desktop app on macOS: Electron's built-in Chromium
+ * authenticator there doesn't support the PRF extension this vault needs, and a real fix (a native Touch ID bridge
+ * such as electron-webauthn-mac) would still require rpId to be a domain Apple can verify the app owns — impossible
+ * for a local, no-domain app like this one. See CLAUDE.md's "Desktop app (Electron)" section.
+ */
 export function passkeysAvailable(): boolean {
   try {
+    if (isElectron() && isMac()) return false;
     return typeof window !== "undefined" && !!window.PublicKeyCredential && !!navigator.credentials?.create && !!globalThis.crypto?.subtle;
   } catch {
     return false;
