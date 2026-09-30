@@ -16,6 +16,19 @@ export class ApiError extends Error {
   }
 }
 
+let sessionExpiredHandler: (() => void) | null = null;
+
+/**
+ * Registered once by AuthContext: called whenever an *authenticated* request (one sent with a token) comes back
+ * 401 — an expired or otherwise invalid session (inactivity, or the server having restarted and lost the
+ * in-memory key that decrypts it) — so the client signs out immediately instead of the user only noticing on
+ * whatever action they happen to try next. A 401 from an unauthenticated call (e.g. a wrong password at login)
+ * doesn't go through this — it has no token to have expired.
+ */
+export function onSessionExpired(handler: (() => void) | null): void {
+  sessionExpiredHandler = handler;
+}
+
 export interface FolderInfo extends ImapFolder {
   total: number;
   unread: number;
@@ -141,6 +154,7 @@ async function request<T>(
   opts.onResponse?.(res);
 
   if (!res.ok) {
+    if (opts.token && res.status === 401) sessionExpiredHandler?.();
     const data = await res.json().catch(() => ({ error: res.statusText }));
     throw new ApiError(res.status, data.error ?? res.statusText);
   }
@@ -152,6 +166,7 @@ async function request<T>(
 }
 
 export const api = {
+  onSessionExpired,
   listUsers: () => request<User[]>("GET", "/api/users"),
   createUser: (username: string, password: string) =>
     request<User>("POST", "/api/users", { body: { username, password } }),

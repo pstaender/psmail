@@ -126,7 +126,10 @@ export async function changeUserPassword(
 ): Promise<Buffer> {
   const existing = getUserRowById(db, id);
   if (!existing) throw new NotFoundError(`User ${id} not found`);
-  if (!(await verifyPassword(currentPassword, existing.password_hash))) throw new UnauthorizedError("Current password is incorrect");
+  // 400, not 401: this is already an authenticated request (a valid session) -- the session itself isn't
+  // in question, just this one field's value. A 401 here would be indistinguishable from the session having
+  // actually expired, which the client treats as "sign out and show the login screen" (see onSessionExpired in lib/api.ts).
+  if (!(await verifyPassword(currentPassword, existing.password_hash))) throw new ApiError(400, "Current password is incorrect");
 
   const newSalt = generateSalt();
   const newKey = deriveEncryptionKey(newPassword, newSalt);

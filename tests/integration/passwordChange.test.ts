@@ -49,7 +49,7 @@ describe("changing the password", () => {
     expect((await api("POST", "/api/auth/change-password", { token: a, body: { newPassword: "x" } })).status).toBe(400);
     expect((await api("POST", "/api/auth/change-password", { body: { currentPassword: "old-pw", newPassword: "x" } })).status).toBe(401);
     const wrong = await api("POST", "/api/auth/change-password", { token: a, body: { currentPassword: "nope", newPassword: "new-pw" } });
-    expect(wrong.status).toBe(401);
+    expect(wrong.status).toBe(400); // an authenticated request with bad input, not a session problem -- see onSessionExpired in lib/api.ts
     expect((await login("old-pw")).status).toBe(200);
 
     const changed = await api("POST", "/api/auth/change-password", { token: a, body: { currentPassword: "old-pw", newPassword: "new-pw" } });

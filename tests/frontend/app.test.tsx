@@ -286,7 +286,7 @@ function installMockFetch(
     draftFullBody?: string;
     /** Makes POST /api/auth/change-username answer with this error (status 409) instead of succeeding. */
     changeUsernameError?: string;
-    /** Makes POST /api/auth/change-password answer with this error (status 401) instead of succeeding. */
+    /** Makes POST /api/auth/change-password answer with this error (status 400 -- a wrong current password isn't a session problem) instead of succeeding. */
     changePasswordError?: string;
     /** What GET /api/unified/inbox/new answers when asked with an afterId (without one it just reports latestId: 100). */
     newMail?: { total: number; messages: Record<string, unknown>[] };
@@ -487,7 +487,7 @@ function installMockFetch(
     }
     if (method === "POST" && path === "/api/auth/change-password") {
       passwordChanges.push(init?.body ? JSON.parse(init.body as string) : {});
-      if (opts.changePasswordError) return jsonResponse({ error: opts.changePasswordError }, 401);
+      if (opts.changePasswordError) return jsonResponse({ error: opts.changePasswordError }, 400);
       return jsonResponse({ ok: true, otherSessionsSignedOut: 2 });
     }
     if (path.startsWith("/api/ai/") || /\/ai\/(summarize|translate|categorize)$/.test(path)) {
@@ -3866,6 +3866,8 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
 
       expect(await screen.findByText("Current password is incorrect")).toBeTruthy();
       expect((screen.getByLabelText("New password") as HTMLInputElement).value).toBe("new-pw");
+      // A wrong current password isn't the session itself being invalid -- it must not sign the user out.
+      expect(screen.queryByText("Sign in to your profile to continue")).toBeNull();
     });
   });
 

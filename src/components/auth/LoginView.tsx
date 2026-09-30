@@ -14,7 +14,7 @@ import type { User } from "../../server/types";
 import logoUrl from "../../../logo/psmail_logo_text.svg";
 
 export function LoginView() {
-  const { login } = useAuth();
+  const { login, sessionExpiredMessage } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
   const [selected, setSelected] = useState<User | null>(null);
@@ -129,7 +129,7 @@ export function LoginView() {
           <CardDescription>Sign in to your profile to continue</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {error && <p className="text-sm text-destructive text-center">{error}</p>}
+          {(error ?? sessionExpiredMessage) && <p className="text-sm text-destructive text-center">{error ?? sessionExpiredMessage}</p>}
 
           {!creatingNew && (
             <>
