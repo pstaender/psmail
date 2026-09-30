@@ -1,3 +1,6 @@
+2026-09-30 - Sign out and show the login screen when the session becomes invalid (62912fc)
+Previously, once a session expired (inactivity, a server restart losing the in-memory decryption key, etc.), the client just kept failing whatever action the user tried next, with no indication they needed to sign back in. api.ts now calls a registered handler whenever an authenticated request comes back 401, AuthContext wires that to an immediate client-side logout (no network round trip -- the server already considers the session gone), and the login screen explains why. This required fixing a status-code collision: changing the login password used to report a wrong current password as 401 too, which is a valid session hitting ordinary bad input, not an invalid one -- it now reports 400 so it isn't mistaken for a dead session and doesn't force a spurious sign-out.
+
 2026-09-30 - Offer to include the original's attachments when forwarding (675ae6b)
 Forwarding an email previously dropped its attachments entirely -- only the quoted text carried over. The compose dialog now shows a checkbox (checked by default) listing the original message's real attachments; when sending or saving, each is copied server-side onto the new draft via a new attachments/copy endpoint, so the browser doesn't have to download and re-upload the files itself.
 
