@@ -579,6 +579,40 @@ export function emailsRoutes(db: Database) {
         return json(attachment, { status: 201 });
       }),
     },
+    // Copies one attachment from another email of the same account onto this one — used to carry
+    // the original's attachments onto a forward, without the browser re-downloading and re-uploading the file.
+    "/api/accounts/:email/emails/:emailId/attachments/copy": {
+      POST: withErrorHandling(async req => {
+        const { session } = requireAuth(req, db);
+        const account = getOwnedAccountByEmailParam(db, req.params.email, session.userId);
+        assertAccountEnabled(account);
+        const emailId = parseIntParam(req.params.emailId, "emailId");
+        getOwnedEmail(db, emailId, account.id);
+
+        const { sourceEmailId, attachmentId } = await readJsonBody<{ sourceEmailId: number; attachmentId: number }>(req);
+        getOwnedEmail(db, sourceEmailId, account.id); // the source must belong to this account too, not just any attachment id
+        const source = getAttachmentRow(db, attachmentId);
+        if (source.email_id !== sourceEmailId) throw new NotFoundError(`Attachment ${attachmentId} not found`);
+
+        const username = getUserRowById(db, session.userId)!.username;
+        const dir = getEmailAttachmentsDir(username, account.email, emailId);
+        await Bun.$`mkdir -p ${dir}`.quiet();
+
+        const safeName = sanitizeSegment(source.filename);
+        const filePath = join(dir, safeName);
+        await Bun.write(filePath, await Bun.file(source.file_path).arrayBuffer());
+
+        const attachment = addAttachment(db, emailId, {
+          filename: source.filename,
+          contentType: source.content_type,
+          isInline: false,
+          size: source.size,
+          filePath,
+        });
+
+        return json(attachment, { status: 201 });
+      }),
+    },
     "/api/accounts/:email/emails/:emailId/attachments/:attachmentId": {
       GET: withErrorHandling(async req => {
         const { session } = requireAuth(req, db);

@@ -32,6 +32,20 @@ describe("withSignature", () => {
     expect(withSignature(null, SIGNATURE).body).toBe("\n\n-- \nCheers,\nMe");
   });
 
+  test("forwarding offers the original's real attachments, but not inline ones (they're part of the quoted body)", () => {
+    const withAttachments = {
+      ...email,
+      attachments: [
+        { id: 1, emailId: 1, filename: "report.pdf", contentType: "application/pdf", contentId: null, isInline: false, size: 100 },
+        { id: 2, emailId: 1, filename: "logo.png", contentType: "image/png", contentId: "<logo>", isInline: true, size: 50 },
+      ],
+    } as unknown as EmailRecord;
+    expect(forwardDraft(withAttachments).forwardAttachments).toEqual([
+      { id: 1, emailId: 1, filename: "report.pdf", contentType: "application/pdf", contentId: null, isInline: false, size: 100 },
+    ]);
+    expect(forwardDraft(email).forwardAttachments).toEqual([]);
+  });
+
   test("without a signature, replies and forwards keep their quoted body untouched", () => {
     expect(withSignature(replyDraft(email), null).body).toBe(replyDraft(email).body);
     expect(withSignature(forwardDraft(email), "").body).toBe(forwardDraft(email).body);

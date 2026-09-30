@@ -10,6 +10,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -44,6 +45,8 @@ export interface ComposeDraft {
   forwardOf?: { accountEmail: string; id: number };
   /** The draft's attachments already on the server, when editing — shown alongside newly-added files, removable individually. */
   attachments?: AttachmentRecord[];
+  /** A forward only: the original message's own (non-inline) attachments, offered via a checkbox — not yet copied onto the draft. */
+  forwardAttachments?: AttachmentRecord[];
 }
 
 export function ComposeDialog({
@@ -82,6 +85,7 @@ export function ComposeDialog({
   const [body, setBody] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [existingAttachments, setExistingAttachments] = useState<AttachmentRecord[]>([]);
+  const [includeForwardAttachments, setIncludeForwardAttachments] = useState(true);
   const [busy, setBusy] = useState<"draft" | "send" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -155,6 +159,7 @@ export function ComposeDialog({
       setBody(initial?.body ?? "");
       setFiles([]);
       setExistingAttachments(initial?.attachments ?? []);
+      setIncludeForwardAttachments(true);
       setError(null);
       setBeforeRefine(null);
       setTranslateTo(null);
@@ -201,6 +206,12 @@ export function ComposeDialog({
 
       for (const file of files) {
         await api.uploadAttachment(token, accountEmail, draft.id, file);
+      }
+
+      if (includeForwardAttachments && initial?.forwardOf && initial.forwardAttachments) {
+        for (const attachment of initial.forwardAttachments) {
+          await api.copyAttachment(token, accountEmail, draft.id, initial.forwardOf.id, attachment.id);
+        }
       }
 
       if (send) {
@@ -348,6 +359,24 @@ export function ComposeDialog({
               </Button>
             )}
           </div>
+
+          {!!initial?.forwardAttachments?.length && (
+            <div className="space-y-1.5">
+              <label className="flex w-fit cursor-pointer items-center gap-1.5 text-xs">
+                <Checkbox checked={includeForwardAttachments} onCheckedChange={checked => setIncludeForwardAttachments(checked === true)} />
+                Include {initial.forwardAttachments.length === 1 ? "the original message's attachment" : `all ${initial.forwardAttachments.length} attachments from the original message`}
+              </label>
+              <div className={`flex flex-wrap gap-2 ${includeForwardAttachments ? "" : "opacity-50"}`}>
+                {initial.forwardAttachments.map(attachment => (
+                  <span key={attachment.id} className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs">
+                    <Paperclip className="size-3" />
+                    {attachment.filename}
+                    <span className="text-muted-foreground">{formatSizeMB(attachment.size)}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <div className="flex flex-wrap gap-2">

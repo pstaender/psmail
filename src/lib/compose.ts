@@ -56,7 +56,10 @@ export function forwardDraft(email: EmailRecord): ComposeDraft {
     email.plainText ?? "",
   ].join("\n");
 
-  return { to: "", subject, body: `\n\n${quoted}`, quoted };
+  // Inline images (isInline) are part of the quoted HTML body, not something to offer separately — only the real, attached files.
+  const forwardAttachments = (email.attachments ?? []).filter(a => !a.isInline);
+
+  return { to: "", subject, body: `\n\n${quoted}`, quoted, forwardAttachments };
 }
 
 /** Continues editing an existing draft in place (unlike reply/forward, which always start a new one) — saving updates this same row rather than creating another. */

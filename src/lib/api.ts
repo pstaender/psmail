@@ -1,7 +1,7 @@
 import type { NewMailResult } from "./notifications";
 import type { AiApiInput, AiApiRecord, AiSkillInput, AiSkillRecord } from "../server/models/ai";
 import type { AiCategory, AiVendor } from "../ai/categories";
-import type { Account, DownloadJob, EmailRecord, User } from "../server/types";
+import type { Account, AttachmentRecord, DownloadJob, EmailRecord, User } from "../server/types";
 import type { CreateAccountInput, UpdateAccountInput } from "../server/models/accounts";
 import type { EmailInput } from "../server/models/emails";
 import type { SearchResult } from "../server/models/search";
@@ -249,6 +249,13 @@ export const api = {
       "DELETE",
       `/api/accounts/${enc(accountEmail)}/emails/${emailId}/attachments/${attachmentId}`,
       { token }
+    ),
+  /** Copies an attachment from another email of the same account onto `emailId` — e.g. carrying a forward's original attachments onto the new draft. */
+  copyAttachment: (token: string, accountEmail: string, emailId: number, sourceEmailId: number, attachmentId: number) =>
+    request<AttachmentRecord>(
+      "POST",
+      `/api/accounts/${enc(accountEmail)}/emails/${emailId}/attachments/copy`,
+      { token, body: { sourceEmailId, attachmentId } }
     ),
   attachmentUrl: (accountEmail: string, emailId: number, attachmentId: number) =>
     `/api/accounts/${enc(accountEmail)}/emails/${emailId}/attachments/${attachmentId}`,

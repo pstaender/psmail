@@ -250,6 +250,57 @@ describe("P.S.Mail API", () => {
     expect(del.status).toBe(204);
   });
 
+  test("attachments: copying one onto another draft (forwarding the original's attachments)", async () => {
+    const form = new FormData();
+    form.append("file", new File(["forwarded bytes"], "report.pdf", { type: "application/pdf" }));
+    const upload = await api(
+      "POST",
+      `/api/accounts/${encodeURIComponent(accountEmail)}/emails/${draftId}/attachments`,
+      { token, formData: form }
+    );
+    expect(upload.status).toBe(201);
+    const attachmentId = upload.json.id;
+
+    const otherDraft = await api("POST", `/api/accounts/${encodeURIComponent(accountEmail)}/emails`, {
+      token,
+      body: { subject: "Fwd: something", to: [] },
+    });
+    const otherDraftId = otherDraft.json.id;
+
+    const copy = await api(
+      "POST",
+      `/api/accounts/${encodeURIComponent(accountEmail)}/emails/${otherDraftId}/attachments/copy`,
+      { token, body: { sourceEmailId: draftId, attachmentId } }
+    );
+    expect(copy.status).toBe(201);
+    expect(copy.json.filename).toBe("report.pdf");
+    expect(copy.json.id).not.toBe(attachmentId); // its own row, independent of the original
+
+    const download = await api(
+      "GET",
+      `/api/accounts/${encodeURIComponent(accountEmail)}/emails/${otherDraftId}/attachments/${copy.json.id}`,
+      { token }
+    );
+    expect(download.status).toBe(200);
+    expect(download.text).toBe("forwarded bytes");
+
+    // The original is untouched — copying doesn't move or remove it.
+    const originalStillThere = await api(
+      "GET",
+      `/api/accounts/${encodeURIComponent(accountEmail)}/emails/${draftId}/attachments/${attachmentId}`,
+      { token }
+    );
+    expect(originalStillThere.status).toBe(200);
+
+    // A mismatched (sourceEmailId, attachmentId) pair — the attachment doesn't actually belong to that email — is rejected.
+    const mismatched = await api(
+      "POST",
+      `/api/accounts/${encodeURIComponent(accountEmail)}/emails/${otherDraftId}/attachments/copy`,
+      { token, body: { sourceEmailId: otherDraftId, attachmentId } }
+    );
+    expect(mismatched.status).toBe(404);
+  });
+
   test("DELETE .../emails/:id removes the draft", async () => {
     const { status, json } = await api("DELETE", `/api/accounts/${encodeURIComponent(accountEmail)}/emails/${draftId}`, {
       token,
