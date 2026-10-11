@@ -16,6 +16,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RecipientInput } from "./RecipientInput";
+import { AttachmentThumbnail } from "./AttachmentThumbnail";
 import { MarkdownEditor, type MarkdownEditorHandle } from "./MarkdownEditor";
 import { api, type FolderInfo } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
@@ -97,6 +98,7 @@ export function ComposeDialog({
   const [error, setError] = useState<string | null>(null);
 
   const isEditing = initial?.id !== undefined;
+  const forwardOf = initial?.forwardOf;
 
   // Changes that are not saved: what the fields hold now against what the dialog was opened with. (An attachment removed from
   // an existing draft is already gone on the server, so it isn't a pending change; a file added is.) Line endings and trailing
@@ -487,7 +489,7 @@ export function ComposeDialog({
             )}
           </div>
 
-          {!!initial?.forwardAttachments?.length && (
+          {!!initial?.forwardAttachments?.length && forwardOf && (
             <div className="space-y-1.5">
               <label className="flex w-fit cursor-pointer items-center gap-1.5 text-xs">
                 <Checkbox checked={includeForwardAttachments} onCheckedChange={checked => setIncludeForwardAttachments(checked === true)} />
@@ -496,7 +498,9 @@ export function ComposeDialog({
               <div className={`flex flex-wrap gap-2 ${includeForwardAttachments ? "" : "opacity-50"}`}>
                 {initial.forwardAttachments.map(attachment => (
                   <span key={attachment.id} className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs">
-                    <Paperclip className="size-3" />
+                    <AttachmentThumbnail
+                      source={{ accountEmail: forwardOf.accountEmail, emailId: forwardOf.id, attachmentId: attachment.id, contentType: attachment.contentType }}
+                    />
                     {attachment.filename}
                     <span className="text-muted-foreground">{formatSizeMB(attachment.size)}</span>
                   </span>
@@ -509,7 +513,9 @@ export function ComposeDialog({
             <div className="flex flex-wrap gap-2">
               {existingAttachments.map(attachment => (
                 <span key={attachment.id} className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs">
-                  <Paperclip className="size-3" />
+                  <AttachmentThumbnail
+                    source={{ accountEmail, emailId: initial!.id!, attachmentId: attachment.id, contentType: attachment.contentType }}
+                  />
                   {attachment.filename}
                   <span className="text-muted-foreground">{formatSizeMB(attachment.size)}</span>
                   <button type="button" onClick={() => removeExistingAttachment(attachment.id)}>
@@ -519,7 +525,7 @@ export function ComposeDialog({
               ))}
               {files.map((file, i) => (
                 <span key={i} className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs">
-                  <Paperclip className="size-3" />
+                  <AttachmentThumbnail source={{ file }} />
                   {file.name}
                   <span className="text-muted-foreground">{formatSizeMB(file.size)}</span>
                   <button type="button" onClick={() => setFiles(prev => prev.filter((_, idx) => idx !== i))}>
@@ -581,7 +587,7 @@ export function ComposeDialog({
           <div className="flex flex-wrap gap-2">
             {avifOffer.map((file, i) => (
               <span key={i} className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs">
-                <Paperclip className="size-3" />
+                <AttachmentThumbnail source={{ file }} />
                 {file.name}
                 <span className="text-muted-foreground">{formatSizeMB(file.size)}</span>
               </span>

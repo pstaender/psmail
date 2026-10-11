@@ -275,13 +275,17 @@ export const api = {
   attachmentUrl: (accountEmail: string, emailId: number, attachmentId: number) =>
     `/api/accounts/${enc(accountEmail)}/emails/${emailId}/attachments/${attachmentId}`,
 
-  /** Downloads happen via fetch (not a plain <a href>) so the Authorization header can be attached. */
-  async downloadAttachment(token: string, accountEmail: string, emailId: number, attachmentId: number, filename: string) {
+  /** Attachments are fetched (not a plain <a href>/<img src>) so the Authorization header can be attached. */
+  async attachmentBlob(token: string, accountEmail: string, emailId: number, attachmentId: number): Promise<Blob> {
     const res = await fetch(api.attachmentUrl(accountEmail, emailId, attachmentId), {
       headers: { authorization: `Bearer ${token}` },
     });
     if (!res.ok) throw new ApiError(res.status, "Failed to download attachment");
-    saveBlob(await res.blob(), filename);
+    return res.blob();
+  },
+
+  async downloadAttachment(token: string, accountEmail: string, emailId: number, attachmentId: number, filename: string) {
+    saveBlob(await api.attachmentBlob(token, accountEmail, emailId, attachmentId), filename);
   },
 
   /**
