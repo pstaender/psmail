@@ -1,4 +1,7 @@
 # P.S.Mail
+
+[![Tests](https://github.com/pstaender/psmail/actions/workflows/tests.yml/badge.svg)](https://github.com/pstaender/psmail/actions/workflows/tests.yml)
+
 ### A minimal, markdown-first webmail client
 
 Uses react/shadcn UI + Bun API server (IMAP/SMTP sync, sqlite storage, CLI).

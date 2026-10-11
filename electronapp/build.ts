@@ -12,4 +12,4 @@ const electronDir = import.meta.dir;
 await $`bun run ${join(electronDir, "scripts", "sync-version.ts")}`;
 await $`bun install --frozen-lockfile`.cwd(electronDir).nothrow();
 await $`bun run ${join(electronDir, "scripts", "build-sidecar.ts")}`;
-await $`bunx electron-builder --config electron-builder.yml`.cwd(electronDir);
+await $`bunx electron-builder --config electron-builder.yml --publish never`.cwd(electronDir);

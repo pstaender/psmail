@@ -1,0 +1,50 @@
+# Builds the P.S.Mail desktop app (electronapp/) whenever a GitHub release is published and
+# attaches the resulting .dmg to that release. macOS on Apple Silicon (arm64) only for now — the
+# sidecar (electronapp/scripts/build-sidecar.ts) compiles for the host machine, so the arm64
+# runner produces an arm64 app.
+name: Electron release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # The sidecar build imports bun-plugin-tailwind and the server sources from the root project.
+      - name: Install root dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Electron app dependencies
+        working-directory: electronapp
+        run: bun install --frozen-lockfile
+
+      # No Apple Developer ID certificate is configured, so the app is unsigned (ad-hoc) and not
+      # notarized. electronapp/build.ts passes `--publish never`; uploading happens in the step below.
+      - name: Build the desktop app
+        run: bun run electron:build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: psmail-macos-arm64
+          path: |
+            electronapp/release/*.dmg
+            electronapp/release/*.dmg.blockmap
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.event.release.tag_name }}" electronapp/release/*.dmg --clobber
