@@ -93,6 +93,7 @@ import {
   withSignature,
 } from "@/lib/compose";
 import { resolveSpecialFolder } from "@/lib/folders";
+import { modKey } from "@/lib/platform";
 import type { Account, EmailRecord } from "../../server/types";
 import type { SearchResult } from "../../server/models/search";
 
@@ -654,6 +655,8 @@ export function AppShell() {
   // - Cmd/Ctrl+A selects every loaded message in the list on screen (for the bulk actions) — only
   //   outside text fields, where it keeps its normal meaning.
   // - Cmd/Ctrl+R replies to the open message (instead of reloading the page) — only when one is open.
+  // - Cmd/Ctrl+N starts a new message, same as the New button. Browsers keep this key for a new window and
+  //   never pass it to the page, so it only works in the desktop app (whose menu leaves it unbound).
   // - Backspace/Delete deletes the open message (or the bulk selection, if there is one), same as
   //   clicking the Delete button — also skipped while typing in a text field.
   useEffect(() => {
@@ -703,6 +706,13 @@ export function AppShell() {
         if (!selectedEmail) return;
         e.preventDefault();
         reply();
+        return;
+      }
+
+      if (mod && key === "n") {
+        if (!messageAccountEmail || isDisabledAccount(messageAccountEmail)) return;
+        e.preventDefault();
+        openCompose(null);
         return;
       }
 
@@ -1700,7 +1710,7 @@ export function AppShell() {
                     title={
                       isDisabledAccount(messageAccountEmail)
                         ? "This account is disabled"
-                        : undefined
+                        : `New message (${modKey("N")})`
                     }
                     onClick={() => openCompose(null)}
                   >

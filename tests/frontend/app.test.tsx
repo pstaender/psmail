@@ -3223,6 +3223,18 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     expect((within(composeDialog).getByLabelText("Subject") as HTMLInputElement).value).toBe("Re: Hello there");
   });
 
+  test("Cmd/Ctrl+N opens a new message", async () => {
+    render(<App />);
+    await userEvent.click(await screen.findByText("default"));
+    await openAccountInbox();
+
+    (document.body as HTMLElement).focus();
+    expect(fireEvent.keyDown(document.body, { key: "n", metaKey: true })).toBe(false); // preventDefault'd: no new window
+
+    const composeDialog = (await screen.findByText("New message")).closest('[role="dialog"]') as HTMLElement;
+    expect((within(composeDialog).getByLabelText("Subject") as HTMLInputElement).value).toBe("");
+  });
+
   test("the compose dialog focuses the message editor when To is already filled in (reply), else the To field", async () => {
     render(<App />);
     await userEvent.click(await screen.findByText("default"));
