@@ -1,6 +1,9 @@
 appId: com.psmail.desktop
 productName: P.S.Mail
 copyright: Copyright © Philipp Staender
+# e.g. P.S.Mail-0.0.5-mac-arm64.dmg / P.S.Mail-0.0.5-win-x64.exe — always with the arch, so the
+# per-runner builds in .github/workflows/electron-release.yml don't collide on the release.
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 
 directories:
   output: release
@@ -22,6 +25,12 @@ extraResources:
 mac:
   category: public.app-category.productivity
   target: dmg
+  # No Apple Developer ID, so sign ad-hoc. Without an identity electron-builder skips signing
+  # entirely, leaving an unsealed bundle that Apple Silicon refuses to launch once downloaded
+  # (quarantined) — it reports the app as damaged instead of showing the usual Gatekeeper prompt.
+  # Ad-hoc signing needs the hardened runtime off (or the disable-library-validation entitlement).
+  identity: "-"
+  hardenedRuntime: false
 
 win:
   target: nsis

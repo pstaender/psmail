@@ -1,7 +1,7 @@
 # Builds the P.S.Mail desktop app (electronapp/) whenever a GitHub release is published and
-# attaches the resulting .dmg to that release. macOS on Apple Silicon (arm64) only for now — the
-# sidecar (electronapp/scripts/build-sidecar.ts) compiles for the host machine, so the arm64
-# runner produces an arm64 app.
+# attaches the installers to that release: macOS Apple Silicon (arm64) and Intel (x64) .dmg, and a
+# Windows (x64) NSIS installer .exe. Each is built natively on its own runner, because the sidecar
+# (electronapp/scripts/build-sidecar.ts) compiles the psmail server for the host machine only.
 name: Electron release
 
 on:
@@ -13,8 +13,25 @@ permissions:
   contents: write
 
 jobs:
-  build-macos:
-    runs-on: macos-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            runner: macos-latest
+            files: electronapp/release/*.dmg
+          - name: macos-x64
+            runner: macos-15-intel
+            files: electronapp/release/*.dmg
+          - name: windows-x64
+            runner: windows-latest
+            files: electronapp/release/*.exe
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        # Git Bash on Windows too, so the globs in the upload step expand the same everywhere.
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -30,21 +47,21 @@ jobs:
         working-directory: electronapp
         run: bun install --frozen-lockfile
 
-      # No Apple Developer ID certificate is configured, so the app is unsigned (ad-hoc) and not
-      # notarized. electronapp/build.ts passes `--publish never`; uploading happens in the step below.
+      # No Apple Developer ID / Windows code-signing certificate is configured: the macOS app is
+      # ad-hoc signed and not notarized (see electronapp/electron-builder.yml), the Windows
+      # installer is unsigned. electronapp/build.ts passes `--publish never`; uploading happens
+      # in the step below.
       - name: Build the desktop app
         run: bun run electron:build
 
       - uses: actions/upload-artifact@v4
         with:
-          name: psmail-macos-arm64
-          path: |
-            electronapp/release/*.dmg
-            electronapp/release/*.dmg.blockmap
+          name: psmail-${{ matrix.name }}
+          path: ${{ matrix.files }}
           if-no-files-found: error
 
       - name: Attach to the release
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.event.release.tag_name }}" electronapp/release/*.dmg --clobber
+        run: gh release upload "${{ github.event.release.tag_name }}" ${{ matrix.files }} --clobber

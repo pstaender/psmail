@@ -45,6 +45,8 @@ bun run electron:build   # builds the installable app (electronapp/release/)
 
 The app menu has **Open Settings** (opens `settings.json` in its default editor) and **Open Settings Folder** (opens the [config directory](#configuration) in Finder/Explorer/the file manager) — the same file and folder the CLI and a manual `bun run start` use. A link clicked anywhere in the app (a message body most commonly) opens in the OS's default browser/mail/phone app instead of this window trying to navigate there. First run needs the Electron/electron-builder dependencies installed (`bun install` inside `electronapp/`); `scripts/build-sidecar.ts` only ever builds for the machine it runs on, so ship a build made on each platform you're targeting, not a cross-compile.
 
+Publishing a GitHub release builds the app on GitHub's runners and attaches the installers to it: macOS Apple Silicon and Intel (`.dmg`) and Windows x64 (NSIS `.exe`). They aren't signed with a paid certificate. The macOS app is ad-hoc signed, so on first launch right-click it → **Open** (or allow it under System Settings → Privacy & Security). On Windows, SmartScreen asks you to confirm via **More info → Run anyway**.
+
 ## Webclient
 
 The app opens on the combined Inbox (all accounts' Inboxes) with every account collapsed in the sidebar (nothing is selected yet, and a collapsed account's folders aren't even fetched); expand an account and pick a folder to see its mail. A sync that was already running when the page loads (started in an earlier visit, another tab, or another browser's automatic sync) is picked up from the account's job history: its spinner and progress show, and the app refreshes when it ends.
