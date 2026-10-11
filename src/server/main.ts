@@ -14,9 +14,6 @@ import { contactsRoutes } from "./routes/contacts";
 import { settingsRoutes } from "./routes/settings";
 import { aiRoutes } from "./routes/ai";
 import { imboxRoutes } from "./routes/imbox";
-// The AVIF encoder for attachments (src/lib/avif.ts). Served from a fixed route, not imported by the frontend itself: a file
-// the frontend's JS imports is only served by the dev server (/_bun/asset/…), never in production or a compiled binary.
-import avifEncoderWasm from "@jsquash/avif/codec/enc/avif_enc.wasm" with { type: "file" };
 
 export async function startServer() {
   const settings = await loadSettings();
@@ -39,13 +36,6 @@ export async function startServer() {
 
     "/api/health": {
       GET: () => Response.json({ ok: true }),
-    },
-
-    "/assets/avif_enc.wasm": {
-      GET: () =>
-        new Response(Bun.file(avifEncoderWasm), {
-          headers: { "Content-Type": "application/wasm", "Cache-Control": "public, max-age=86400" },
-        }),
     },
 
     // Serve the webclient for everything else.

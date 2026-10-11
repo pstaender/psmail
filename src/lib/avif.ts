@@ -2,8 +2,8 @@
 // The encoder is the libavif WASM build from @jsquash/avif (Squoosh's codec), not Bun.Image on the server: Bun.Image can
 // only encode AVIF through the OS (macOS on Apple M3+, Windows with the AV1 extension) — never on Linux, Intel Macs or M1/M2.
 // The single-threaded build is loaded directly: the multithreaded one needs SharedArrayBuffer, i.e. a cross-origin-isolated
-// page, which this app isn't. Its WASM is served by the psmail server itself (see src/server/main.ts).
-const WASM_URL = "/assets/avif_enc.wasm";
+// page, which this app isn't.
+import wasmUrl from "@jsquash/avif/codec/enc/avif_enc.wasm" with { type: "file" };
 
 /** PNGs, and JPEGs above this size, are worth offering to convert (a small JPEG is already about as small as it gets). */
 export const JPEG_THRESHOLD_BYTES = 100 * 1024;
@@ -28,7 +28,7 @@ function loadEncoder(): Promise<AvifEncoder> {
   encoderPromise ??= (async () => {
     const [{ default: factory }, wasm] = await Promise.all([
       import("@jsquash/avif/codec/enc/avif_enc.js"),
-      fetch(WASM_URL).then(res => (res.ok ? res.arrayBuffer() : Promise.reject(new Error(`AVIF encoder: HTTP ${res.status}`)))).then(bytes => WebAssembly.compile(bytes)),
+      fetch(wasmUrl).then(res => (res.ok ? res.arrayBuffer() : Promise.reject(new Error(`AVIF encoder: HTTP ${res.status}`)))).then(bytes => WebAssembly.compile(bytes)),
     ]);
     return (await factory({
       noInitialRun: true,

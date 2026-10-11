@@ -26,7 +26,7 @@ declare module "*.mp3" {
 
 declare module "*.wasm" {
   /**
-   * The path of the WebAssembly file (imported `with { type: "file" }`; embedded in a compiled binary)
+   * The URL the bundler serves the WebAssembly file under (imported `with { type: "file" }`)
    */
   const url: string;
   export default url;
