@@ -23,3 +23,11 @@ declare module "*.mp3" {
   const url: string;
   export default url;
 }
+
+declare module "*.wasm" {
+  /**
+   * The path of the WebAssembly file (imported `with { type: "file" }`; embedded in a compiled binary)
+   */
+  const url: string;
+  export default url;
+}

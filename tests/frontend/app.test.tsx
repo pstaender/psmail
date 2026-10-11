@@ -1328,10 +1328,11 @@ describe("frontend smoke test (headless render, mocked backend)", () => {
     await userEvent.click(screen.getByRole("button", { name: /new/i }));
     expect(await screen.findByText("New message")).toBeTruthy();
 
-    const file = new File([new Uint8Array(2 * 1024 * 1024)], "photo.png", { type: "image/png" }); // exactly 2 MB
+    // Not an image: a PNG or larger JPEG would also bring up the "Convert to AVIF?" prompt (see composeAvifOffer.test.tsx).
+    const file = new File([new Uint8Array(2 * 1024 * 1024)], "report.pdf", { type: "application/pdf" }); // exactly 2 MB
     await userEvent.upload(screen.getByLabelText("Attach files"), file);
 
-    expect(await screen.findByText("photo.png")).toBeTruthy();
+    expect(await screen.findByText("report.pdf")).toBeTruthy();
     expect(screen.getByText("2.00 MB")).toBeTruthy();
   });
 

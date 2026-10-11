@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Languages, Loader2, Paperclip, Send as SendIcon, Sparkles, Undo2, X } from "lucide-react";
+import { ImageDown, Languages, Loader2, Paperclip, Send as SendIcon, Sparkles, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -22,6 +22,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { parseAddressList } from "@/lib/addresses";
 import { cleanSubject, joinRefined, replaceRefined, splitRefinable } from "@/lib/compose";
 import { resolveSpecialFolder } from "@/lib/folders";
+import { canOfferAvif, convertToAvif } from "@/lib/avif";
+import { toast } from "sonner";
 import type { AiCategory } from "../../ai/categories";
 import type { AiSkillRecord } from "../../server/models/ai";
 import type { AttachmentRecord, EmailRecord } from "../../server/types";
@@ -88,6 +90,10 @@ export function ComposeDialog({
   const [existingAttachments, setExistingAttachments] = useState<AttachmentRecord[]>([]);
   const [includeForwardAttachments, setIncludeForwardAttachments] = useState(true);
   const [busy, setBusy] = useState<"draft" | "send" | null>(null);
+  // Newly attached PNGs / larger JPEGs: offered for converting to AVIF (see addFiles), then converted in place in `files`.
+  const [avifOffer, setAvifOffer] = useState<File[]>([]);
+  const [converting, setConverting] = useState(false);
+  const convertRef = useRef<HTMLButtonElement>(null);
   const [error, setError] = useState<string | null>(null);
 
   const isEditing = initial?.id !== undefined;
@@ -234,6 +240,7 @@ export function ComposeDialog({
       setSubject(initial?.subject ?? "");
       setBody(initial?.body ?? "");
       setFiles([]);
+      setAvifOffer([]);
       setExistingAttachments(initial?.attachments ?? []);
       setIncludeForwardAttachments(true);
       setError(null);
@@ -251,6 +258,36 @@ export function ComposeDialog({
       setExistingAttachments(prev => prev.filter(a => a.id !== attachmentId));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function addFiles(added: File[]) {
+    setFiles(prev => [...prev, ...added]);
+    const candidates = added.filter(canOfferAvif);
+    if (candidates.length > 0) setAvifOffer(candidates);
+  }
+
+  /** Replaces each offered image in `files` by its AVIF version (unless that wouldn't be smaller), one at a time. */
+  async function convertOffered() {
+    const candidates = avifOffer;
+    setAvifOffer([]);
+    setConverting(true);
+    let before = 0;
+    let after = 0;
+    try {
+      for (const original of candidates) {
+        // The encode blocks the main thread — let the "Converting…" state paint first.
+        await new Promise(resolve => setTimeout(resolve, 16));
+        const converted = await convertToAvif(original);
+        before += original.size;
+        after += converted.size;
+        setFiles(prev => prev.map(file => (file === original ? converted : file)));
+      }
+      toast.success(`Images converted to AVIF: ${formatSizeMB(before)} → ${formatSizeMB(after)}`);
+    } catch (err) {
+      setError(`Could not convert to AVIF, the original kept: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setConverting(false);
     }
   }
 
@@ -491,30 +528,73 @@ export function ComposeDialog({
                 </span>
               ))}
             </div>
-            <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-              <Paperclip className="size-3.5" />
-              Attach files
-              <input
-                type="file"
-                multiple
-                className="hidden"
-                onChange={e => setFiles(prev => [...prev, ...Array.from(e.target.files ?? [])])}
-              />
-            </label>
+            {converting ? (
+              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" />
+                Converting images to AVIF…
+              </span>
+            ) : (
+              <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+                <Paperclip className="size-3.5" />
+                Attach files
+                <input
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={e => {
+                    addFiles(Array.from(e.target.files ?? []));
+                    e.target.value = ""; // so picking the same file again (after removing it) still fires onChange
+                  }}
+                />
+              </label>
+            )}
           </div>
         </div>
 
         <DialogFooter>
-          <Button variant="outline" disabled={busy !== null} onClick={() => saveAndMaybeSend(false)}>
+          <Button variant="outline" disabled={busy !== null || converting} onClick={() => saveAndMaybeSend(false)}>
             {busy === "draft" && <Loader2 className="size-4 animate-spin" />}
             Save draft
           </Button>
-          <Button disabled={busy !== null} onClick={() => saveAndMaybeSend(true)}>
+          <Button disabled={busy !== null || converting} onClick={() => saveAndMaybeSend(true)}>
             {busy === "send" ? <Loader2 className="size-4 animate-spin" /> : <SendIcon className="size-4" />}
             Send
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      <AlertDialog open={avifOffer.length > 0} onOpenChange={next => !next && setAvifOffer([])}>
+        <AlertDialogContent
+          // Converting is the default, Enter does it.
+          onOpenAutoFocus={e => {
+            e.preventDefault();
+            convertRef.current?.focus();
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>{avifOffer.length === 1 ? "Convert the image to AVIF?" : `Convert ${avifOffer.length} images to AVIF?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              AVIF files are usually much smaller than PNG or JPEG at a similar quality, so the message is quicker to send and to
+              download. Most current mail apps and browsers show them; some older ones don't.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex flex-wrap gap-2">
+            {avifOffer.map((file, i) => (
+              <span key={i} className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs">
+                <Paperclip className="size-3" />
+                {file.name}
+                <span className="text-muted-foreground">{formatSizeMB(file.size)}</span>
+              </span>
+            ))}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep originals</AlertDialogCancel>
+            <Button ref={convertRef} onClick={convertOffered}>
+              <ImageDown className="size-4" /> Convert to AVIF
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={askingToClose} onOpenChange={setAskingToClose}>
         <AlertDialogContent
