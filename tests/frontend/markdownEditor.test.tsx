@@ -46,6 +46,25 @@ describe("MarkdownEditor", () => {
     expect(document.activeElement).toBe(editable);
   });
 
+  test("getSelectedRange() gives the selected text as offsets, keeps it after leaving the editor, and forgets it on setContent", () => {
+    const ref = createRef<MarkdownEditorHandle>();
+    const { container } = render(<MarkdownEditor ref={ref} initialValue={"Hi Bob,\nsee you soon"} onChange={() => {}} />);
+    expect(ref.current?.getSelectedRange()).toBeNull();
+
+    const editable = container.querySelector(".TinyMDE") as HTMLElement;
+    ref.current?.focus();
+    const walker = document.createTreeWalker(editable.childNodes[1]!, NodeFilter.SHOW_TEXT);
+    const line = walker.nextNode()!; // "see you soon"
+    expect(line.textContent).toBe("see you soon");
+    window.getSelection()!.setBaseAndExtent(line, 4, line, 7);
+    document.dispatchEvent(new Event("selectionchange"));
+    editable.blur();
+    expect(ref.current?.getSelectedRange()).toEqual({ start: 12, end: 15 }); // "you"
+
+    ref.current?.setContent("Something else");
+    expect(ref.current?.getSelectedRange()).toBeNull();
+  });
+
   test("cleans up (destroy) on unmount without throwing", () => {
     const { unmount } = render(<MarkdownEditor initialValue="test" onChange={() => {}} />);
     expect(() => unmount()).not.toThrow();

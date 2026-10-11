@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { Editor } from "tiny-markdown-editor";
+import { offsetAt } from "@/lib/compose";
 import { cn } from "@/lib/utils";
 import "./tinyMarkdownEditor.css";
 
@@ -7,7 +8,14 @@ export interface MarkdownEditorHandle {
   focus: () => void;
   /** Replaces the whole content (e.g. with an AI-refined draft). Doesn't go through the undo history's typing, but it is one undo step. */
   setContent: (content: string) => void;
+  /**
+   * The text last selected in the editor as character offsets into its content (`start` < `end`), or null when nothing is
+   * selected. It is kept while the editor isn't focused (e.g. while a button is pressed) and forgotten when `setContent` runs.
+   */
+  getSelectedRange: () => { start: number; end: number } | null;
 }
+
+type Position = { row: number; col: number };
 
 /**
  * TinyMDE (https://github.com/jefago/tiny-markdown-editor) without its command bar — just the
@@ -34,7 +42,21 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, {
 
   useImperativeHandle(ref, () => ({
     focus: () => editorRef.current?.e?.focus(),
-    setContent: content => editorRef.current?.setContent(content),
+    setContent: content => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      editor.setContent(content);
+      // TinyMDE only updates its last selection while focused; a range into the old content would be stale.
+      (editor as unknown as { lastSelection: unknown }).lastSelection = null;
+    },
+    getSelectedRange: () => {
+      const editor = editorRef.current;
+      const selection = (editor as unknown as { lastSelection: { focus: Position | null; anchor: Position | null } | null } | null)?.lastSelection;
+      if (!editor || !selection?.focus || !selection.anchor) return null;
+      const content = editor.getContent();
+      const [a, b] = [offsetAt(content, selection.anchor), offsetAt(content, selection.focus)];
+      return a === b ? null : { start: Math.min(a, b), end: Math.max(a, b) };
+    },
   }));
 
   useEffect(() => {

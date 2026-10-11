@@ -185,6 +185,17 @@ describe("AI endpoints", () => {
     expect((await api("POST", "/api/ai/run", { token, body: { category: "improve", text: "x" } })).status).toBe(409); // no improve skill
   });
 
+  test("run can write a subject line with a \"Create subject line\" skill", async () => {
+    expect((await api("POST", "/api/ai/run", { token, body: { category: "subject", text: "Meeting on Friday?" } })).status).toBe(409); // none yet
+    const skill = await api("POST", "/api/ai/skills", { token, body: { aiApiId: apiId, category: "subject", prompt: "Write a subject." } });
+    expect(skill.status).toBe(201);
+    const sent = fakeAi(() => "Meeting on Friday");
+    const res = await api("POST", "/api/ai/run", { token, body: { category: "subject", text: "Can we meet on Friday?" } });
+    expect(res.json).toEqual({ text: "Meeting on Friday" });
+    expect(sent[0]).toEqual({ system: "Write a subject.", user: "Can we meet on Friday?" });
+    await api("DELETE", `/api/ai/skills/${skill.json.id}`, { token });
+  });
+
   test("every successful call adds its tokens to the provider's record; failed calls add nothing", async () => {
     const usageOf = async () => {
       const list = (await api("GET", "/api/ai/apis", { token })).json as { id: number; calls: number; inputTokens: number; outputTokens: number }[];

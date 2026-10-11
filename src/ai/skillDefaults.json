@@ -30,6 +30,11 @@
       "label": "Phrase (improve wording)",
       "description": "Improves the wording and phrasing of your draft.",
       "prompt": "You are a helpful writing assistant for e-mails. Improve the wording of the following draft so that it is clear, polite and to the point, while keeping its meaning, the language, and the facts (names, dates, numbers). Keep it about the same length and keep the formatting. Answer with the improved text only, without comments or explanations."
+    },
+    "subject": {
+      "label": "Create subject line",
+      "description": "Writes a short subject line for your draft (Refine → Subject line, or automatically when you refine the whole text and the subject is empty).",
+      "prompt": "You write subject lines for e-mails. Write one short, concise subject line (at most about 8 words) for the following e-mail draft that names its most important point, such as the topic, the request or a date. Do not include sensitive data: no passwords, PINs, account or card numbers, phone numbers, addresses, amounts of money or health details. Use the same language as the draft. Answer with the subject line only, on a single line, without quotes, without a \"Subject:\" prefix and without any other text."
     }
   }
 }

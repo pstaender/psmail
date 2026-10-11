@@ -109,3 +109,26 @@ export function joinRefined(original: { head: string; tail: string }, refined: s
   const trailing = /\s*$/.exec(original.head)![0];
   return `${leading}${refined.trim()}${trailing}${original.tail}`;
 }
+
+/** The character offset of an editor position (`row` = line, `col` = column) in `text`, clamped to the text. */
+export function offsetAt(text: string, position: { row: number; col: number }): number {
+  const lines = text.split("\n");
+  const row = Math.min(Math.max(position.row, 0), lines.length - 1);
+  let offset = 0;
+  for (let i = 0; i < row; i++) offset += lines[i]!.length + 1;
+  return offset + Math.min(Math.max(position.col, 0), lines[row]!.length);
+}
+
+/** Puts an AI result in place of the selected `start`–`end` of `text`, keeping the whitespace the selection had around it. */
+export function replaceRefined(text: string, start: number, end: number, refined: string): string {
+  return `${text.slice(0, start)}${joinRefined({ head: text.slice(start, end), tail: "" }, refined)}${text.slice(end)}`;
+}
+
+/** An AI answer made into a subject line: the first non-empty line, without a "Subject:" prefix or quotes around it. */
+export function cleanSubject(answer: string): string {
+  const line = answer.split("\n").map(l => l.trim()).find(l => l) ?? "";
+  return line
+    .replace(/^(?:subject|betreff)\s*:\s*/i, "")
+    .replace(/^(["'“„«*]+)(.*?)(["'”“»*]+)$/, "$2")
+    .trim();
+}

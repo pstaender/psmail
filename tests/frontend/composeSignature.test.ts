@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { forwardDraft, joinRefined, replyDraft, splitRefinable, withSignature } from "../../src/lib/compose";
+import { cleanSubject, forwardDraft, joinRefined, offsetAt, replaceRefined, replyDraft, splitRefinable, withSignature } from "../../src/lib/compose";
 import type { EmailRecord } from "../../src/server/types";
 
 const email = {
@@ -75,5 +75,32 @@ describe("splitRefinable / joinRefined (what the AI Refine may rewrite)", () => 
     const parts = splitRefinable("\nhi bob\n\n-- \nCheers");
     expect(joinRefined(parts, "  Hello Bob,  ")).toBe("\nHello Bob,\n\n-- \nCheers");
     expect(joinRefined(splitRefinable("only text"), "Only text.")).toBe("Only text.");
+  });
+});
+
+describe("refining only the selected text", () => {
+  test("an editor position (line, column) is turned into an offset in the text, clamped to it", () => {
+    const text = "Hi Bob,\nsee you\nMe";
+    expect(offsetAt(text, { row: 0, col: 0 })).toBe(0);
+    expect(offsetAt(text, { row: 1, col: 4 })).toBe(12);
+    expect(text.slice(offsetAt(text, { row: 1, col: 0 }), offsetAt(text, { row: 1, col: 7 }))).toBe("see you");
+    expect(offsetAt(text, { row: 9, col: 99 })).toBe(text.length);
+  });
+
+  test("only the selection is replaced, keeping the whitespace it had around it", () => {
+    const text = "Hi Bob,\ni has a mistake \n\n-- \nMe";
+    const start = text.indexOf("i has");
+    expect(replaceRefined(text, start, start + "i has a mistake ".length, "I have a mistake.")).toBe("Hi Bob,\nI have a mistake. \n\n-- \nMe");
+    expect(replaceRefined("subject: teh plan", 9, 17, "the plan")).toBe("subject: the plan");
+  });
+});
+
+describe("cleanSubject (an AI answer as a subject line)", () => {
+  test("one line, without a prefix or quotes around it", () => {
+    expect(cleanSubject("Meeting on Friday")).toBe("Meeting on Friday");
+    expect(cleanSubject("\nSubject: \"Meeting on Friday\"\n\nHope that helps")).toBe("Meeting on Friday");
+    expect(cleanSubject("Betreff: „Treffen am Freitag“")).toBe("Treffen am Freitag");
+    expect(cleanSubject("**Invoice 2026-03**")).toBe("Invoice 2026-03");
+    expect(cleanSubject("Bob's plan")).toBe("Bob's plan");
   });
 });

@@ -313,7 +313,7 @@ export function aiRoutes(db: Database) {
       POST: withErrorHandling(async req => {
         const { session, encryptionKey } = requireAuth(req, db);
         const body = await readJsonBody<{ category?: unknown; text?: unknown; language?: unknown; skillId?: unknown }>(req);
-        if (!isAiCategory(body.category) || body.category === "categorize" || body.category === "events") throw new ApiError(400, "category must be summarize, translate, grammar or improve");
+        if (!isAiCategory(body.category) || body.category === "categorize" || body.category === "events") throw new ApiError(400, "category must be summarize, translate, grammar, improve or subject");
         if (typeof body.text !== "string" || !body.text.trim()) throw new ApiError(400, "text is required");
         if (body.text.length > MAX_TEXT) throw new ApiError(400, "The text is too long for the AI");
 

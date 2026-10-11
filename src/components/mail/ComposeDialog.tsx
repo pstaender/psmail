@@ -20,7 +20,7 @@ import { MarkdownEditor, type MarkdownEditorHandle } from "./MarkdownEditor";
 import { api, type FolderInfo } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { parseAddressList } from "@/lib/addresses";
-import { joinRefined, splitRefinable } from "@/lib/compose";
+import { cleanSubject, joinRefined, replaceRefined, splitRefinable } from "@/lib/compose";
 import { resolveSpecialFolder } from "@/lib/folders";
 import type { AiCategory } from "../../ai/categories";
 import type { AiSkillRecord } from "../../server/models/ai";
@@ -77,6 +77,7 @@ export function ComposeDialog({
 }) {
   const { token } = useAuth();
   const editorRef = useRef<MarkdownEditorHandle>(null);
+  const subjectRef = useRef<HTMLInputElement>(null);
   const [to, setTo] = useState("");
   const [cc, setCc] = useState("");
   const [bcc, setBcc] = useState("");
@@ -110,31 +111,103 @@ export function ComposeDialog({
     if (!next && dirty && busy === null) setAskingToClose(true);
     else onOpenChange(next);
   }
-  // "Refine" (AI): rewrites the part of the draft you wrote — not the signature or the quoted original — and keeps the
-  // text from before so it can be undone.
+  // "Refine" (AI): rewrites what is selected in the subject or the message — or, with nothing selected, the part of the draft
+  // you wrote (not the signature or the quoted original), and then writes a subject line if there is none yet. The text from
+  // before is kept so it can be undone.
   const [refining, setRefining] = useState<AiCategory | null>(null);
-  const [beforeRefine, setBeforeRefine] = useState<string | null>(null);
+  const [beforeRefine, setBeforeRefine] = useState<{ body: string; subject: string } | null>(null);
   const [translateTo, setTranslateTo] = useState<string | null>(null);
   // Which translation skill the language box belongs to (when the user has several).
   const [translateSkillId, setTranslateSkillId] = useState<number | undefined>(undefined);
+  // The field (subject or message) the user was in last, so its selection is what Refine works on — the Refine menu and the
+  // language box take the focus but don't count; any other field (To, Cc, …) means "no selection".
+  const lastFieldRef = useRef<"subject" | "body" | null>(null);
   const skillsOf = (category: AiCategory) => aiSkills.filter(skill => skill.category === category);
+
+  function trackField(e: React.FocusEvent) {
+    const target = e.target as HTMLElement;
+    if (target === subjectRef.current) lastFieldRef.current = "subject";
+    else if (target.closest(".psmail-markdown-editor")) lastFieldRef.current = "body";
+    else if (target.closest("[data-refine-ui]")) return;
+    else if (target.matches("input, textarea, [contenteditable]")) lastFieldRef.current = null;
+  }
+
+  /** What is selected in the field the user was in last: the subject's or the message's selection, as offsets; null if nothing. */
+  function selection(): { field: "subject" | "body"; start: number; end: number } | null {
+    if (lastFieldRef.current === "subject") {
+      const input = subjectRef.current;
+      const [start, end] = [input?.selectionStart ?? 0, input?.selectionEnd ?? 0];
+      return start < end && subject.slice(start, end).trim() ? { field: "subject", start, end } : null;
+    }
+    if (lastFieldRef.current === "body") {
+      const range = editorRef.current?.getSelectedRange();
+      return range && body.slice(range.start, range.end).trim() ? { field: "body", ...range } : null;
+    }
+    return null;
+  }
+
+  function applyRefined(next: { body: string; subject: string }) {
+    setBeforeRefine({ body, subject });
+    if (next.body !== body) {
+      editorRef.current?.setContent(next.body);
+      setBody(next.body);
+    }
+    setSubject(next.subject);
+  }
 
   async function refine(category: "improve" | "grammar" | "translate", language?: string, skillId?: number) {
     if (!token) return;
+    const selected = selection();
     const parts = splitRefinable(body);
-    if (!parts.head.trim()) {
+    if (!selected && !parts.head.trim()) {
       setError("Write something first — there is no text to refine yet.");
       return;
     }
     setRefining(category);
     setError(null);
     try {
-      const result = await api.aiRun(token, category, parts.head.trim(), language, skillId);
-      const next = joinRefined(parts, result.text);
-      setBeforeRefine(body);
-      editorRef.current?.setContent(next);
-      setBody(next);
+      if (selected) {
+        const text = selected.field === "subject" ? subject : body;
+        const result = await api.aiRun(token, category, text.slice(selected.start, selected.end).trim(), language, skillId);
+        const next = replaceRefined(text, selected.start, selected.end, result.text);
+        // A subject is one line, whatever the AI answered.
+        applyRefined(selected.field === "subject" ? { body, subject: next.replace(/\s*\n\s*/g, " ") } : { body: next, subject });
+      } else {
+        const result = await api.aiRun(token, category, parts.head.trim(), language, skillId);
+        const nextBody = joinRefined(parts, result.text);
+        // The whole text refined and no subject yet: write one from it (if there is a skill for that). If that fails, the
+        // refined text is kept anyway.
+        let nextSubject = subject;
+        if (!subject.trim() && skillsOf("subject").length > 0) {
+          setRefining("subject");
+          try {
+            nextSubject = cleanSubject((await api.aiRun(token, "subject", splitRefinable(nextBody).head.trim())).text);
+          } catch (err) {
+            setError(`The text was refined, but no subject line could be written: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+        applyRefined({ body: nextBody, subject: nextSubject });
+      }
       setTranslateTo(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRefining(null);
+    }
+  }
+
+  /** Writes a subject line from the part of the draft you wrote, replacing the subject there is. */
+  async function createSubject(skillId: number) {
+    if (!token) return;
+    const text = splitRefinable(body).head.trim();
+    if (!text) {
+      setError("Write something first — the subject line is made from your text.");
+      return;
+    }
+    setRefining("subject");
+    setError(null);
+    try {
+      applyRefined({ body, subject: cleanSubject((await api.aiRun(token, "subject", text, undefined, skillId)).text) });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -144,8 +217,11 @@ export function ComposeDialog({
 
   function undoRefine() {
     if (beforeRefine === null) return;
-    editorRef.current?.setContent(beforeRefine);
-    setBody(beforeRefine);
+    if (beforeRefine.body !== body) {
+      editorRef.current?.setContent(beforeRefine.body);
+      setBody(beforeRefine.body);
+    }
+    setSubject(beforeRefine.subject);
     setBeforeRefine(null);
   }
 
@@ -163,6 +239,7 @@ export function ComposeDialog({
       setError(null);
       setBeforeRefine(null);
       setTranslateTo(null);
+      lastFieldRef.current = null;
       setAskingToClose(false);
     }
   }, [open, initial]);
@@ -244,7 +321,7 @@ export function ComposeDialog({
           <DialogTitle>{isEditing ? "Edit draft" : "New message"}</DialogTitle>
         </DialogHeader>
 
-        <div className="-mx-1 min-h-0 flex-1 space-y-3 overflow-y-auto px-1">
+        <div className="-mx-1 min-h-0 flex-1 space-y-3 overflow-y-auto px-1" onFocus={trackField}>
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <div className="space-y-1.5">
@@ -279,7 +356,7 @@ export function ComposeDialog({
 
           <div className="space-y-1.5">
             <Label htmlFor="compose-subject">Subject</Label>
-            <Input id="compose-subject" value={subject} onChange={e => setSubject(e.target.value)} />
+            <Input id="compose-subject" ref={subjectRef} value={subject} onChange={e => setSubject(e.target.value)} />
           </div>
 
           <div className="space-y-1.5">
@@ -300,10 +377,17 @@ export function ComposeDialog({
 
           <div className="flex flex-wrap items-center gap-2 empty:hidden">
             {/* Only for skills that exist: no Refine at all without any, and one entry per skill (named) when a category has several. */}
-            {aiSkills.some(skill => skill.category === "improve" || skill.category === "grammar" || skill.category === "translate") && (
+            {aiSkills.some(skill => ["improve", "grammar", "translate", "subject"].includes(skill.category)) && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button type="button" variant="outline" size="sm" disabled={refining !== null || busy !== null}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    data-refine-ui
+                    disabled={refining !== null || busy !== null}
+                    title="Refines the selected text (in the subject or the message), or the whole text when nothing is selected"
+                  >
                     {refining ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
                     Refine
                   </Button>
@@ -332,11 +416,17 @@ export function ComposeDialog({
                       {all.length > 1 ? `Translate… · ${skill.name}` : "Translate…"}
                     </DropdownMenuItem>
                   ))}
+                  {skillsOf("subject").map((skill, _, all) => (
+                    <DropdownMenuItem key={skill.id} onSelect={() => createSubject(skill.id)}>
+                      {all.length > 1 ? `Subject line · ${skill.name}` : "Subject line"}
+                    </DropdownMenuItem>
+                  ))}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
             {translateTo !== null && (
               <form
+                data-refine-ui
                 className="flex items-center gap-1.5"
                 onSubmit={e => {
                   e.preventDefault();
