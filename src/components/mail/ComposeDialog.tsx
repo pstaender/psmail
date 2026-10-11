@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ImageDown, Languages, Loader2, Paperclip, Send as SendIcon, Sparkles, Undo2, X } from "lucide-react";
+import { ImageDown, Languages, Loader2, Maximize2, Minimize2, Paperclip, Send as SendIcon, Sparkles, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -20,6 +20,7 @@ import { AttachmentThumbnail } from "./AttachmentThumbnail";
 import { MarkdownEditor, type MarkdownEditorHandle } from "./MarkdownEditor";
 import { api, type FolderInfo } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import { parseAddressList } from "@/lib/addresses";
 import { cleanSubject, joinRefined, replaceRefined, splitRefinable } from "@/lib/compose";
 import { resolveSpecialFolder } from "@/lib/folders";
@@ -98,6 +99,8 @@ export function ComposeDialog({
   const [error, setError] = useState<string | null>(null);
 
   const isEditing = initial?.id !== undefined;
+  // Maximized: the window covers the whole screen and the message field takes up the height. Remembered for the next one.
+  const [maximized, setMaximized] = useLocalStorageState("psmail.composeMaximized", false);
   const forwardOf = initial?.forwardOf;
 
   // Changes that are not saved: what the fields hold now against what the dialog was opened with. (An attachment removed from
@@ -346,7 +349,11 @@ export function ComposeDialog({
   return (
     <Dialog open={open} onOpenChange={requestClose}>
       <DialogContent
-        className="flex max-h-[85vh] flex-col sm:max-w-xl lg:max-w-[50rem]"
+        className={
+          maximized
+            ? "top-0 left-0 flex h-dvh max-h-none w-screen max-w-none translate-x-0 translate-y-0 flex-col rounded-none border-0 sm:max-w-none lg:max-w-none"
+            : "flex max-h-[85vh] flex-col sm:max-w-xl lg:max-w-[50rem]"
+        }
         // A reply arrives with the recipient already filled in, so the cursor belongs in the message,
         // not in the To field Radix would focus by default.
         onOpenAutoFocus={e => {
@@ -360,7 +367,7 @@ export function ComposeDialog({
           <DialogTitle>{isEditing ? "Edit draft" : "New message"}</DialogTitle>
         </DialogHeader>
 
-        <div className="-mx-1 min-h-0 flex-1 space-y-3 overflow-y-auto px-1" onFocus={trackField}>
+        <div className={`-mx-1 min-h-0 flex-1 space-y-3 overflow-y-auto px-1 ${maximized ? "flex flex-col" : ""}`} onFocus={trackField}>
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           <div className="space-y-1.5">
@@ -398,18 +405,18 @@ export function ComposeDialog({
             <Input id="compose-subject" ref={subjectRef} value={subject} onChange={e => setSubject(e.target.value)} />
           </div>
 
-          <div className="space-y-1.5">
+          <div className={`space-y-1.5 ${maximized ? "flex flex-1 flex-col" : ""}`}>
             <Label className="cursor-pointer" onClick={() => editorRef.current?.focus()}>
               Message
             </Label>
-            <div className="rounded-md border border-input bg-transparent px-3 py-2 shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
+            <div className="flex flex-1 flex-col rounded-md border border-input bg-transparent px-3 py-2 shadow-xs transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
               <MarkdownEditor
                 ref={editorRef}
                 initialValue={body}
                 onChange={setBody}
                 placeholder="Write your message…"
                 aria-label="Message"
-                className="min-h-[12rem]"
+                className={maximized ? "min-h-[12rem] flex-1" : "min-h-[12rem]"}
               />
             </div>
           </div>
@@ -567,6 +574,17 @@ export function ComposeDialog({
             Send
           </Button>
         </DialogFooter>
+        {/* Beside the dialog's own close button (top-4 right-4), styled the same. Last, like that one, so it isn't the first
+            focusable element — Radix would put the cursor on it when the window opens, instead of in To or the message. */}
+        <button
+          type="button"
+          className="absolute top-4 right-11 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden"
+          title={maximized ? "Restore" : "Maximize"}
+          aria-label={maximized ? "Restore" : "Maximize"}
+          onClick={() => setMaximized(!maximized)}
+        >
+          {maximized ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+        </button>
       </DialogContent>
 
       <AlertDialog open={avifOffer.length > 0} onOpenChange={next => !next && setAvifOffer([])}>
