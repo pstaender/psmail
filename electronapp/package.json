@@ -1,7 +1,7 @@
 {
   "name": "psmail-electron",
   "private": true,
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "P.S.Mail desktop app",
   "main": "src/main.js",
   "author": {
