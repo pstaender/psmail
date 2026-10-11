@@ -1,3 +1,6 @@
+2026-10-11 - Version 0.0.6 (4acc06e)
+Bumped the version from 0.0.5 to 0.0.6. The root package.json was edited by hand. electronapp/package.json was updated with its sync script (electronapp/scripts/sync-version.ts), so the two match.
+
 2026-10-11 - Keyboard shortcut Cmd/Ctrl+N: new message (2721bae)
 Cmd+N (macOS) or Ctrl+N (Windows/Linux) now opens a new message, the same as the New button. It works in the desktop app. Browsers keep this key for opening a new window and never pass it to the page, so there the shortcut does nothing and the browser keeps its usual behavior. The desktop app's menu doesn't use the key, so it reaches the page. Like the other shortcuts, it's off while a dialog is open. It is also skipped when the New button would be disabled (no account selected, or a disabled account). The New button's tooltip now shows the shortcut ("New message (⌘N)" or "Ctrl+N"), and the README's keyboard-shortcuts list includes it. A new test checks that the key opens an empty new message and that the browser default is prevented. Typecheck, all 534 backend tests and all 419 frontend tests pass.
 
